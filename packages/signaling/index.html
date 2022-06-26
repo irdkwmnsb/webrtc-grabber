@@ -1,0 +1,59 @@
+<script src="/socket.io/socket.io.js"></script>
+<div id="peers"></div>
+<video id="video"></video>
+<script>
+    const socket = io("/admin");
+    const pc = new RTCPeerConnection();
+    let curId = undefined;
+
+    socket.on("peers", (peers) => {
+        var allPeersAnchor = document.getElementById('peers');
+        allPeersAnchor.innerHTML = '';
+        // Append users to anchor
+        peers.forEach((peer) => {
+            allPeersAnchor.innerHTML += `<div class="peer">
+            <pre>
+            ${JSON.stringify(peer)}
+            </pre>
+            <div>Last ping: ${peer.lastPing ? (new Date(peer.lastPing)).toLocaleString() : "never"}</div>
+            <button onClick="connect('${peer.id}')">Connect</button>
+        </div>`;
+        });
+    });
+
+    const connect = (id) => {
+        console.log("calling");
+        curId = id;
+        socket.emit("call", id);
+    }
+
+    pc.addEventListener("icecandidate", (event) => {
+        console.log("sending ice");
+        socket.emit("ice", curId, event.candidate);
+    })
+
+    socket.on("offer", async (offer) => {
+        console.log("got offer");
+        await pc.setRemoteDescription(offer);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit("answer", curId, answer);
+        console.log("send answer");
+    })
+
+    socket.on("ice", async (candidate) => {
+        console.log("got ice");
+        await pc.addIceCandidate(candidate);
+    })
+
+    pc.addEventListener("track", (e) => {
+        console.log("got track");
+        const remoteVideo = document.getElementById("video");
+        if (remoteVideo.srcObject !== e.streams[0]) {
+            remoteVideo.srcObject = e.streams[0];
+            remoteVideo.play();
+            console.log('pc2 received remote stream');
+        }
+    })
+
+</script>

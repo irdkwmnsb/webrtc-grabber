@@ -1,0 +1,17 @@
+{
+  "name": "signaling",
+  "version": "0.0.0",
+  "description": "my first socket.io app",
+  "type": "module",
+  "scripts": {
+    "start:dev": "nodemon ./server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.1",
+    "socket.io": "^4.5.1",
+    "nanoid": "^4.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.18"
+  }
+}

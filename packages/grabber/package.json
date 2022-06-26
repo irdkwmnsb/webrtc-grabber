@@ -1,0 +1,15 @@
+{
+  "name": "grabber",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "ELECTRON_DISABLE_SECURITY_WARNINGS=true electron ."
+  },
+  "devDependencies": {
+    "electron": "^19.0.4",
+    "socket.io-client": "^4.5.1"
+  },
+  "dependencies": {
+    "mac-screen-capture-permissions": "^2.0.0"
+  }
+}
