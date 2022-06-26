@@ -40,6 +40,7 @@ ipcRenderer.on("START", async (event, baseUrl, name) => {
 
         pcs.get(callerId).addEventListener('iceconnectionstatechange', console.log);
 
+
         const offerOptions = {
             offerToReceiveAudio: 0,
             offerToReceiveVideo: 0,
