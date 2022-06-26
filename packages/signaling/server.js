@@ -22,18 +22,17 @@ peers.on("connection", (socket) => {
         socket.disconnect(true);
         return;
     }
-    const peer = storage.addPeer(name);
+    const peer = storage.addPeer(name, socket.id);
     admin.emit("peers", storage.getAll());
     console.log("New peer:", name, peer);
-    socket.join(peer.id);
     socket.on("ping", () => {
         storage.ping(peer.id);
     })
-    socket.on("offer", (offer) => {
-        admin.to(peer.id).emit("offer", offer);
+    socket.on("offer", (offer, callerId) => {
+        admin.to(callerId).emit("offer", offer);
     })
-    socket.on("ice", (ice) => {
-        admin.to(peer.id).emit("ice", ice);
+    socket.on("ice", (ice, callerId) => {
+        admin.to(callerId).emit("ice", ice);
     })
 });
 
@@ -47,18 +46,18 @@ admin.on("connection", (socket) => {
     socket.on("disconnect", () => {
         clearInterval(refreshInterval);
     })
+    const callerId = socket.id;
     socket.on("call", (id) => {
         console.log("Calling", id);
-        socket.join(id);
-        peers.to(id).emit("call");
+        peers.to(id).emit("call", callerId);
     })
     socket.on("answer", (id, offer) => {
         console.log("got answer, retransmitting");
-        peers.to(id).emit("answer", offer);
+        peers.to(id).emit("answer", offer, callerId);
     })
     socket.on("ice", (id, ice) => {
         console.log("got ice, retransmitting");
-        peers.to(id).emit("ice", ice);
+        peers.to(id).emit("ice", ice, callerId);
     })
 })
 

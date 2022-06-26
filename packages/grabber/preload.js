@@ -13,32 +13,32 @@ ipcRenderer.on("START", async (event, baseUrl, name) => {
     const socketPath = socketUrl.toString();
     console.log("init socket", socketPath);
     const socket = io(socketPath);
-    let pc = undefined;
+    const pcs = new Map();
     socket.on("connect", async () => {
         console.log("connect");
     });
     const interval = setInterval(() => {
         socket.emit("ping");
     }, 1000);
-    socket.on("call", async () => {
+    socket.on("call", async (callerId) => {
         console.log("Got call");
         const configuration = {};
         console.log('RTCPeerConnection configuration:', configuration);
-        pc = new RTCPeerConnection(configuration);
+        pcs.set(callerId, new RTCPeerConnection(configuration));
 
         console.log("stream:", stream);
         stream.getTracks().forEach(track => {
             console.log("added track");
             console.log(track);
-            pc.addTrack(track, stream);
+            pcs.get(callerId).addTrack(track, stream);
         });
 
-        pc.addEventListener("icecandidate", (event) => {
+        pcs.get(callerId).addEventListener("icecandidate", (event) => {
             console.log("send ice");
-            socket.emit("ice", event.candidate);
+            socket.emit("ice", event.candidate, callerId);
         })
 
-        pc.addEventListener('iceconnectionstatechange', console.log);
+        pcs.get(callerId).addEventListener('iceconnectionstatechange', console.log);
 
         const offerOptions = {
             offerToReceiveAudio: 0,
@@ -46,19 +46,19 @@ ipcRenderer.on("START", async (event, baseUrl, name) => {
             offerToSendVideo: 1
         };
 
-        const offer = await pc.createOffer(offerOptions);
-        socket.emit("offer", offer);
+        const offer = await pcs.get(callerId).createOffer(offerOptions);
+        socket.emit("offer", offer, callerId);
         console.log("send offer");
 
-        await pc.setLocalDescription(offer);
+        await pcs.get(callerId).setLocalDescription(offer);
     });
-    socket.on("ice", async (candidate) => {
+    socket.on("ice", async (candidate, callerId) => {
         console.log("got ice");
-        await pc.addIceCandidate(candidate);
+        await pcs.get(callerId).addIceCandidate(candidate);
     })
-    socket.on("answer", async (answer) => {
+    socket.on("answer", async (answer, callerId) => {
         console.log("got answer");
-        await pc.setRemoteDescription(answer);
+        await pcs.get(callerId).setRemoteDescription(answer);
     })
 })
 

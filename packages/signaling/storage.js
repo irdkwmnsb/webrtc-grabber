@@ -1,9 +1,9 @@
 import { nanoid } from 'nanoid';
 
 class Peer {
-    constructor(name) {
+    constructor(name, id) {
         this.name = name
-        this.id = nanoid()
+        this.id = id
         this.lastPing = undefined
     }
 }
@@ -16,8 +16,8 @@ class Storage {
         return this.peers.has(id);
     }
 
-    addPeer(name) {
-        const newPeer = new Peer(name);
+    addPeer(name, id) {
+        const newPeer = new Peer(name, id);
         this.peers.set(newPeer.id, newPeer);
         // this.usedNames.add(name);
         return newPeer;
