@@ -7,7 +7,7 @@
     let curId = undefined;
 
     socket.on("peers", (peers) => {
-        var allPeersAnchor = document.getElementById('peers');
+        const allPeersAnchor = document.getElementById('peers');
         allPeersAnchor.innerHTML = '';
         // Append users to anchor
         peers.forEach((peer) => {
@@ -24,6 +24,9 @@
     const connect = (id) => {
         console.log("calling");
         curId = id;
+        if(["connecting", "connected", "new", undefined].indexOf(pc.connectionState) !== -1) {
+            pc.close();
+        }
         socket.emit("call", id);
     }
 
