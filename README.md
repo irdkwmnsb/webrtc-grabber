@@ -14,7 +14,8 @@ A socket.io server for signaling between the overlay and grabber.
 
 ## Developing
 Start using
-```npm ci
+```
+npm ci
 npm run grabber:start
 npm run signaling:start:dev
 ```
