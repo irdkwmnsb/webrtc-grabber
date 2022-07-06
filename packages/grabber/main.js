@@ -9,16 +9,26 @@ const path = require("path");
 
 const signalingUrl = "http://localhost:3000";
 const name = "Tester";
+let mainWindow = null;
 
 async function createWindow() {
     // Create the browser window.
-    const mainWindow = new BrowserWindow({
+    mainWindow = new BrowserWindow({
         width: 1000,
         height: 900,
         webPreferences: {
             preload: path.join(__dirname, "preload.js")
         }
     });
+
+    mainWindow.on('close', (event) => {
+        if (app.quitting) {
+            mainWindow = null
+        } else {
+            event.preventDefault()
+            mainWindow.hide()
+        }
+    })
 
     // and load the index.html of the app.
     await mainWindow.loadURL(`file://${ __dirname}/index.html`)
@@ -52,12 +62,15 @@ app.whenReady().then(async () => {
     });
 });
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
-app.on("window-all-closed", function () {
-    if (process.platform !== "darwin") app.quit();
-});
+app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+        app.quit()
+    }
+})
+
+app.on('activate', () => { mainWindow.show() })
+
+app.on('before-quit', () => app.quitting = true)
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.
