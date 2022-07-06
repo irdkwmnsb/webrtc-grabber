@@ -6,12 +6,9 @@ let stream;
 ipcRenderer.on("START", async (event, baseUrl, name) => {
     const url = new URL(baseUrl);
     console.log(url);
-    const socketUrl = new URL("a://e");
-    socketUrl.protocol = url.protocol;
-    socketUrl.host = url.host;
-    socketUrl.pathname = "peers";
-    socketUrl.searchParams.append("name", name);
-    const socketPath = socketUrl.toString();
+    url.pathname = "peers";
+    url.searchParams.append("name", name);
+    const socketPath = url.toString();
     console.log("init socket", socketPath);
     const socket = io(socketPath);
     const pcs = new Map();
