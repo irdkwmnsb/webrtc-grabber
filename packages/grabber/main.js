@@ -22,7 +22,7 @@ async function createWindow() {
 
     // and load the index.html of the app.
     await mainWindow.loadURL(`file://${ __dirname}/index.html`)
-    await mainWindow.toggleTabBar();
+    // await mainWindow.toggleTabBar();
 
     // Open the DevTools.
     mainWindow.webContents.openDevTools();
