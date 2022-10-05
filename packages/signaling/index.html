@@ -66,4 +66,6 @@
         console.log("got ice");
         await pc.addIceCandidate(candidate);
     });
+
+    window.addEventListener("close", () => ps?.close());
 </script>
