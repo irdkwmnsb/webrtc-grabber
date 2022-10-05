@@ -1,67 +1,26 @@
 const {ipcRenderer} = require('electron')
-const io = require('socket.io-client');
 
-let stream;
+window.addEventListener('DOMContentLoaded', () => {
+    const replaceText = (selector, text) => {
+        const element = document.getElementById(selector)
+        if (element) element.innerText = text
+    }
 
-ipcRenderer.on("START", async (event, baseUrl, name) => {
-    const url = new URL(baseUrl);
-    console.log(url);
-    url.pathname = "peers";
-    url.searchParams.append("name", name);
-    const socketPath = url.toString();
-    console.log("init socket", socketPath);
-    const socket = io(socketPath);
-    const pcs = new Map();
-    socket.on("connect", async () => {
-        console.log("connect");
-    });
-    const interval = setInterval(() => {
-        socket.emit("ping");
-    }, 1000);
-    socket.on("call", async (callerId) => {
-        console.log("Got call");
-        const configuration = {};
-        console.log('RTCPeerConnection configuration:', configuration);
-        pcs.set(callerId, new RTCPeerConnection(configuration));
-
-        console.log("stream:", stream);
-        stream.getTracks().forEach(track => {
-            console.log("added track");
-            console.log(track);
-            pcs.get(callerId).addTrack(track, stream);
-        });
-
-        pcs.get(callerId).addEventListener("icecandidate", (event) => {
-            console.log("send ice");
-            socket.emit("ice", event.candidate, callerId);
-        })
-
-        pcs.get(callerId).addEventListener('iceconnectionstatechange', console.log);
-
-
-        const offerOptions = {
-            offerToReceiveAudio: 0,
-            offerToReceiveVideo: 0,
-            offerToSendVideo: 1
-        };
-
-        const offer = await pcs.get(callerId).createOffer(offerOptions);
-        socket.emit("offer", offer, callerId);
-        console.log("send offer");
-
-        await pcs.get(callerId).setLocalDescription(offer);
-    });
-    socket.on("ice", async (candidate, callerId) => {
-        console.log("got ice");
-        await pcs.get(callerId).addIceCandidate(candidate);
-    })
-    socket.on("answer", async (answer, callerId) => {
-        console.log("got answer");
-        await pcs.get(callerId).setRemoteDescription(answer);
-    })
+    for (const type of ['chrome', 'node', 'electron']) {
+        replaceText(`${type}-version`, process.versions[type])
+    }
 })
 
-ipcRenderer.on('SET_SOURCE', async (event, sourceId) => {
+let stream;
+const pcs = new Map();
+
+function handleStream(stream) {
+    const video = document.querySelector('video#preview')
+    video.srcObject = stream
+    video.onloadedmetadata = () => video.play()
+}
+
+ipcRenderer.on('source:set', async (_, sourceId) => {
     console.log(sourceId);
     stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
@@ -77,8 +36,39 @@ ipcRenderer.on('SET_SOURCE', async (event, sourceId) => {
     handleStream(stream)
 })
 
-function handleStream(stream) {
-    const video = document.querySelector('video')
-    video.srcObject = stream
-    video.onloadedmetadata = (e) => video.play()
-}
+ipcRenderer.on('offer', async (_, playerId, offer, configuration) => {
+    console.log(`create new peer connection for ${playerId}`);
+    pcs.set(playerId, new RTCPeerConnection(configuration));
+    const pc = pcs.get(playerId);
+
+    stream.getTracks().forEach(track => {
+        console.log("added track: ", track);
+        pc.addTrack(track, stream);
+    });
+
+    pc.addEventListener("icecandidate", (event) => {
+        console.log(`send ice for player ${playerId}`);
+        ipcRenderer.invoke('grabber_ice', playerId, JSON.stringify(event.candidate));
+    })
+
+    pc.addEventListener('iceconnectionstatechange', ({target: connection}) => {
+        console.log(`change player ${playerId} connection state ${connection.connectionState}`);
+        if (connection.connectionState === "failed") {
+            connection.close();
+            pcs.delete(playerId);
+            console.log(`close connection for ${playerId}`);
+        }
+    });
+
+    await pc.setRemoteDescription(offer);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    await ipcRenderer.invoke('offer_answer', playerId, JSON.stringify(answer));
+    console.log(`send offer_answer for ${playerId}`);
+});
+
+ipcRenderer.on('player_ice', (_, playerId, candidate) => {
+    pcs.get(playerId).addIceCandidate(candidate)
+        .then(() => console.log(`add player_ice from ${playerId}`));
+});

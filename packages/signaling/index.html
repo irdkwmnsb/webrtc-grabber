@@ -2,9 +2,14 @@
 <div id="peers"></div>
 <video id="video"></video>
 <script>
+    const rtcPeerConnectionConfig = {
+        iceServers: [
+            {urls: "stun:stun.l.google.com:19302",}
+        ]
+    }
     const socket = io("/admin");
-    const pc = new RTCPeerConnection();
-    let curId = undefined;
+    let pc = null;
+    let curGrabberId = null;
 
     socket.on("peers", (peers) => {
         const allPeersAnchor = document.getElementById('peers');
@@ -20,42 +25,45 @@
         });
     });
 
-    const connect = (id) => {
-        console.log("calling");
-        curId = id;
-        if(["connecting", "connected", undefined].indexOf(pc.connectionState) !== -1) {
-            pc.close();
+    const connect = (peerId) => {
+        console.log(`send offer to ${peerId}`);
+        curGrabberId = peerId;
+        if(["connecting", "connected", undefined].indexOf(pc?.connectionState) !== -1) {
+            pc?.close();
         }
-        socket.emit("call", id);
+        pc = new RTCPeerConnection(rtcPeerConnectionConfig);
+        pc.addTransceiver("video");
+
+        pc.addEventListener("track", (e) => {
+            console.log("got track");
+            const remoteVideo = document.getElementById("video");
+            if (e.track.kind === "video" && e.streams.length > 0 && remoteVideo.srcObject !== e.streams[0]) {
+                remoteVideo.srcObject = null;
+                remoteVideo.srcObject = e.streams[0];
+                remoteVideo.play();
+                console.log('pc2 received remote stream');
+            }
+        })
+
+        pc.createOffer().then(offer => {
+            pc.setLocalDescription(offer)
+            socket.emit("offer", peerId, offer);
+        });
+
+        pc.addEventListener("icecandidate", (event) => {
+            console.log(`sending ice to ${curGrabberId}`);
+            socket.emit("player_ice", curGrabberId, event.candidate);
+        });
     }
 
-    pc.addEventListener("icecandidate", (event) => {
-        console.log("sending ice");
-        socket.emit("ice", curId, event.candidate);
-    })
-
-    socket.on("offer", async (offer) => {
-        console.log("got offer");
-        await pc.setRemoteDescription(offer);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        socket.emit("answer", curId, answer);
-        console.log("send answer");
+    socket.on("offer_answer", async (peerId, answer) => {
+        console.log(`got offer_answer from ${peerId}`);
+        await pc.setRemoteDescription(answer);
+        console.log("got offer_answer as remote description");
     })
 
     socket.on("ice", async (candidate) => {
         console.log("got ice");
         await pc.addIceCandidate(candidate);
-    })
-
-    pc.addEventListener("track", (e) => {
-        console.log("got track");
-        const remoteVideo = document.getElementById("video");
-        if (remoteVideo.srcObject !== e.streams[0]) {
-            remoteVideo.srcObject = e.streams[0];
-            remoteVideo.play();
-            console.log('pc2 received remote stream');
-        }
-    })
-
+    });
 </script>

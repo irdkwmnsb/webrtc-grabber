@@ -4,6 +4,8 @@ import path from "path";
 import {Server} from "socket.io";
 import storage from "./storage.js";
 
+const debug = (...x) => console.log(...x);
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -13,26 +15,29 @@ const io = new Server(server);
 
 const peers = io.of("peers");
 
-
 peers.on("connection", (socket) => {
     const name = socket.handshake.query.name;
-    if(name === undefined) {
-        console.log("failed connection, name=", name);
+    if (name === undefined) {
+        console.warn("failed connection, name=", name);
         socket.emit("error", "No name");
         socket.disconnect(true);
         return;
     }
+
     const peer = storage.addPeer(name, socket.id);
+    const grabberId = peer.id;
+    debug(`new peer connection ${grabberId} [${name}]`);
     admin.emit("peers", storage.getAll());
-    console.log("New peer:", name, peer);
+
     socket.on("ping", () => {
-        storage.ping(peer.id);
+        storage.ping(grabberId);
     })
-    socket.on("offer", (offer, callerId) => {
-        admin.to(callerId).emit("offer", offer);
+    socket.on("offer_answer", (playerId, answer) => {
+        debug(`resend offer_answer from ${grabberId} to ${playerId}`);
+        admin.to(playerId).emit("offer_answer", grabberId, answer);
     })
-    socket.on("ice", (ice, callerId) => {
-        admin.to(callerId).emit("ice", ice);
+    socket.on("grabber_ice", (playerId, ice) => {
+        admin.to(playerId).emit("grabber_ice", grabberId, ice);
     })
 });
 
@@ -46,19 +51,15 @@ admin.on("connection", (socket) => {
     socket.on("disconnect", () => {
         clearInterval(refreshInterval);
     })
-    const callerId = socket.id;
-    socket.on("call", (id) => {
-        console.log("Calling", id);
-        peers.to(id).emit("call", callerId);
-    })
-    socket.on("answer", (id, offer) => {
-        console.log("got answer, retransmitting");
-        peers.to(id).emit("answer", offer, callerId);
-    })
-    socket.on("ice", (id, ice) => {
-        console.log("got ice, retransmitting");
-        peers.to(id).emit("ice", ice, callerId);
-    })
+    const playerId = socket.id;
+    socket.on("offer", (grabberId, offer) => {
+        debug(`resend offer from ${playerId} to ${grabberId}`);
+        peers.to(grabberId).emit("offer", playerId, offer);
+    });
+    socket.on("player_ice", (grabberId, ice) => {
+        console.log("got player_ice, retransmitting");
+        peers.to(grabberId).emit("player_ice", playerId, ice);
+    });
 })
 
 // Serve index.html file
