@@ -22,7 +22,7 @@ ipcRenderer.on('source:set', async (_, sourceId) => {
             }
         }
     })
-    handleStream(stream)
+    handleStream(stream);
 })
 
 ipcRenderer.on('offer', async (_, playerId, offer, configuration) => {

@@ -62,7 +62,8 @@
         console.log("got offer_answer as remote description");
     })
 
-    socket.on("grabber_ice", async (_, candidate) => {
+    socket.on("grabber_ice", async (peerId, candidate) => {
+        console.log(`got grabber_ice from ${peerId}`);
         await pc.addIceCandidate(candidate);
     });
 

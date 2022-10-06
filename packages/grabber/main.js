@@ -46,7 +46,7 @@ function runGrabbing(window) {
         socket.emit("ping");
     }, 1000);
     socket.on("offer", async (playerId, offer) => {
-        window.webContents.send("offer", playerId, offer, console.peerConnectionConfig);
+        window.webContents.send("offer", playerId, offer, config.peerConnectionConfig);
     });
     ipcMain.handle('offer_answer', async (_, playerId, offer) => {
         socket.emit("offer_answer", playerId, JSON.parse(offer));
