@@ -56,9 +56,26 @@ admin.on("connection", (socket) => {
         debug(`resend offer from ${playerId} to ${grabberId}`);
         peers.to(grabberId).emit("offer", playerId, offer);
     });
+    socket.on("offer_name", (grabberName, offer) => {
+        const peer = storage.getPeerByName(grabberName);
+        if (!peer) {
+            console.warn(`no grabber peer with name ${grabberName}`);
+            return;
+        }
+        const grabberId = peer.id;
+        debug(`resend offer from ${playerId} to ${grabberId}`);
+        peers.to(grabberId).emit("offer", playerId, offer);
+    });
     socket.on("player_ice", (grabberId, ice) => {
-        console.log("got player_ice, retransmitting");
         peers.to(grabberId).emit("player_ice", playerId, ice);
+    });
+    socket.on("player_ice_name", (grabberName, ice) => {
+        const peer = storage.getPeerByName(grabberName);
+        if (!peer) {
+            console.warn(`no grabber peer with name ${grabberName}`);
+            return;
+        }
+        peers.to(peer.id).emit("player_ice", playerId, ice);
     });
 })
 
@@ -66,6 +83,11 @@ admin.on("connection", (socket) => {
 app.get('/', (_, res) => {
     res.sendFile('index.html', {root: path.resolve()});
 });
+app.get('/player', (_, res) => {
+    res.sendFile('player.html', {root: path.resolve()});
+});
+
+setInterval(() => storage.deleteOldPeers(), 60000);
 
 server.listen(3000, () => {
     console.log('listening on *:3000');

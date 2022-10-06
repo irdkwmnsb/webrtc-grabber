@@ -62,8 +62,7 @@
         console.log("got offer_answer as remote description");
     })
 
-    socket.on("ice", async (candidate) => {
-        console.log("got ice");
+    socket.on("grabber_ice", async (_, candidate) => {
         await pc.addIceCandidate(candidate);
     });
 

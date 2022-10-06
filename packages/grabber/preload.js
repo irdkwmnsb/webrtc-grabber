@@ -15,9 +15,9 @@ let stream;
 const pcs = new Map();
 
 function handleStream(stream) {
-    const video = document.querySelector('video#preview')
-    video.srcObject = stream
-    video.onloadedmetadata = () => video.play()
+    // const video = document.querySelector('video#preview')
+    // video.srcObject = stream
+    // video.onloadedmetadata = () => video.play()
 }
 
 ipcRenderer.on('source:set', async (_, sourceId) => {
@@ -51,7 +51,7 @@ ipcRenderer.on('offer', async (_, playerId, offer, configuration) => {
         ipcRenderer.invoke('grabber_ice', playerId, JSON.stringify(event.candidate));
     })
 
-    pc.addEventListener('iceconnectionstatechange', ({target: connection}) => {
+    pc.addEventListener('connectionstatechange', ({target: connection}) => {
         console.log(`change player ${playerId} connection state ${connection.connectionState}`);
         if (connection.connectionState === "failed") {
             connection.close();

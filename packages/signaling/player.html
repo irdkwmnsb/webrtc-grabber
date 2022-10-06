@@ -1,0 +1,82 @@
+<html>
+<head>
+    <title>WebRTC player</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body {
+            background-color: rgba(0, 0, 0, 0);
+            margin: 0 auto;
+            overflow: hidden;
+        }
+
+        #webrtcVideo {
+            width: 100%;
+        }
+
+        #webrtcAudio {
+            opacity: 0;
+        }
+    </style>
+</head>
+<body>
+<video id="webrtcVideo" width="100%" autoplay muted></video>
+<audio id="webrtcAudio" autoplay style="opacity: 0"></audio>
+</body>
+
+</html>
+<script>
+    const rtcPeerConnectionConfig = {
+        iceServers: [
+            {urls: "stun:stun.l.google.com:19302",}
+        ]
+    }
+    const socket = io("/admin");
+    let pc = undefined;
+
+    const webrtcVideo = document.getElementById("webrtcVideo");
+    const webrtcAudio = document.getElementById("webrtcAudio");
+
+    function playStream(streamName) {
+        pc?.close();
+        webrtcVideo.srcObject = null;
+        webrtcAudio.srcObject = null;
+
+        pc = new RTCPeerConnection(rtcPeerConnectionConfig);
+        pc.addTransceiver("video");
+
+        pc.addEventListener("track", (e) => {
+            console.log("got track");
+            if (e.track.kind === "video" && e.streams.length > 0 && webrtcVideo.srcObject !== e.streams[0]) {
+                webrtcVideo.srcObject = null;
+                webrtcVideo.srcObject = e.streams[0];
+                console.log("pc2 received remote stream");
+            }
+        })
+
+        pc.createOffer().then(offer => {
+            pc.setLocalDescription(offer)
+            console.log(`send offer to [${streamName}]`)
+            socket.emit("offer_name", streamName, offer);
+        });
+
+        pc.addEventListener("icecandidate", (event) => {
+            console.log(`sending ice to [${streamName}]`);
+            socket.emit("player_ice_name", streamName, event.candidate);
+        });
+    }
+
+    socket.on("offer_answer", async (peerId, answer) => {
+        console.log(`got offer_answer from ${peerId}`);
+        await pc.setRemoteDescription(answer);
+        console.log("got offer_answer as remote description");
+    })
+
+    socket.on("grabber_ice", async (_, candidate) => {
+        console.log("got ice");
+        await pc.addIceCandidate(candidate);
+    });
+
+    window.addEventListener("close", () => ps?.close());
+
+    playStream(location.hash.length > 0 ? location.hash.slice(1) : "");
+</script>
