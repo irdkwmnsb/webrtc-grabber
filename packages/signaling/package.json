@@ -4,7 +4,7 @@
   "description": "my first socket.io app",
   "type": "module",
   "scripts": {
-    "start:dev": "nodemon ./server.js"
+    "start:dev": "node ./server.js"
   },
   "dependencies": {
     "express": "^4.18.1",

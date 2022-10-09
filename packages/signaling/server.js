@@ -3,6 +3,12 @@ import http from "http";
 import path from "path";
 import {Server} from "socket.io";
 import storage from "./storage.js";
+import fs from "fs";
+
+const debug = (...x) => console.log(...x);
+
+const config = JSON.parse(fs.readFileSync("config.json", {encoding: "utf8"}));
+config.peerConnectionConfig = config.peerConnectionConfig ?? undefined;
 
 const app = express();
 const server = http.createServer(app);
@@ -13,26 +19,31 @@ const io = new Server(server);
 
 const peers = io.of("peers");
 
-
 peers.on("connection", (socket) => {
     const name = socket.handshake.query.name;
-    if(name === undefined) {
-        console.log("failed connection, name=", name);
+    if (name === undefined) {
+        console.warn("failed connection, name=", name);
         socket.emit("error", "No name");
         socket.disconnect(true);
         return;
     }
+
+    socket.emit("init_peer", config.peerConnectionConfig);
+
     const peer = storage.addPeer(name, socket.id);
+    const grabberId = peer.id;
+    debug(`new peer connection ${grabberId} [${name}]`);
     admin.emit("peers", storage.getAll());
-    console.log("New peer:", name, peer);
+
     socket.on("ping", () => {
-        storage.ping(peer.id);
+        storage.ping(grabberId);
     })
-    socket.on("offer", (offer, callerId) => {
-        admin.to(callerId).emit("offer", offer);
+    socket.on("offer_answer", (playerId, answer) => {
+        debug(`resend offer_answer from ${grabberId} to ${playerId}`);
+        admin.to(playerId).emit("offer_answer", grabberId, answer);
     })
-    socket.on("ice", (ice, callerId) => {
-        admin.to(callerId).emit("ice", ice);
+    socket.on("grabber_ice", (playerId, ice) => {
+        admin.to(playerId).emit("grabber_ice", grabberId, ice);
     })
 });
 
@@ -45,26 +56,46 @@ admin.on("connection", (socket) => {
     }, 1000);
     socket.on("disconnect", () => {
         clearInterval(refreshInterval);
-    })
-    const callerId = socket.id;
-    socket.on("call", (id) => {
-        console.log("Calling", id);
-        peers.to(id).emit("call", callerId);
-    })
-    socket.on("answer", (id, offer) => {
-        console.log("got answer, retransmitting");
-        peers.to(id).emit("answer", offer, callerId);
-    })
-    socket.on("ice", (id, ice) => {
-        console.log("got ice, retransmitting");
-        peers.to(id).emit("ice", ice, callerId);
-    })
+    });
+    socket.emit("init_peer", config.peerConnectionConfig);
+
+    const playerId = socket.id;
+    socket.on("offer", (grabberId, offer) => {
+        debug(`resend offer from ${playerId} to ${grabberId}`);
+        peers.to(grabberId).emit("offer", playerId, offer);
+    });
+    socket.on("offer_name", (grabberName, offer) => {
+        const peer = storage.getPeerByName(grabberName);
+        if (!peer) {
+            console.warn(`no grabber peer with name ${grabberName}`);
+            return;
+        }
+        const grabberId = peer.id;
+        debug(`resend offer from ${playerId} to ${grabberId}`);
+        peers.to(grabberId).emit("offer", playerId, offer);
+    });
+    socket.on("player_ice", (grabberId, ice) => {
+        peers.to(grabberId).emit("player_ice", playerId, ice);
+    });
+    socket.on("player_ice_name", (grabberName, ice) => {
+        const peer = storage.getPeerByName(grabberName);
+        if (!peer) {
+            console.warn(`no grabber peer with name ${grabberName}`);
+            return;
+        }
+        peers.to(peer.id).emit("player_ice", playerId, ice);
+    });
 })
 
 // Serve index.html file
 app.get('/', (_, res) => {
     res.sendFile('index.html', {root: path.resolve()});
 });
+app.get('/player', (_, res) => {
+    res.sendFile('player.html', {root: path.resolve()});
+});
+
+setInterval(() => storage.deleteOldPeers(), 60000);
 
 server.listen(3000, () => {
     console.log('listening on *:3000');

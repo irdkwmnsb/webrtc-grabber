@@ -23,12 +23,25 @@ class Storage {
         return newPeer;
     }
 
+    getPeerByName(name) {
+        return [ ...this.peers.values() ]
+            .filter(p => p.name === name)
+            .sort((a, b) => b.lastPing - a.lastPing)
+            .find(() => true);
+    }
+
     deletePeer(id) {
         const peer = this.peers.get(id);
         if (peer) {
             this.peers.delete(peer.id);
             // this.usedNames.delete(peer.name);
         }
+    }
+
+    deleteOldPeers() {
+        const now = new Date();
+        [...this.peers.values()].filter((p) => now - p.lastPing > 60000)
+            .forEach(({id}) => this.deletePeer(id));
     }
 
     ping(id) {
