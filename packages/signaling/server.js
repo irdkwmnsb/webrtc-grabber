@@ -9,11 +9,17 @@ const debug = (...x) => console.log(...x);
 
 const config = JSON.parse(fs.readFileSync("config.json", {encoding: "utf8"}));
 config.peerConnectionConfig = config.peerConnectionConfig ?? undefined;
+config.participants = config.participants ?? [];
+storage.setParticipants(config.participants);
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+
+const sendPeersStatus = () => {
+    admin.emit("peers", storage.getAll(), storage.getParticipantsStatus());
+}
 
 // peer connection
 
@@ -33,7 +39,7 @@ peers.on("connection", (socket) => {
     const peer = storage.addPeer(name, socket.id);
     const grabberId = peer.id;
     debug(`new peer connection ${grabberId} [${name}]`);
-    admin.emit("peers", storage.getAll());
+    sendPeersStatus();
 
     socket.on("ping", () => {
         storage.ping(grabberId);
@@ -52,8 +58,8 @@ peers.on("connection", (socket) => {
 const admin = io.of("admin");
 admin.on("connection", (socket) => {
     const refreshInterval = setInterval(() => {
-        socket.emit("peers", storage.getAll());
-    }, 1000);
+        sendPeersStatus();
+    }, 5000);
     socket.on("disconnect", () => {
         clearInterval(refreshInterval);
     });

@@ -1,6 +1,53 @@
-<script src="/socket.io/socket.io.js"></script>
-<div id="peers"></div>
-<video id="video"></video>
+<html>
+<head>
+    <title>WebRTC grabber</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        #main {
+            display: grid;
+            grid-template-columns : repeat(2, 1fr);
+        }
+
+        #participants {
+            grid-column-start: 1;
+            grid-column-end: 3;
+            padding: 8px;
+            display: grid;
+            grid-template-columns : repeat(5, 1fr);
+            gap: 5px;
+        }
+        .participantStatus {
+            border: black 1px solid;
+            padding: 2px;
+            text-align: center;
+        }
+        .participantStatus.offline {
+            background: #ff7272;
+        }
+        .participantStatus.disconnected {
+            background: #ffff75;
+        }
+        .participantStatus.active {
+            background: #91ff54;
+        }
+        #peers {
+            padding: 8px;
+        }
+        #video {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+<div id="main">
+    <div id="participants"></div>
+    <div id="peers"></div>
+    <div id="videoContainer"><video id="video"></video></div>
+</div>
 <script>
     let peerConnectionConfig;
     const socket = io("/admin");
@@ -11,24 +58,34 @@
         peerConnectionConfig = pcConfig;
         console.log("set peerConnectionConfig");
     });
-    socket.on("peers", (peers) => {
-        const allPeersAnchor = document.getElementById('peers');
-        allPeersAnchor.innerHTML = '';
+    socket.on("peers", (peers, participantsStatus) => {
+        const allPeersAnchor = document.getElementById("peers");
+        allPeersAnchor.innerHTML = "";
         peers.forEach((peer) => {
             allPeersAnchor.innerHTML += `<div class="peer">
-            <pre>
-            ${JSON.stringify(peer)}
-            </pre>
-            <div>Last ping: ${peer.lastPing ? (new Date(peer.lastPing)).toLocaleString() : "never"}</div>
-            <button onClick="connect('${peer.id}')">Connect</button>
+<button onClick="connect('${peer.id}')">Connect</button> ${peer.id} [${peer.name}] last ping: ${peer.lastPing ? (new Date(peer.lastPing)).toLocaleString() : "never"}
         </div>`;
+        });
+
+        const participantsStatusAnchor = document.getElementById("participants");
+        participantsStatusAnchor.innerHTML = "";
+        participantsStatus.forEach((peer) => {
+            const peerState = peer.lastPing ? ((new Date() - new Date(peer.lastPing)) < 5000 ? "active" : "disconnected") : "offline";
+            const pStatus = document.createElement('div');
+            pStatus.className = "participantStatus " + peerState;
+            pStatus.innerText = peer.name + " " + (peer.id ? "[" + peer.id +"]" : "");
+            if (peerState !== "offline") {
+                pStatus.ondblclick = () => connect(peer.id);
+                pStatus.style.cursor = "pointer";
+            }
+            participantsStatusAnchor.appendChild(pStatus);
         });
     });
 
     const connect = (peerId) => {
         console.log(`send offer to ${peerId}`);
         curGrabberId = peerId;
-        if(["connecting", "connected", undefined].indexOf(pc?.connectionState) !== -1) {
+        if (["connecting", "connected", undefined].indexOf(pc?.connectionState) !== -1) {
             pc?.close();
         }
         pc = new RTCPeerConnection(peerConnectionConfig);
@@ -69,3 +126,5 @@
 
     window.addEventListener("close", () => ps?.close());
 </script>
+</body>
+</html>

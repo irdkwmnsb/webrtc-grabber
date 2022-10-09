@@ -35,6 +35,7 @@
     socket.on("init_peer", (pcConfig) => {
         peerConnectionConfig = pcConfig;
         console.log("set peerConnectionConfig");
+        playStream(location.hash.length > 0 ? location.hash.slice(1) : "");
     });
     function playStream(streamName) {
         pc?.close();
@@ -77,6 +78,4 @@
     });
 
     window.addEventListener("close", () => ps?.close());
-
-    playStream(location.hash.length > 0 ? location.hash.slice(1) : "");
 </script>

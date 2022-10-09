@@ -10,6 +10,7 @@ class Peer {
 
 class Storage {
     peers = new Map();
+    participants = [];
     // usedNames = new Set();
 
     hasPeer(id) {
@@ -50,6 +51,14 @@ class Storage {
 
     getAll() {
         return [...this.peers.values()];
+    }
+
+    getParticipantsStatus() {
+        return this.participants.map(partName => this.getPeerByName(partName) ?? new Peer(partName, null));
+    }
+
+    setParticipants(participants) {
+        this.participants = participants;
     }
 }
 
