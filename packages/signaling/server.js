@@ -3,8 +3,12 @@ import http from "http";
 import path from "path";
 import {Server} from "socket.io";
 import storage from "./storage.js";
+import fs from "fs";
 
 const debug = (...x) => console.log(...x);
+
+const config = JSON.parse(fs.readFileSync("config.json", {encoding: "utf8"}));
+config.peerConnectionConfig = config.peerConnectionConfig ?? undefined;
 
 const app = express();
 const server = http.createServer(app);
@@ -23,6 +27,8 @@ peers.on("connection", (socket) => {
         socket.disconnect(true);
         return;
     }
+
+    socket.emit("init_peer", config.peerConnectionConfig);
 
     const peer = storage.addPeer(name, socket.id);
     const grabberId = peer.id;
@@ -50,7 +56,9 @@ admin.on("connection", (socket) => {
     }, 1000);
     socket.on("disconnect", () => {
         clearInterval(refreshInterval);
-    })
+    });
+    socket.emit("init_peer", config.peerConnectionConfig);
+
     const playerId = socket.id;
     socket.on("offer", (grabberId, offer) => {
         debug(`resend offer from ${playerId} to ${grabberId}`);

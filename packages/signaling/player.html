@@ -25,23 +25,23 @@
 
 </html>
 <script>
-    const rtcPeerConnectionConfig = {
-        iceServers: [
-            {urls: "stun:stun.l.google.com:19302",}
-        ]
-    }
+    let peerConnectionConfig;
     const socket = io("/admin");
     let pc = undefined;
 
     const webrtcVideo = document.getElementById("webrtcVideo");
     const webrtcAudio = document.getElementById("webrtcAudio");
 
+    socket.on("init_peer", (pcConfig) => {
+        peerConnectionConfig = pcConfig;
+        console.log("set peerConnectionConfig");
+    });
     function playStream(streamName) {
         pc?.close();
         webrtcVideo.srcObject = null;
         webrtcAudio.srcObject = null;
 
-        pc = new RTCPeerConnection(rtcPeerConnectionConfig);
+        pc = new RTCPeerConnection(peerConnectionConfig);
         pc.addTransceiver("video");
 
         pc.addEventListener("track", (e) => {

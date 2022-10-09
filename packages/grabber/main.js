@@ -26,6 +26,7 @@ function createWindow() {
 }
 
 function runGrabbing(window) {
+    let peerConnectionConfig = undefined;
     desktopCapturer.getSources({types: ['screen']}).then(async sources => {
         for (const source of sources) {
             window.webContents.send('source:set', source.id)
@@ -42,11 +43,15 @@ function runGrabbing(window) {
     socket.on("connect", async () => {
         console.log("connect");
     });
+    socket.on("init_peer", (pcConfig) => {
+        peerConnectionConfig = pcConfig;
+        console.log("set peerConnectionConfig");
+    });
     setInterval(() => {
         socket.emit("ping");
     }, 1000);
     socket.on("offer", async (playerId, offer) => {
-        window.webContents.send("offer", playerId, offer, config.peerConnectionConfig);
+        window.webContents.send("offer", playerId, offer, peerConnectionConfig);
     });
     ipcMain.handle('offer_answer', async (_, playerId, offer) => {
         socket.emit("offer_answer", playerId, JSON.parse(offer));

@@ -2,15 +2,15 @@
 <div id="peers"></div>
 <video id="video"></video>
 <script>
-    const rtcPeerConnectionConfig = {
-        iceServers: [
-            {urls: "stun:stun.l.google.com:19302",}
-        ]
-    }
+    let peerConnectionConfig;
     const socket = io("/admin");
     let pc = null;
     let curGrabberId = null;
 
+    socket.on("init_peer", (pcConfig) => {
+        peerConnectionConfig = pcConfig;
+        console.log("set peerConnectionConfig");
+    });
     socket.on("peers", (peers) => {
         const allPeersAnchor = document.getElementById('peers');
         allPeersAnchor.innerHTML = '';
@@ -31,7 +31,7 @@
         if(["connecting", "connected", undefined].indexOf(pc?.connectionState) !== -1) {
             pc?.close();
         }
-        pc = new RTCPeerConnection(rtcPeerConnectionConfig);
+        pc = new RTCPeerConnection(peerConnectionConfig);
         pc.addTransceiver("video");
 
         pc.addEventListener("track", (e) => {

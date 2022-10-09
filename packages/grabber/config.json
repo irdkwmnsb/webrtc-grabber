@@ -1,11 +1,4 @@
 {
   "debug": true,
-  "signalingUrl": "http://live.aismagilov.ru:3000",
-  "peerConnectionConfig": {
-    "iceServers": [
-      {
-        "urls": "stun:stun.l.google.com:19302"
-      }
-    ]
-  }
+  "peerName": "Tester"
 }
