@@ -10,8 +10,6 @@ An electron application that is running in the background and listens for incomi
 A socket.io server for signaling between the overlay and grabber.
 
 
-<h1>THE PROJECT IS NOT CURRENTLY IN ITS STABLE STATE</h1>
-
 ## Developing
 Start using
 ```
