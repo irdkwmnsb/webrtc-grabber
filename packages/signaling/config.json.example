@@ -1,4 +1,7 @@
 {
+  "participants": [
+    "hello"
+  ],
   "peerConnectionConfig": {
     "iceServers": [
       {

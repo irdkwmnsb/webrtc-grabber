@@ -1,7 +1,7 @@
 {
   "name": "signaling",
   "version": "0.0.0",
-  "description": "my first socket.io app",
+  "description": "WebRTC Grabber signaling",
   "type": "module",
   "scripts": {
     "start:dev": "node ./server.js"
