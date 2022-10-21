@@ -38,24 +38,27 @@ function runGrabbing(window) {
     url.searchParams.append("name", peerName);
     const socketPath = url.toString();
 
-    console.log("init socket", socketPath);
     const socket = io(socketPath);
     socket.on("connect", async () => {
-        console.log("connect");
+        console.log("init socket", socketPath);
     });
-    socket.on("init_peer", (pcConfig) => {
+    let pingTimerId;
+    socket.on("init_peer", (pcConfig, pingInterval) => {
         peerConnectionConfig = pcConfig;
-        console.log("set peerConnectionConfig");
+        pingInterval = pingInterval ?? 3000;
+        if (pingTimerId) {
+            clearInterval(pingTimerId);
+        }
+        pingTimerId = setInterval(() => {
+            socket.emit("ping");
+        }, pingInterval);
+        console.log(`init peer (pingInterval = ${pingInterval})`);
     });
-    setInterval(() => {
-        socket.emit("ping");
-    }, 1000);
     socket.on("offer", async (playerId, offer) => {
         window.webContents.send("offer", playerId, offer, peerConnectionConfig);
     });
     ipcMain.handle('offer_answer', async (_, playerId, offer) => {
         socket.emit("offer_answer", playerId, JSON.parse(offer));
-        console.log(`send offer_answer for ${playerId}`);
     });
     socket.on("player_ice", (playerId, candidate) => {
         window.webContents.send("player_ice", playerId, candidate);

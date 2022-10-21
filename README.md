@@ -20,6 +20,7 @@ sudo docker run -d -p 3000:3000 --name grabber grabber
 ```
 
 ### signalling config.json
+See example in [config.json.example](packages/signaling/config.json.example).
 ```json
 {
   "participants": [
@@ -36,9 +37,9 @@ sudo docker run -d -p 3000:3000 --name grabber grabber
         "credential": "credential"
       }
     ]
-  }
+  },
+  "grabberPingInterval": "{ping interval in millisecond (number)}"
 }
-
 ```
 
 ## Grabber
@@ -47,3 +48,12 @@ An electron application that is running in the background and listens for incomi
 Run in windows `.\run_runner.bat "{signallingUrl}" "{peerName}"`
 
 Run in linux `./run_runner.sh "{signallingUrl}" "{peerName}"`
+
+### grabber config.json
+```json
+{
+  "debug": false,
+  "signalingUrl": "signaling url, you can set when using run_runner",
+  "peerName": "name of peer (participant number or etc), you can set when using run_runner"
+}
+```

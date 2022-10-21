@@ -10,6 +10,7 @@ const debug = (...x) => console.log(...x);
 const config = JSON.parse(fs.readFileSync("config.json", {encoding: "utf8"}));
 config.peerConnectionConfig = config.peerConnectionConfig ?? undefined;
 config.participants = config.participants ?? [];
+config.grabberPingInterval = config.grabberPingInterval ?? 3000;
 storage.setParticipants(config.participants);
 
 const app = express();
@@ -34,7 +35,7 @@ peers.on("connection", (socket) => {
         return;
     }
 
-    socket.emit("init_peer", config.peerConnectionConfig);
+    socket.emit("init_peer", config.peerConnectionConfig, config.grabberPingInterval);
 
     const peer = storage.addPeer(name, socket.id);
     const grabberId = peer.id;

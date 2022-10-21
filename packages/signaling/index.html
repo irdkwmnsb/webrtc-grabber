@@ -1,4 +1,4 @@
-<html>
+<html lang="en">
 <head>
     <title>WebRTC grabber</title>
     <script src="/socket.io/socket.io.js"></script>
@@ -15,14 +15,16 @@
         #participants {
             grid-column-start: 1;
             grid-column-end: 3;
-            padding: 8px;
+            padding: 2px 8px;
             display: grid;
-            grid-template-columns : repeat(5, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
             gap: 5px;
         }
         .participantStatus {
             border: black 1px solid;
-            padding: 2px;
+            padding: 2px 8px;
+        }
+        #participants .participantStatus {
             text-align: center;
         }
         .participantStatus.offline {
@@ -34,8 +36,19 @@
         .participantStatus.active {
             background: #91ff54;
         }
+        .participantStatus.selected {
+            background: #81b6ff;
+        }
+        .participantStatus button {
+            margin-left: 4px;
+        }
+        #selectedParticipant {
+            grid-column-start: 1;
+            grid-column-end: 3;
+            padding: 2px 8px;
+        }
         #peers {
-            padding: 8px;
+            padding: 2px 8px;
         }
         #video {
             width: 100%;
@@ -45,6 +58,7 @@
 <body>
 <div id="main">
     <div id="participants"></div>
+    <div id="selectedParticipant"></div>
     <div id="peers"></div>
     <div id="videoContainer"><video id="video"></video></div>
 </div>
@@ -54,11 +68,29 @@
     let pc = null;
     let curGrabberId = null;
 
-    socket.on("init_peer", (pcConfig) => {
-        peerConnectionConfig = pcConfig;
-        console.log("set peerConnectionConfig");
-    });
-    socket.on("peers", (peers, participantsStatus) => {
+    const peerState = (peer) =>
+        peer.lastPing ? ((new Date() - new Date(peer.lastPing)) < 10000 ? "active" : "disconnected") : "offline";
+
+    let peersInfo = [[], []];
+    let selectedParticipantName = null;
+    const renderSelectedPeer = (peer) => {
+        const lastPingStr = peer.lastPing ? (new Date(peer.lastPing)).toLocaleString() : "never";
+        const anchor = document.getElementById("selectedParticipant");
+        anchor.innerText = "";
+        const pStatus = document.createElement('div');
+        pStatus.className = "participantStatus " + peerState(peer);
+        pStatus.innerText = `${peer.id} [${peer.name}] last ping: ${lastPingStr}`;
+        const connectButton = document.createElement('button');
+        connectButton.innerText = "Connect";
+        connectButton.onclick = () => connect(peer.id);
+        pStatus.appendChild(connectButton);
+        // const playerButton = document.createElement('button');
+        // playerButton.innerText = "Player";
+        // playerButton.onclick = () => prompt("Player url", `${window.location}player#${peer.name}`);
+        // pStatus.appendChild(playerButton);
+        anchor.appendChild(pStatus);
+    }
+    const renderParticipants = ([peers, participantsStatus]) => {
         const allPeersAnchor = document.getElementById("peers");
         allPeersAnchor.innerHTML = "";
         peers.forEach((peer) => {
@@ -70,16 +102,33 @@
         const participantsStatusAnchor = document.getElementById("participants");
         participantsStatusAnchor.innerHTML = "";
         participantsStatus.forEach((peer) => {
-            const peerState = peer.lastPing ? ((new Date() - new Date(peer.lastPing)) < 5000 ? "active" : "disconnected") : "offline";
             const pStatus = document.createElement('div');
-            pStatus.className = "participantStatus " + peerState;
-            pStatus.innerText = peer.name + " " + (peer.id ? "[" + peer.id +"]" : "");
-            if (peerState !== "offline") {
-                pStatus.ondblclick = () => connect(peer.id);
+            pStatus.className = "participantStatus " + peerState(peer);
+            pStatus.innerText = peer.name;
+            if (peerState(peer) !== "offline") {
+                if (peer.name === selectedParticipantName) {
+                    renderSelectedPeer(peer);
+                    pStatus.className += " selected";
+                }
+                pStatus.onclick = () => {
+                    selectedParticipantName = peer.name;
+                    pStatus.className += " selected";
+                    renderParticipants(peersInfo);
+                    renderSelectedPeer(peer);
+                };
                 pStatus.style.cursor = "pointer";
             }
             participantsStatusAnchor.appendChild(pStatus);
         });
+    }
+
+    socket.on("init_peer", (pcConfig) => {
+        peerConnectionConfig = pcConfig;
+        console.log("set peerConnectionConfig");
+    });
+    socket.on("peers", (peers, participantsStatus) => {
+        peersInfo = [peers, participantsStatus];
+        renderParticipants(peersInfo);
     });
 
     const connect = (peerId) => {
