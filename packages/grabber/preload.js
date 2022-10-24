@@ -3,6 +3,10 @@ const {ipcRenderer} = require('electron')
 let stream;
 const pcs = new Map();
 
+setInterval(() => {
+    ipcRenderer.invoke('status:connections', { connectionsCount: pcs.size });
+}, 3000);
+
 function handleStream(stream) {
     // const video = document.querySelector('video#preview')
     // video.srcObject = stream

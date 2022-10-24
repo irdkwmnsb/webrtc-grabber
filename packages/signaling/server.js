@@ -42,8 +42,8 @@ peers.on("connection", (socket) => {
     debug(`new peer connection ${grabberId} [${name}]`);
     sendPeersStatus();
 
-    socket.on("ping", () => {
-        storage.ping(grabberId);
+    socket.on("ping", (status) => {
+        storage.ping(grabberId, status);
     })
     socket.on("offer_answer", (playerId, answer) => {
         debug(`resend offer_answer from ${grabberId} to ${playerId}`);

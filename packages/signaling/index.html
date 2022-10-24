@@ -10,12 +10,13 @@
         #main {
             display: grid;
             grid-template-columns : repeat(2, 1fr);
+            padding: 4px 8px;
         }
 
         #participants {
+            margin-bottom: 4px;
             grid-column-start: 1;
             grid-column-end: 3;
-            padding: 2px 8px;
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
             gap: 5px;
@@ -36,6 +37,9 @@
         .participantStatus.active {
             background: #91ff54;
         }
+        .participantStatus.viewed {
+            background: #e798ff;
+        }
         .participantStatus.selected {
             background: #81b6ff;
         }
@@ -43,15 +47,25 @@
             margin-left: 4px;
         }
         #selectedParticipant {
+            margin-bottom: 4px;
             grid-column-start: 1;
             grid-column-end: 3;
-            padding: 2px 8px;
-        }
-        #peers {
-            padding: 2px 8px;
         }
         #video {
             width: 100%;
+        }
+        #footer {
+            grid-column-start: 1;
+            grid-column-end: 3;
+        }
+        .legend {
+            padding-inline-start: 0;
+            margin-block-start: 0;
+            margin-block-end: 0;
+        }
+        .legend li {
+            list-style: none;
+            margin: 8px 0;
         }
     </style>
 </head>
@@ -61,6 +75,16 @@
     <div id="selectedParticipant"></div>
     <div id="peers"></div>
     <div id="videoContainer"><video id="video"></video></div>
+    <div id="footer">
+        Legend:
+        <ul class="legend">
+            <li><span class="participantStatus offline">offline</span> no pings yet</li>
+            <li><span class="participantStatus disconnected">disconnected</span> last ping was 15 seconds ago</li>
+            <li><span class="participantStatus active">active</span> last ping was earlier than 15 seconds ago</li>
+            <li><span class="participantStatus viewed">viewed [connection count]</span> peer has at least one connection</li>
+            <li><span class="participantStatus selected">selected</span> peer is selected</li>
+        </ul>
+    </div>
 </div>
 <script>
     let peerConnectionConfig;
@@ -69,14 +93,17 @@
     let curGrabberId = null;
 
     const peerState = (peer) =>
-        peer.lastPing ? ((new Date() - new Date(peer.lastPing)) < 10000 ? "active" : "disconnected") : "offline";
+        peer.lastPing ? ((new Date() - new Date(peer.lastPing)) < 15000 ? "active" : "disconnected") : "offline";
 
     let peersInfo = [[], []];
     let selectedParticipantName = null;
     const renderSelectedPeer = (peer) => {
-        const lastPingStr = peer.lastPing ? (new Date(peer.lastPing)).toLocaleString() : "never";
         const anchor = document.getElementById("selectedParticipant");
         anchor.innerText = "";
+        if (!peer) {
+            return;
+        }
+        const lastPingStr = peer.lastPing ? (new Date(peer.lastPing)).toLocaleString() : "never";
         const pStatus = document.createElement('div');
         pStatus.className = "participantStatus " + peerState(peer);
         pStatus.innerText = `${peer.id} [${peer.name}] last ping: ${lastPingStr}`;
@@ -105,16 +132,26 @@
             const pStatus = document.createElement('div');
             pStatus.className = "participantStatus " + peerState(peer);
             pStatus.innerText = peer.name;
+            if (peer.connectionsCount > 0) {
+                pStatus.className += " viewed";
+                pStatus.innerText += ` [${peer.connectionsCount}]`
+            }
+            if (peer.name === selectedParticipantName) {
+                renderSelectedPeer(peer);
+                pStatus.classList.add("selected");
+            }
             if (peerState(peer) !== "offline") {
-                if (peer.name === selectedParticipantName) {
-                    renderSelectedPeer(peer);
-                    pStatus.className += " selected";
-                }
                 pStatus.onclick = () => {
-                    selectedParticipantName = peer.name;
-                    pStatus.className += " selected";
+                    if (selectedParticipantName === peer.name) {
+                        selectedParticipantName = null;
+                        pStatus.classList.remove("selected");
+                        renderSelectedPeer(null);
+                    } else {
+                        selectedParticipantName = peer.name;
+                        pStatus.classList.add("selected");
+                        renderSelectedPeer(peer);
+                    }
                     renderParticipants(peersInfo);
-                    renderSelectedPeer(peer);
                 };
                 pStatus.style.cursor = "pointer";
             }

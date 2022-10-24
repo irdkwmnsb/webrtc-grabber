@@ -33,6 +33,11 @@ function runGrabbing(window) {
         }
     });
 
+    let connectionsStatus = {};
+    ipcMain.handle('status:connections', (_, cs) => {
+        connectionsStatus = cs;
+    });
+
     const url = new URL(signalingUrl);
     url.pathname = "peers";
     url.searchParams.append("name", peerName);
@@ -50,7 +55,7 @@ function runGrabbing(window) {
             clearInterval(pingTimerId);
         }
         pingTimerId = setInterval(() => {
-            socket.emit("ping");
+            socket.emit("ping", connectionsStatus);
         }, pingInterval);
         console.log(`init peer (pingInterval = ${pingInterval})`);
     });

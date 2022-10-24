@@ -2,9 +2,10 @@ import { nanoid } from 'nanoid';
 
 class Peer {
     constructor(name, id) {
-        this.name = name
-        this.id = id
-        this.lastPing = undefined
+        this.name = name;
+        this.id = id;
+        this.lastPing = undefined;
+        this.connectionsCount = 0;
     }
 }
 
@@ -45,8 +46,10 @@ class Storage {
             .forEach(({id}) => this.deletePeer(id));
     }
 
-    ping(id) {
-        this.peers.get(id).lastPing = new Date();
+    ping(id, status) {
+        const peer = this.peers.get(id);
+        peer.lastPing = new Date();
+        peer.connectionsCount = status?.connectionsCount ?? 0;
     }
 
     getAll() {
