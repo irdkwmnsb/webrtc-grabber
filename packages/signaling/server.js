@@ -54,10 +54,21 @@ peers.on("connection", (socket) => {
     })
 });
 
+const checkAdminCredential = (socket) => {
+    if (!config.adminCredential) {
+        return true;
+    }
+    return socket.handshake?.auth && socket.handshake?.auth["token"] === config.adminCredential;
+}
 
 // admin connection
 const admin = io.of("admin");
 admin.on("connection", (socket) => {
+    if (!checkAdminCredential(socket)){
+        socket.emit("auth", "forbidden");
+        socket.disconnect(true);
+        return;
+    }
     const refreshInterval = setInterval(() => {
         sendPeersStatus();
     }, 5000);

@@ -87,8 +87,16 @@
     </div>
 </div>
 <script>
+    const requireAuth = () => prompt("Admin credentials");
+
     let peerConnectionConfig;
-    const socket = io("/admin");
+    const socket = io("/admin", {
+        auth: {
+            token: requireAuth()
+        },
+    });
+    socket.on("auth", (status) => status === "forbidden" && alert("Forbidden. Authorization failed"));
+
     let pc = null;
     let curGrabberId = null;
 
