@@ -14,5 +14,6 @@
       }
     ]
   },
- "grabberPingInterval": 3000
+ "grabberPingInterval": 3000,
+  "adminCredential": "live"
 }
