@@ -87,15 +87,27 @@
     </div>
 </div>
 <script>
-    const requireAuth = () => prompt("Admin credentials");
+    const requireAuth = () => {
+        if (localStorage.getItem("adminCredentials")) {
+            return localStorage.getItem("adminCredentials");
+        }
+        const credentialInput = prompt("Admin credentials");
+        localStorage.setItem("adminCredentials", credentialInput);
+        return credentialInput;
+    }
 
     let peerConnectionConfig;
     const socket = io("/admin", {
         auth: {
-            token: requireAuth()
+            token: requireAuth(),
         },
     });
-    socket.on("auth", (status) => status === "forbidden" && alert("Forbidden. Authorization failed"));
+    socket.on("auth", (status) => {
+        if (status === "forbidden") {
+            localStorage.removeItem("adminCredentials");
+            alert("Forbidden. Authorization failed");
+        }
+    });
 
     let pc = null;
     let curGrabberId = null;
