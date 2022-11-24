@@ -25,13 +25,29 @@ function createWindow() {
     return window;
 }
 
+const sendAvailableStreams = (window) => {
+    desktopCapturer.getSources({types: ['screen']})
+        .then(async sources => {
+            let screenSourceId = null;
+            for (const source of sources) {
+                screenSourceId = source.id ?? screenSourceId;
+            }
+            return screenSourceId;
+        })
+        .then(screenSourceId => {
+            window.webContents.send('source:update', {screenSourceId: screenSourceId});
+        });
+}
+
+function runStreamsCapturing(window) {
+    setInterval(() => sendAvailableStreams(window), 5000);
+    sendAvailableStreams(window);
+}
+
 function runGrabbing(window) {
     let peerConnectionConfig = undefined;
-    desktopCapturer.getSources({types: ['screen']}).then(async sources => {
-        for (const source of sources) {
-            window.webContents.send('source:set', source.id)
-        }
-    });
+
+    runStreamsCapturing(window);
 
     let connectionsStatus = {};
     ipcMain.handle('status:connections', (_, cs) => {
@@ -59,8 +75,8 @@ function runGrabbing(window) {
         }, pingInterval);
         console.log(`init peer (pingInterval = ${pingInterval})`);
     });
-    socket.on("offer", async (playerId, offer) => {
-        window.webContents.send("offer", playerId, offer, peerConnectionConfig);
+    socket.on("offer", async (playerId, offer, streamType) => {
+        window.webContents.send("offer", playerId, offer, streamType, peerConnectionConfig);
     });
     ipcMain.handle('offer_answer', async (_, playerId, offer) => {
         socket.emit("offer_answer", playerId, JSON.parse(offer));

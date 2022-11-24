@@ -1,10 +1,10 @@
-const {ipcRenderer} = require('electron')
+const { ipcRenderer } = require('electron')
 
-let stream;
+let streams = {};
 const pcs = new Map();
 
 setInterval(() => {
-    ipcRenderer.invoke('status:connections', { connectionsCount: pcs.size });
+    ipcRenderer.invoke('status:connections', { connectionsCount: pcs.size, streamTypes: Object.keys(streams) });
 }, 3000);
 
 function handleStream(stream) {
@@ -13,31 +13,45 @@ function handleStream(stream) {
     // video.onloadedmetadata = () => video.play()
 }
 
-ipcRenderer.on('source:set', async (_, sourceId) => {
-    console.log(sourceId);
-    stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-            mandatory: {
-                chromeMediaSource: 'desktop',
-                chromeMediaSourceId: sourceId,
-                minWidth: 1920,
-                minHeight: 1080,
+ipcRenderer.on('source:update', async (_, { screenSourceId }) => {
+    const detectedStreams = {};
+
+    detectedStreams["webcam"] = await navigator.mediaDevices.getUserMedia({
+        video: { width: 1280, height: 720 },
+    });
+
+    if (screenSourceId) {
+        detectedStreams["desktop"] = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+                mandatory: {
+                    chromeMediaSource: 'desktop',
+                    chromeMediaSourceId: screenSourceId,
+                    minWidth: 1920,
+                    minHeight: 1080,
+                }
             }
-        }
-    })
-    handleStream(stream);
+        }) ?? undefined;
+    }
+
+    streams = detectedStreams;
 })
 
-ipcRenderer.on('offer', async (_, playerId, offer, configuration) => {
+ipcRenderer.on('offer', async (_, playerId, offer, streamType, configuration) => {
     console.log(`create new peer connection for ${playerId}`);
     pcs.set(playerId, new RTCPeerConnection(configuration));
     const pc = pcs.get(playerId);
 
-    stream.getTracks().forEach(track => {
-        console.log("added track: ", track);
-        pc.addTrack(track, stream);
-    });
+    streamType = streamType ?? "desktop";
+    const stream = streams[streamType];
+    if (stream) {
+        stream.getTracks().forEach(track => {
+            console.log("added track: ", track);
+            pc.addTrack(track, stream);
+        });
+    } else {
+        console.warn(`No surch ${streamType} as captured stream`);
+    }
 
     pc.addEventListener("icecandidate", (event) => {
         console.log(`send ice for player ${playerId}`);

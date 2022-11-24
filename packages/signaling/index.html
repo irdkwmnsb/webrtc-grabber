@@ -117,6 +117,7 @@
 
     let peersInfo = [[], []];
     let selectedParticipantName = null;
+
     const renderSelectedPeer = (peer) => {
         const anchor = document.getElementById("selectedParticipant");
         anchor.innerText = "";
@@ -127,16 +128,28 @@
         const pStatus = document.createElement('div');
         pStatus.className = "participantStatus " + peerState(peer);
         pStatus.innerText = `${peer.id} [${peer.name}] last ping: ${lastPingStr}`;
-        const connectButton = document.createElement('button');
-        connectButton.innerText = "Connect";
-        connectButton.onclick = () => connect(peer.id);
-        pStatus.appendChild(connectButton);
+
+        const connectStreamButton = (streamType) => {
+            const connectButton = document.createElement('button');
+            connectButton.innerText = "Connect " + streamType;
+            connectButton.onclick = () => connect(peer.id, streamType);
+            return connectButton;
+        }
+        if (peer.streamTypes) {
+            for (const streamType of peer.streamTypes) {
+                pStatus.appendChild(connectStreamButton(streamType));
+            }
+        } else {
+            pStatus.appendChild(connectStreamButton());
+        }
+
         // const playerButton = document.createElement('button');
         // playerButton.innerText = "Player";
         // playerButton.onclick = () => prompt("Player url", `${window.location}player#${peer.name}`);
         // pStatus.appendChild(playerButton);
         anchor.appendChild(pStatus);
     }
+
     const renderParticipants = ([peers, participantsStatus]) => {
         const allPeersAnchor = document.getElementById("peers");
         allPeersAnchor.innerHTML = "";
@@ -155,6 +168,9 @@
             if (peer.connectionsCount > 0) {
                 pStatus.className += " viewed";
                 pStatus.innerText += ` [${peer.connectionsCount}]`
+            }
+            if (peer.streamTypes) {
+                pStatus.innerText += " " + peer.streamTypes.map(t => t.slice(0, 1).toUpperCase()).join("");
             }
             if (peer.name === selectedParticipantName) {
                 renderSelectedPeer(peer);
@@ -188,8 +204,8 @@
         renderParticipants(peersInfo);
     });
 
-    const connect = (peerId) => {
-        console.log(`send offer to ${peerId}`);
+    const connect = (peerId, streamType) => {
+        console.log(`send offer to ${peerId} ${streamType}`);
         curGrabberId = peerId;
         if (["connecting", "connected", undefined].indexOf(pc?.connectionState) !== -1) {
             pc?.close();
@@ -210,7 +226,7 @@
 
         pc.createOffer().then(offer => {
             pc.setLocalDescription(offer)
-            socket.emit("offer", peerId, offer);
+            socket.emit("offer", peerId, offer, streamType);
         });
 
         pc.addEventListener("icecandidate", (event) => {

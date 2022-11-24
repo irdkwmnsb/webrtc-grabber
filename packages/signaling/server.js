@@ -78,11 +78,11 @@ admin.on("connection", (socket) => {
     socket.emit("init_peer", config.peerConnectionConfig);
 
     const playerId = socket.id;
-    socket.on("offer", (grabberId, offer) => {
+    socket.on("offer", (grabberId, offer, streamType) => {
         debug(`resend offer from ${playerId} to ${grabberId}`);
-        peers.to(grabberId).emit("offer", playerId, offer);
+        peers.to(grabberId).emit("offer", playerId, offer, streamType);
     });
-    socket.on("offer_name", (grabberName, offer) => {
+    socket.on("offer_name", (grabberName, offer, streamType) => {
         const peer = storage.getPeerByName(grabberName);
         if (!peer) {
             console.warn(`no grabber peer with name ${grabberName}`);
@@ -90,7 +90,7 @@ admin.on("connection", (socket) => {
         }
         const grabberId = peer.id;
         debug(`resend offer from ${playerId} to ${grabberId}`);
-        peers.to(grabberId).emit("offer", playerId, offer);
+        peers.to(grabberId).emit("offer", playerId, offer, streamType);
     });
     socket.on("player_ice", (grabberId, ice) => {
         peers.to(grabberId).emit("player_ice", playerId, ice);

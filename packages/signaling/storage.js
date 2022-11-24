@@ -6,6 +6,7 @@ class Peer {
         this.id = id;
         this.lastPing = undefined;
         this.connectionsCount = 0;
+        this.streamTypes = [];
     }
 }
 
@@ -50,6 +51,7 @@ class Storage {
         const peer = this.peers.get(id);
         peer.lastPing = new Date();
         peer.connectionsCount = status?.connectionsCount ?? 0;
+        peer.streamTypes = status?.streamTypes;
     }
 
     getAll() {
