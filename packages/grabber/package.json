@@ -13,6 +13,7 @@
     "electron-packager": "^16.0.0"
   },
   "dependencies": {
+    "command-line-args": "^5.2.1",
     "socket.io-client": "^4.5.2",
     "webrtc": "^1.14.1"
   }

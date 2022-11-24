@@ -2,10 +2,9 @@ const path = require('path');
 const fs = require('fs');
 const io = require('socket.io-client');
 const {app, BrowserWindow, desktopCapturer, ipcMain} = require('electron')
+const commandLineArgs = require('command-line-args')
 
-const config = JSON.parse(fs.readFileSync("config.json", {encoding: "utf8"}));
-const signalingUrl = config?.signalingUrl ?? "http://localhost:3000";
-const peerName = config?.peerName ?? "Test";
+const config = parseArguments();
 console.log("loaded config ", config);
 
 function createWindow() {
@@ -54,9 +53,9 @@ function runGrabbing(window) {
         connectionsStatus = cs;
     });
 
-    const url = new URL(signalingUrl);
+    const url = new URL(config.signalingUrl);
     url.pathname = "peers";
-    url.searchParams.append("name", peerName);
+    url.searchParams.append("name", config.peerName);
     const socketPath = url.toString();
 
     const socket = io(socketPath);
@@ -111,3 +110,22 @@ app.on('window-all-closed', () => {
         app.quit()
     }
 })
+
+
+function parseArguments() {
+    const argumentsDefinitions = [
+        { name: "debugMode", type: Boolean, defaultValue: false },
+        // {name: 'timeout', alias: 't', type: Number}
+        { name: "signalingUrl", alias: "s", type: String },
+        { name: "peerName", alias: "n", type: String },
+    ];
+    const options = commandLineArgs(argumentsDefinitions);
+    console.log(options);
+
+    const config = {};
+    config.debug = options.debugMode;
+    config.signalingUrl = options.signalingUrl;
+    config.peerName = options.peerName;
+
+    return config;
+}
