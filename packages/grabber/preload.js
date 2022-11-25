@@ -18,7 +18,7 @@ ipcRenderer.on('source:update', async (_, { screenSourceId, webcamConstraint, we
 
     detectedStreams["webcam"] = await navigator.mediaDevices.getUserMedia({
         video: webcamConstraint ?? { width: 1280, height: 720 },
-        audio: webcamAudio ? true : false,
+        audio: webcamAudio ?? true,
     });
 
     if (screenSourceId) {

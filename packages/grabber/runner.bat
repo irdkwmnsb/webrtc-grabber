@@ -1,1 +1,1 @@
-%~dp0/grabber.exe . --peerName=lida "--signalingUrl=http://live.aismagilov.ru:3000"
+%~dp0grabber.exe . --peerName=lidia "--signalingUrl=http://live.aismagilov.ru:3000"
