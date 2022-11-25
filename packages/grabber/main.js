@@ -4,8 +4,9 @@ const io = require('socket.io-client');
 const {app, BrowserWindow, desktopCapturer, ipcMain} = require('electron')
 const commandLineArgs = require('command-line-args')
 
+const configS = loadConfigS();
 const config = parseArguments();
-console.log("loaded config ", config);
+console.log("loaded config ", config, configS);
 
 function createWindow() {
     const window = new BrowserWindow({
@@ -34,12 +35,16 @@ const sendAvailableStreams = (window) => {
             return screenSourceId;
         })
         .then(screenSourceId => {
-            window.webContents.send('source:update', {screenSourceId: screenSourceId});
+            window.webContents.send('source:update', {
+                screenSourceId: screenSourceId,
+                webcamConstraint: configS.webcamConstraint,
+                webcamAudio: configS.webcamAudio,
+            });
         });
 }
 
 function runStreamsCapturing(window) {
-    setInterval(() => sendAvailableStreams(window), 5000);
+    setInterval(() => sendAvailableStreams(window), 10000);
     sendAvailableStreams(window);
 }
 
@@ -112,15 +117,22 @@ app.on('window-all-closed', () => {
 })
 
 
+function loadConfigS() {
+    try {
+        return JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), {encoding: "utf8"}));
+    } catch (e) {
+        console.warn("Failed to load config.json", e)
+    }
+    return {};
+}
+
 function parseArguments() {
     const argumentsDefinitions = [
-        { name: "debugMode", type: Boolean, defaultValue: false },
-        // {name: 'timeout', alias: 't', type: Number}
-        { name: "signalingUrl", alias: "s", type: String },
-        { name: "peerName", alias: "n", type: String },
+        {name: "debugMode", type: Boolean, defaultValue: false},
+        {name: "signalingUrl", alias: "s", type: String},
+        {name: "peerName", alias: "n", type: String},
     ];
     const options = commandLineArgs(argumentsDefinitions);
-    console.log(options);
 
     const config = {};
     config.debug = options.debugMode;

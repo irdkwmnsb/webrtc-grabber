@@ -74,7 +74,8 @@
     <div id="participants"></div>
     <div id="selectedParticipant"></div>
     <div id="peers"></div>
-    <div id="videoContainer"><video id="video"></video></div>
+    <div id="videoContainer"><video id="video"></video>
+        <audio id="audio"></audio></div>
     <div id="footer">
         Legend:
         <ul class="legend">
@@ -212,15 +213,17 @@
         }
         pc = new RTCPeerConnection(peerConnectionConfig);
         pc.addTransceiver("video");
+        pc.addTransceiver("audio");
 
         pc.addEventListener("track", (e) => {
             console.log("got track");
             const remoteVideo = document.getElementById("video");
+            const remoteAudio = document.getElementById("audio");
             if (e.track.kind === "video" && e.streams.length > 0 && remoteVideo.srcObject !== e.streams[0]) {
                 remoteVideo.srcObject = null;
                 remoteVideo.srcObject = e.streams[0];
                 remoteVideo.play();
-                console.log('pc2 received remote stream');
+                console.log('pc2 received remote stream', e.streams);
             }
         })
 

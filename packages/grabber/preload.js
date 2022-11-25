@@ -13,16 +13,16 @@ function handleStream(stream) {
     // video.onloadedmetadata = () => video.play()
 }
 
-ipcRenderer.on('source:update', async (_, { screenSourceId }) => {
+ipcRenderer.on('source:update', async (_, { screenSourceId, webcamConstraint, webcamAudio }) => {
     const detectedStreams = {};
 
     detectedStreams["webcam"] = await navigator.mediaDevices.getUserMedia({
-        video: { width: 1280, height: 720 },
+        video: webcamConstraint ?? { width: 1280, height: 720 },
+        audio: webcamAudio ? true : false,
     });
 
     if (screenSourceId) {
         detectedStreams["desktop"] = await navigator.mediaDevices.getUserMedia({
-            audio: false,
             video: {
                 mandatory: {
                     chromeMediaSource: 'desktop',
