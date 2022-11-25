@@ -10,8 +10,8 @@ console.log("loaded config ", config, configS);
 
 function createWindow() {
     const window = new BrowserWindow({
-        width: 800,
-        height: 600,
+        width: 1080,
+        height: 660,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js')
         },
@@ -38,7 +38,8 @@ const sendAvailableStreams = (window) => {
             window.webContents.send('source:update', {
                 screenSourceId: screenSourceId,
                 webcamConstraint: configS.webcamConstraint,
-                webcamAudio: configS.webcamAudio,
+                webcamAudioConstraint: configS.webcamAudioConstraint,
+                desktopConstraint: configS.desktopConstraint,
             });
         });
 }
@@ -46,6 +47,12 @@ const sendAvailableStreams = (window) => {
 function runStreamsCapturing(window) {
     setInterval(() => sendAvailableStreams(window), 10000);
     sendAvailableStreams(window);
+
+    if (config.debug) {
+        setTimeout(() => {
+            window.webContents.send("source:show_debug");
+        }, 2000);
+    }
 }
 
 function runGrabbing(window) {

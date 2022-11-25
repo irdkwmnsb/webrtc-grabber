@@ -7,24 +7,22 @@ setInterval(() => {
     ipcRenderer.invoke('status:connections', { connectionsCount: pcs.size, streamTypes: Object.keys(streams) });
 }, 3000);
 
-function handleStream(stream) {
-    // const video = document.querySelector('video#preview')
-    // video.srcObject = stream
-    // video.onloadedmetadata = () => video.play()
-}
-
-ipcRenderer.on('source:update', async (_, { screenSourceId, webcamConstraint, webcamAudio }) => {
+ipcRenderer.on('source:update', async (_, { screenSourceId, webcamConstraint, webcamAudioConstraint, desktopConstraint }) => {
     const detectedStreams = {};
 
     detectedStreams["webcam"] = await navigator.mediaDevices.getUserMedia({
         video: webcamConstraint ?? { width: 1280, height: 720 },
-        audio: webcamAudio ?? true,
+        audio: webcamAudioConstraint ?? true,
     });
 
     if (screenSourceId) {
         detectedStreams["desktop"] = await navigator.mediaDevices.getUserMedia({
             video: {
                 mandatory: {
+                    chromeMediaSource: 'desktop',
+                    chromeMediaSourceId: screenSourceId,
+                    desktopConstraint,
+                } ?? {
                     chromeMediaSource: 'desktop',
                     chromeMediaSourceId: screenSourceId,
                     minWidth: 1920,
@@ -35,7 +33,21 @@ ipcRenderer.on('source:update', async (_, { screenSourceId, webcamConstraint, we
     }
 
     streams = detectedStreams;
-})
+});
+
+ipcRenderer.on('source:show_debug', async () => {
+    for (const streamType of ["desktop", "webcam"]) {
+        const video = document.querySelector("video#" + streamType);
+        video.srcObject = streams[streamType];
+        video.onloadedmetadata = () => video.play()
+    }
+    navigator.mediaDevices.enumerateDevices().then((devices) => {
+        console.log("Webcam devices:")
+        for (const device of devices.filter(d => d.kind === "videoinput")) {
+            console.log(`${device.label}: ${device.deviceId}`)
+        }
+    });
+});
 
 ipcRenderer.on('offer', async (_, playerId, offer, streamType, configuration) => {
     console.log(`create new peer connection for ${playerId}`);

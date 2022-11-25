@@ -3,5 +3,9 @@
     "width": 1280,
     "height": 720
   },
-  "webcamAudio": true
+  "webcamAudioConstraint": true,
+  "desktopConstraint": {
+    "width": 1280,
+    "height": 720
+  }
 }
