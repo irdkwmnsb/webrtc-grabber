@@ -21,9 +21,15 @@
             grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
             gap: 5px;
         }
+        .peerInfo {
+            padding: 2px 8px;
+        }
+        .peerInfo button, .participantStatus button {
+            margin-left: 4px;
+            padding: 2px 8px;
+        }
         .participantStatus {
             border: black 1px solid;
-            padding: 2px 8px;
         }
         #participants .participantStatus {
             text-align: center;
@@ -42,9 +48,6 @@
         }
         .participantStatus.selected {
             background: #81b6ff;
-        }
-        .participantStatus button {
-            margin-left: 4px;
         }
         #selectedParticipant {
             margin-bottom: 4px;
@@ -119,45 +122,52 @@
     let peersInfo = [[], []];
     let selectedParticipantName = null;
 
+    function renderPeerInfo(peer, isSelected) {
+        const lastPingStr = peer.lastPing ? (new Date(peer.lastPing)).toLocaleString() : "never";
+        const pStatus = document.createElement('div');
+        if (isSelected) {
+            pStatus.className += "peerInfo participantStatus " + peerState(peer);
+        } else {
+            pStatus.className += "peerInfo " + peerState(peer);
+        }
+        pStatus.innerText = `${peer.id ?? "???"} [${peer.name}] last ping: ${lastPingStr}`;
+
+        const connectStreamButton = (streamType, isSpirit) => {
+            const connectButton = document.createElement('button');
+            connectButton.innerText = "Connect " + (isSpirit && "?" || "") + streamType;
+            connectButton.onclick = () => connect(peer.id, streamType);
+            return connectButton;
+        }
+        if (peer.streamTypes && peer.streamTypes.length > 0) {
+            for (const streamType of peer.streamTypes) {
+                pStatus.appendChild(connectStreamButton(streamType));
+            }
+        } else {
+            pStatus.appendChild(connectStreamButton("desktop", true));
+            pStatus.appendChild(connectStreamButton("webcam", true));
+        }
+        return pStatus;
+    }
+
     const renderSelectedPeer = (peer) => {
         const anchor = document.getElementById("selectedParticipant");
         anchor.innerText = "";
         if (!peer) {
             return;
         }
-        const lastPingStr = peer.lastPing ? (new Date(peer.lastPing)).toLocaleString() : "never";
-        const pStatus = document.createElement('div');
-        pStatus.className = "participantStatus " + peerState(peer);
-        pStatus.innerText = `${peer.id} [${peer.name}] last ping: ${lastPingStr}`;
-
-        const connectStreamButton = (streamType) => {
-            const connectButton = document.createElement('button');
-            connectButton.innerText = "Connect " + streamType;
-            connectButton.onclick = () => connect(peer.id, streamType);
-            return connectButton;
-        }
-        if (peer.streamTypes) {
-            for (const streamType of peer.streamTypes) {
-                pStatus.appendChild(connectStreamButton(streamType));
-            }
-        } else {
-            pStatus.appendChild(connectStreamButton());
-        }
-
         // const playerButton = document.createElement('button');
         // playerButton.innerText = "Player";
         // playerButton.onclick = () => prompt("Player url", `${window.location}player#${peer.name}`);
         // pStatus.appendChild(playerButton);
-        anchor.appendChild(pStatus);
+        anchor.appendChild(renderPeerInfo(peer, true));
     }
 
     const renderParticipants = ([peers, participantsStatus]) => {
         const allPeersAnchor = document.getElementById("peers");
         allPeersAnchor.innerHTML = "";
         peers.forEach((peer) => {
-            allPeersAnchor.innerHTML += `<div class="peer">
-<button onClick="connect('${peer.id}')">Connect</button> ${peer.id} [${peer.name}] last ping: ${peer.lastPing ? (new Date(peer.lastPing)).toLocaleString() : "never"}
-        </div>`;
+            allPeersAnchor.innerHTML += "";
+            allPeersAnchor.appendChild(renderPeerInfo(peer));
         });
 
         const participantsStatusAnchor = document.getElementById("participants");
@@ -177,21 +187,19 @@
                 renderSelectedPeer(peer);
                 pStatus.classList.add("selected");
             }
-            if (peerState(peer) !== "offline") {
-                pStatus.onclick = () => {
-                    if (selectedParticipantName === peer.name) {
-                        selectedParticipantName = null;
-                        pStatus.classList.remove("selected");
-                        renderSelectedPeer(null);
-                    } else {
-                        selectedParticipantName = peer.name;
-                        pStatus.classList.add("selected");
-                        renderSelectedPeer(peer);
-                    }
-                    renderParticipants(peersInfo);
-                };
-                pStatus.style.cursor = "pointer";
-            }
+            pStatus.onclick = () => {
+                if (selectedParticipantName === peer.name) {
+                    selectedParticipantName = null;
+                    pStatus.classList.remove("selected");
+                    renderSelectedPeer(null);
+                } else {
+                    selectedParticipantName = peer.name;
+                    pStatus.classList.add("selected");
+                    renderSelectedPeer(peer);
+                }
+                renderParticipants(peersInfo);
+            };
+            pStatus.style.cursor = "pointer";
             participantsStatusAnchor.appendChild(pStatus);
         });
     }
