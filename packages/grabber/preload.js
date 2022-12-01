@@ -10,13 +10,16 @@ setInterval(() => {
 ipcRenderer.on('source:update', async (_, { screenSourceId, webcamConstraint, webcamAudioConstraint, desktopConstraint }) => {
     const detectedStreams = {};
 
-    detectedStreams["webcam"] = await navigator.mediaDevices.getUserMedia({
+    const webcamStream = await navigator.mediaDevices.getUserMedia({
         video: webcamConstraint ?? { width: 1280, height: 720 },
         audio: webcamAudioConstraint ?? true,
-    });
+    }).catch(() => undefined);
+    if (webcamStream) {
+        detectedStreams["webcam"] = webcamStream;
+    }
 
     if (screenSourceId) {
-        detectedStreams["desktop"] = await navigator.mediaDevices.getUserMedia({
+        const desktopStream = await navigator.mediaDevices.getUserMedia({
             video: {
                 mandatory: {
                     chromeMediaSource: 'desktop',
@@ -29,7 +32,10 @@ ipcRenderer.on('source:update', async (_, { screenSourceId, webcamConstraint, we
                     minHeight: 1080,
                 }
             }
-        }) ?? undefined;
+        }).catch(() => undefined);
+        if (desktopStream) {
+            detectedStreams["desktop"] = desktopStream;
+        }
     }
 
     streams = detectedStreams;
@@ -38,8 +44,10 @@ ipcRenderer.on('source:update', async (_, { screenSourceId, webcamConstraint, we
 ipcRenderer.on('source:show_debug', async () => {
     for (const streamType of ["desktop", "webcam"]) {
         const video = document.querySelector("video#" + streamType);
-        video.srcObject = streams[streamType];
-        video.onloadedmetadata = () => video.play()
+        if (streams[streamType]) {
+            video.srcObject = streams[streamType];
+            video.onloadedmetadata = () => video.play()
+        }
     }
     navigator.mediaDevices.enumerateDevices().then((devices) => {
         console.log("Webcam devices:")

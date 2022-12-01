@@ -51,7 +51,7 @@ function runStreamsCapturing(window) {
     if (config.debug) {
         setTimeout(() => {
             window.webContents.send("source:show_debug");
-        }, 2000);
+        }, 3000);
     }
 }
 
