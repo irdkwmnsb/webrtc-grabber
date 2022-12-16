@@ -4,8 +4,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build_win_64": "npx electron-packager . --platform=win32 --arch=x64 --out build",
-    "build_linux_64": "npx electron-packager . --platform=linux --arch=x64 --ignore=^/build --out build",
+    "build_win64": "npx electron-packager . --platform=win32 --arch=x64 --ignore=\"^(/build|/scripts)\" --out build",
+    "build_linux64": "npx electron-packager . --platform=linux --arch=x64 --ignore=\"^(/build|/scripts)\" --out build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "devDependencies": {

@@ -1,7 +1,6 @@
 {
   "webcamConstraint": {
-    "width": 1280,
-    "height": 720
+    "aspectRatio": 1.7777777778
   },
   "webcamAudioConstraint": true,
   "desktopConstraint": {
