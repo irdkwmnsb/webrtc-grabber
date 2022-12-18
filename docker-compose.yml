@@ -9,7 +9,5 @@ services:
       - ./packages/signaling/conf:/app/conf
   turn:
     image: coturn/coturn:latest
+    command: -n --no-cli -z -f --listening-port 3478 --min-port=40000 --max-port=40199
     network_mode: host
-    command: -n --min-port=40000 --max-port=40199 -u admin:credential --lt-cred-mech
-    tty: true
-    stdin_open: true
