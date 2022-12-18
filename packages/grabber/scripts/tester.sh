@@ -1,1 +1,1 @@
-$(dirname $0)/grabber  . --debugMode --peerName=test "--signalingUrl=http://live.aismagilov.ru:3000"
+$(dirname $0)/grabber  . --debugMode --peerName=001 "--signalingUrl=http://grabber.kbats.ru"

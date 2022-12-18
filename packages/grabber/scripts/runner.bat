@@ -1,1 +1,1 @@
-%~dp0grabber.exe . --peerName=test "--signalingUrl=http://live.aismagilov.ru:3000"
+%~dp0grabber.exe . --peerName=001 "--signalingUrl=http://grabber.kbats.ru"

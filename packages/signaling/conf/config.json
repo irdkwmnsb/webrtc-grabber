@@ -1,14 +1,11 @@
 {
   "participants": [
-    "hello"
+    "001", "002", "003", "004", "005", "006", "007", "008"
   ],
   "peerConnectionConfig": {
     "iceServers": [
       {
-        "urls": "stun:stun.l.google.com:19302"
-      },
-      {
-        "urls": "turn:77.234.215.132:3478",
+        "urls": "turn:193.233.204.163:3478",
         "username": "admin",
         "credential": "credential"
       }
