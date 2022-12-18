@@ -9,7 +9,7 @@
 
         #main {
             display: grid;
-            grid-template-columns : repeat(2, 1fr);
+            grid-template-columns: repeat(2, 1fr);
             padding: 4px 8px;
         }
 
@@ -21,51 +21,68 @@
             grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
             gap: 5px;
         }
+
         .peerInfo {
             padding: 2px 8px;
         }
+
         .peerInfo button, .participantStatus button {
             margin-left: 4px;
             padding: 2px 8px;
         }
+        .peerInfo a, .participantStatus a {
+            margin-left: 4px;
+        }
+
         .participantStatus {
             border: black 1px solid;
         }
+
         #participants .participantStatus {
             text-align: center;
         }
+
         .participantStatus.offline {
             background: #ff7272;
         }
+
         .participantStatus.disconnected {
             background: #ffff75;
         }
+
         .participantStatus.active {
             background: #91ff54;
         }
+
         .participantStatus.viewed {
             background: #e798ff;
         }
+
         .participantStatus.selected {
             background: #81b6ff;
         }
+
         #selectedParticipant {
             margin-bottom: 4px;
             grid-column-start: 1;
             grid-column-end: 3;
         }
+
         #video {
             width: 100%;
         }
+
         #footer {
             grid-column-start: 1;
             grid-column-end: 3;
         }
+
         .legend {
             padding-inline-start: 0;
             margin-block-start: 0;
             margin-block-end: 0;
         }
+
         .legend li {
             list-style: none;
             margin: 8px 0;
@@ -77,15 +94,18 @@
     <div id="participants"></div>
     <div id="selectedParticipant"></div>
     <div id="peers"></div>
-    <div id="videoContainer"><video id="video"></video>
-        <audio id="audio"></audio></div>
+    <div id="videoContainer">
+        <video id="video"></video>
+        <audio id="audio"></audio>
+    </div>
     <div id="footer">
         Legend:
         <ul class="legend">
             <li><span class="participantStatus offline">offline</span> no pings yet</li>
             <li><span class="participantStatus disconnected">disconnected</span> last ping was 15 seconds ago</li>
             <li><span class="participantStatus active">active</span> last ping was earlier than 15 seconds ago</li>
-            <li><span class="participantStatus viewed">viewed [connection count]</span> peer has at least one connection</li>
+            <li><span class="participantStatus viewed">viewed [connection count]</span> peer has at least one connection
+            </li>
             <li><span class="participantStatus selected">selected</span> peer is selected</li>
         </ul>
     </div>
@@ -134,17 +154,22 @@
 
         const connectStreamButton = (streamType, isSpirit) => {
             const connectButton = document.createElement('button');
-            connectButton.innerText = "Connect " + (isSpirit && "?" || "") + streamType;
+            connectButton.innerText = (isSpirit && "?" || "") + streamType;
             connectButton.onclick = () => connect(peer.id, streamType);
-            return connectButton;
+            pStatus.appendChild(connectButton);
+            const playerLink = document.createElement('a');
+            playerLink.innerText = "" + (isSpirit && "?" || "") + streamType;
+            playerLink.href = `${window.location}player?` +
+                `peerName=${peer.name}&streamType=${streamType}&credential=${localStorage.getItem("adminCredentials")}`
+            pStatus.appendChild(playerLink);
         }
         if (peer.streamTypes && peer.streamTypes.length > 0) {
             for (const streamType of peer.streamTypes) {
-                pStatus.appendChild(connectStreamButton(streamType));
+                connectStreamButton(streamType);
             }
         } else {
-            pStatus.appendChild(connectStreamButton("desktop", true));
-            pStatus.appendChild(connectStreamButton("webcam", true));
+            connectStreamButton("desktop", true);
+            connectStreamButton("webcam", true);
         }
         return pStatus;
     }
@@ -155,10 +180,6 @@
         if (!peer) {
             return;
         }
-        // const playerButton = document.createElement('button');
-        // playerButton.innerText = "Player";
-        // playerButton.onclick = () => prompt("Player url", `${window.location}player#${peer.name}`);
-        // pStatus.appendChild(playerButton);
         anchor.appendChild(renderPeerInfo(peer, true));
     }
 
@@ -226,7 +247,6 @@
         pc.addEventListener("track", (e) => {
             console.log("got track");
             const remoteVideo = document.getElementById("video");
-            const remoteAudio = document.getElementById("audio");
             if (e.track.kind === "video" && e.streams.length > 0 && remoteVideo.srcObject !== e.streams[0]) {
                 remoteVideo.srcObject = null;
                 remoteVideo.srcObject = e.streams[0];

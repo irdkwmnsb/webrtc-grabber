@@ -19,50 +19,71 @@
     </style>
 </head>
 <body>
-<video id="webrtcVideo" width="100%" autoplay muted></video>
-<audio id="webrtcAudio" autoplay style="opacity: 0"></audio>
+<video id="video" width="100%" autoplay muted></video>
 </body>
 
 </html>
 <script>
-    let peerConnectionConfig;
-    const socket = io("/admin");
-    let pc = undefined;
+    const extractArguments = () => {
+        const params = new URLSearchParams(window.location.search);
+        if (!params.has("peerName")) {
+            alert("Invalid parameters. No peerName argument");
+        }
+        return { peerName: params.get("peerName"), streamType: params.get("streamType"), credential: params.get("credential") };
+    }
+    const connectionArgs = extractArguments();
 
-    const webrtcVideo = document.getElementById("webrtcVideo");
-    const webrtcAudio = document.getElementById("webrtcAudio");
+    let peerConnectionConfig;
+    const socket = io("/admin", {
+        auth: {
+            token: connectionArgs.credential,
+        },
+    });
+    socket.on("auth", (status) => {
+        if (status === "forbidden") {
+            localStorage.removeItem("adminCredentials");
+            alert("Forbidden. Authorization failed");
+        }
+    });
+
+    let pc = null;
+    let curGrabberId = null;
 
     socket.on("init_peer", (pcConfig) => {
         peerConnectionConfig = pcConfig;
         console.log("set peerConnectionConfig");
-        playStream(location.hash.length > 0 ? location.hash.slice(1) : "");
-    });
-    function playStream(streamName) {
-        pc?.close();
-        webrtcVideo.srcObject = null;
-        webrtcAudio.srcObject = null;
 
+        connect(connectionArgs.peerName, connectionArgs.streamType);
+    });
+
+    const connect = (peerName, streamType) => {
+        console.log(`send offer to [${peerName}] ${streamType}`);
+        if (["connecting", "connected", undefined].indexOf(pc?.connectionState) !== -1) {
+            pc?.close();
+        }
         pc = new RTCPeerConnection(peerConnectionConfig);
         pc.addTransceiver("video");
+        pc.addTransceiver("audio");
 
         pc.addEventListener("track", (e) => {
             console.log("got track");
-            if (e.track.kind === "video" && e.streams.length > 0 && webrtcVideo.srcObject !== e.streams[0]) {
-                webrtcVideo.srcObject = null;
-                webrtcVideo.srcObject = e.streams[0];
-                console.log("pc2 received remote stream");
+            const remoteVideo = document.getElementById("video");
+            if (e.track.kind === "video" && e.streams.length > 0 && remoteVideo.srcObject !== e.streams[0]) {
+                remoteVideo.srcObject = null;
+                remoteVideo.srcObject = e.streams[0];
+                remoteVideo.play();
+                console.log('pc2 received remote stream', e.streams);
             }
         })
 
         pc.createOffer().then(offer => {
             pc.setLocalDescription(offer)
-            console.log(`send offer to [${streamName}]`)
-            socket.emit("offer_name", streamName, offer);
+            socket.emit("offer_name", peerName, offer, streamType);
         });
 
         pc.addEventListener("icecandidate", (event) => {
-            console.log(`sending ice to [${streamName}]`);
-            socket.emit("player_ice_name", streamName, event.candidate);
+            console.log(`sending ice to [${peerName}]`);
+            socket.emit("player_ice_name", peerName, event.candidate);
         });
     }
 
@@ -72,8 +93,8 @@
         console.log("got offer_answer as remote description");
     })
 
-    socket.on("grabber_ice", async (_, candidate) => {
-        console.log("got ice");
+    socket.on("grabber_ice", async (peerId, candidate) => {
+        console.log(`got grabber_ice from ${peerId}`);
         await pc.addIceCandidate(candidate);
     });
 
