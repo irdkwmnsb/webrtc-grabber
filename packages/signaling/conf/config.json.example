@@ -1,0 +1,19 @@
+{
+  "participants": [
+    "hello"
+  ],
+  "peerConnectionConfig": {
+    "iceServers": [
+      {
+        "urls": "stun:stun.l.google.com:19302"
+      },
+      {
+        "urls": "turn:77.234.215.132:3478",
+        "username": "admin",
+        "credential": "credential"
+      }
+    ]
+  },
+ "grabberPingInterval": 3000,
+  "adminCredential": "live"
+}
