@@ -10,6 +10,6 @@ services:
   turn:
     image: coturn/coturn:latest
     network_mode: host
-    command: -n --min-port=49160 --max-port=49200 -u admin:credential --lt-cred-mech
+    command: -n --min-port=40000 --max-port=40199 -u admin:credential --lt-cred-mech
     tty: true
     stdin_open: true
