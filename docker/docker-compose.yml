@@ -1,0 +1,10 @@
+version: "3"
+services:
+  signaling:
+    build:
+      context: ../packages/signaling
+    ports:
+      - 3000:3000
+  turn:
+    image: coturn/coturn:latest
+    network_mode: host
