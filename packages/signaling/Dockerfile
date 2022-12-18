@@ -1,7 +1,10 @@
 FROM node:16
 WORKDIR /app
+COPY package-lock.json .
+COPY package.json .
+RUN npm ci
+
 COPY . .
 EXPOSE 3000
-RUN npm install
-CMD [ "npm", "run", "start" ]
+CMD [ "npm", "run", "start:prod" ]
 
