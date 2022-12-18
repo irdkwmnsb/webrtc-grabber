@@ -7,7 +7,7 @@ import fs from "fs";
 
 const debug = (...x) => console.log(...x);
 
-const config = JSON.parse(fs.readFileSync("config/config.json", {encoding: "utf8"}));
+const config = JSON.parse(fs.readFileSync("conf/config.json", {encoding: "utf8"}));
 config.peerConnectionConfig = config.peerConnectionConfig ?? undefined;
 config.participants = config.participants ?? [];
 config.grabberPingInterval = config.grabberPingInterval ?? 3000;

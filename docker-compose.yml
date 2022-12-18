@@ -6,7 +6,7 @@ services:
     ports:
       - 3000:3000
     volumes:
-      - ./packages/signaling/conf:/app/config
+      - ./packages/signaling/conf:/app/conf
   turn:
     image: coturn/coturn:latest
     network_mode: host
