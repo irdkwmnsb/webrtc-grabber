@@ -2,17 +2,6 @@
 <head>
     <title>WebRTC player</title>
     <script src="/socket.io/socket.io.js"></script>
-    <style>
-        body {
-            background-color: rgba(0, 0, 0, 0);
-            margin: 0 auto;
-            overflow: hidden;
-        }
-
-        #video {
-            width: 100%;
-        }
-    </style>
 </head>
 <body>
 <video id="video" width="100%" autoplay muted></video>
@@ -20,8 +9,8 @@
 
 </html>
 <script>
-    const webcamConstraint = undefined;
-    const webcamAudioConstraint = undefined;
+    const webcamConstraint = {aspectRatio: 16/9};
+    const webcamAudioConstraint = true;
     const desktopConstraint = {video: true};
 
     class GrabberCaptureClient {
@@ -80,8 +69,8 @@
         const detectedStreams = {};
 
         const webcamStream = await navigator.mediaDevices.getUserMedia({
-            video: webcamConstraint ?? {width: 1280, height: 720},
-            audio: webcamAudioConstraint ?? true,
+            video: webcamConstraint,
+            audio: webcamAudioConstraint,
         }).catch(() => undefined);
         if (webcamStream) {
             detectedStreams["webcam"] = webcamStream;
