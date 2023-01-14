@@ -25,14 +25,9 @@
     const desktopConstraint = {video: true};
 
     class GrabberCaptureClient {
-        constructor(peerName, currentStreamTypes) {
+        constructor(peerName) {
             this.peerName = peerName;
             this.target = new EventTarget();
-            this.currentStreamTypes = currentStreamTypes;
-            this.pingTimerId = undefined;
-            this.peerConnectionConfig = undefined;
-
-            const client = this;
 
             const url = new URL(window.location.origin);
             url.pathname = "peers";
@@ -124,7 +119,7 @@
         });
         client.target.addEventListener("offer", async ({detail: {playerId, offer, streamType}}) => {
             console.log(`create new peer connection for ${playerId}`);
-            pcs.set(playerId, new RTCPeerConnection(this.peerConnectionConfig));
+            pcs.set(playerId, new RTCPeerConnection(peerConnectionConfig));
             const pc = pcs.get(playerId);
 
             streamType = streamType ?? "desktop";
