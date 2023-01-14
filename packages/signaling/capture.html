@@ -1,0 +1,154 @@
+<html>
+<head>
+    <title>WebRTC player</title>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+<video id="video" width="100%" autoplay muted></video>
+</body>
+
+</html>
+<script>
+    const webcamConstraint = {aspectRatio: 16/9};
+    const webcamAudioConstraint = true;
+    const desktopConstraint = {video: true};
+
+    class GrabberCaptureClient {
+        constructor(peerName) {
+            this.peerName = peerName;
+            this.target = new EventTarget();
+
+            const url = new URL(window.location.origin);
+            url.pathname = "peers";
+            url.searchParams.append("name", peerName);
+            const socketPath = url.toString();
+
+            this.socket = io(socketPath);
+            this.socket.on("connect", async () => {
+                console.log("init socket", socketPath);
+            });
+
+            const init_peer_handle = function (pcConfig, pingInterval) {
+                this.target.dispatchEvent(new CustomEvent('init_peer', {detail: {pcConfig, pingInterval}}));
+            };
+            const offer_handle = async function (playerId, offer, streamType) {
+                this.target.dispatchEvent(new CustomEvent('offer', {detail: {playerId, offer, streamType}}));
+            }
+            const player_ice_handle = async function (playerId, candidate) {
+                this.target.dispatchEvent(new CustomEvent('player_ice', {detail: {playerId, candidate}}));
+            }
+
+            this.socket.on("init_peer", init_peer_handle.bind(this));
+            this.socket.on("offer", offer_handle.bind(this));
+            this.socket.on("player_ice", player_ice_handle.bind(this));
+        }
+
+        send_ping(connectionsCount, streamTypes) {
+            this.socket.emit("ping", { connectionsCount: connectionsCount, streamTypes: streamTypes });
+        }
+
+        send_offer_answer(playerId, offer) {
+            this.socket.emit("offer_answer", playerId, offer);
+        }
+
+        send_grabber_ice(playerId, candidate) {
+            this.socket.emit("grabber_ice", playerId, candidate);
+        }
+    }
+
+    const extractArguments = () => {
+        const params = new URLSearchParams(window.location.search);
+        if (!params.has("peerName")) {
+            alert("Invalid parameters. No peerName argument");
+        }
+        return {peerName: params.get("peerName")};
+    }
+    const connectionArgs = extractArguments();
+
+    const detectStreams = async () => {
+        const detectedStreams = {};
+
+        const webcamStream = await navigator.mediaDevices.getUserMedia({
+            video: webcamConstraint,
+            audio: webcamAudioConstraint,
+        }).catch(() => undefined);
+        if (webcamStream) {
+            detectedStreams["webcam"] = webcamStream;
+        }
+
+        if (desktopConstraint) {
+            const desktopStream = await navigator.mediaDevices.getDisplayMedia(desktopConstraint).catch(() => undefined);
+            if (desktopStream) {
+                detectedStreams["desktop"] = desktopStream;
+            }
+        }
+
+        return detectedStreams;
+    }
+
+    const capture = async () => {
+        const streams = await detectStreams();
+        const pcs = new Map();
+        let peerConnectionConfig = undefined;
+        let pingTimerId = undefined;
+
+        const client = new GrabberCaptureClient(connectionArgs.peerName);
+        client.target.addEventListener("init_peer", async ({detail: {pcConfig, pingInterval}}) => {
+            peerConnectionConfig = pcConfig;
+            pingInterval = pingInterval ?? 3000;
+            if (pingTimerId) {
+                clearInterval(pingTimerId);
+            }
+            pingTimerId = setInterval(() => {
+                console.log("ping");
+                client.send_ping(pcs.size, Object.keys(streams));
+            }, pingInterval);
+            console.log(`init peer (pingInterval = ${pingInterval})`);
+
+        });
+        client.target.addEventListener("offer", async ({detail: {playerId, offer, streamType}}) => {
+            console.log(`create new peer connection for ${playerId}`);
+            pcs.set(playerId, new RTCPeerConnection(peerConnectionConfig));
+            const pc = pcs.get(playerId);
+
+            streamType = streamType ?? "desktop";
+            const stream = streams[streamType];
+            if (stream) {
+                stream.getTracks().forEach(track => {
+                    console.log("added track: ", track);
+                    pc.addTrack(track, stream);
+                });
+            } else {
+                console.warn(`No surch ${streamType} as captured stream`);
+            }
+
+            pc.addEventListener("icecandidate", (event) => {
+                console.log(`send ice for player ${playerId}`);
+                client.send_grabber_ice(playerId, event.candidate);
+            })
+
+            pc.addEventListener('connectionstatechange', ({target: connection}) => {
+                console.log(`change player ${playerId} connection state ${connection.connectionState}`);
+                if (connection.connectionState === "failed") {
+                    connection.close();
+                    pcs.delete(playerId);
+                    console.log(`close connection for ${playerId}`);
+                }
+            });
+
+            await pc.setRemoteDescription(offer);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+
+            client.send_offer_answer(playerId, answer);
+            console.log(`send offer_answer for ${playerId}`);
+        });
+
+        client.target.addEventListener('player_ice', async ({detail: {playerId, candidate}}) => {
+            pcs.get(playerId).addIceCandidate(candidate)
+                .then(() => console.log(`add player_ice from ${playerId}`));
+        });
+    };
+
+    capture();
+</script>
