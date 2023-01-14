@@ -112,6 +112,9 @@ app.get('/', (_, res) => {
 app.get('/player', (_, res) => {
     res.sendFile('player.html', {root: path.resolve()});
 });
+app.get('/capture', (_, res) => {
+    res.sendFile('capture.html', {root: path.resolve()});
+});
 
 setInterval(() => storage.deleteOldPeers(), 60000);
 
