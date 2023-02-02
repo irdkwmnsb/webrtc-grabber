@@ -1,17 +1,76 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>WebRTC player</title>
+    <title>WebRTC grabber</title>
     <script src="/socket.io/socket.io.js"></script>
+    <style>
+        button {
+            font-size: 24pt;
+            text-decoration: none;
+            display: inline-block;
+            padding: 10px 30px;
+            margin: 10px 20px;
+            position: relative;
+            overflow: hidden;
+            border: 2px solid #b12a1c;
+            border-radius: 8px;
+            color: #b12a1c;
+            transition: .2s ease-in-out;
+            background: inherit;
+        }
+
+        button:hover {
+            background: #b12a1c;
+            color: #ffffff;
+        }
+
+        #captureButton:hover {
+            color: #ffffff !important;
+        }
+
+        #captureButton.detecting {
+            border-color: #4a82c3;
+            color: #4a82c3;
+        }
+
+        #captureButton.detecting:hover {
+            background: #4a82c3;
+        }
+
+        #captureButton.connecting {
+            border-color: #fdba31;
+            color: #fdba31;
+        }
+
+        #captureButton.connecting:hover {
+            background: #fdba31;
+        }
+
+        #captureButton.active {
+            border-color: #1eb11c;
+            color: #1eb11c;
+        }
+
+        #captureButton.active:hover {
+            background: #1eb11c;
+        }
+    </style>
 </head>
 <body>
-<video id="video" width="100%" autoplay muted></video>
+<div style="text-align: center">
+    <button id="captureButton">Capture</button>
+</div>
 </body>
 
 </html>
 <script>
-    const webcamConstraint = {aspectRatio: 16/9};
+    const webcamConstraint = {aspectRatio: 16 / 9};
     const webcamAudioConstraint = true;
-    const desktopConstraint = {video: true};
+    const desktopConstraint = {
+        video: {
+            displaySurface: "window"
+        }
+    };
 
     class GrabberCaptureClient {
         constructor(peerName) {
@@ -44,7 +103,7 @@
         }
 
         send_ping(connectionsCount, streamTypes) {
-            this.socket.emit("ping", { connectionsCount: connectionsCount, streamTypes: streamTypes });
+            this.socket.emit("ping", {connectionsCount: connectionsCount, streamTypes: streamTypes});
         }
 
         send_offer_answer(playerId, offer) {
@@ -86,12 +145,28 @@
         return detectedStreams;
     }
 
+    let currentState = null;
+    const updateState = (newState) => {
+        currentState = newState;
+        const captureButton = document.getElementById("captureButton");
+        captureButton.className = newState;
+        if (newState === "connecting") {
+            captureButton.innerText = "connecting ...";
+        } else if (newState === "active") {
+            captureButton.innerText = "OK";
+        }
+    }
+
     const capture = async () => {
+        if (currentState !== null) return;
+        updateState("detecting");
+
         const streams = await detectStreams();
         const pcs = new Map();
         let peerConnectionConfig = undefined;
         let pingTimerId = undefined;
 
+        updateState("connecting");
         const client = new GrabberCaptureClient(connectionArgs.peerName);
         client.target.addEventListener("init_peer", async ({detail: {pcConfig, pingInterval}}) => {
             peerConnectionConfig = pcConfig;
@@ -104,8 +179,9 @@
                 client.send_ping(pcs.size, Object.keys(streams));
             }, pingInterval);
             console.log(`init peer (pingInterval = ${pingInterval})`);
-
+            updateState("active");
         });
+
         client.target.addEventListener("offer", async ({detail: {playerId, offer, streamType}}) => {
             console.log(`create new peer connection for ${playerId}`);
             pcs.set(playerId, new RTCPeerConnection(peerConnectionConfig));
@@ -150,5 +226,5 @@
         });
     };
 
-    capture();
+    document.getElementById("captureButton").addEventListener("click", capture);
 </script>
