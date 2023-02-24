@@ -1,0 +1,16 @@
+{
+  "participants": [
+    "001", "002", "003", "004", "005", "006", "007", "008"
+  ],
+  "peerConnectionConfig": {
+    "iceServers": [
+      {
+        "urls": "turn:193.233.204.163:3478",
+        "username": "admin",
+        "credential": "credential"
+      }
+    ]
+  },
+  "grabberPingInterval": 3000,
+  "adminCredential": "live"
+}
