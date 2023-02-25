@@ -112,6 +112,13 @@ func (s *Server) listenPlayerSocket(c *websocket.Conn) {
 	sendPeerStatus()
 	timer := utils.SetIntervalTimer(PlayerSendPeerStatusInterval, sendPeerStatus)
 
+	if err := c.WriteJSON(api.PlayerMessage{
+		Event:    api.PlayerMessageEventInitPeer,
+		InitPeer: &api.PcConfigMessage{PcConfig: s.config.PeerConnectionConfig},
+	}); err != nil {
+		log.Printf("failed to send init_peer%s", socketID)
+	}
+
 	for {
 		if err := c.ReadJSON(&message); err != nil {
 			log.Printf("disconnected %s caused by %s", socketID, err.Error())
@@ -186,8 +193,8 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 	if err := c.WriteJSON(api.GrabberMessage{
 		Event: api.GrabberMessageEventInitPeer,
 		InitPeer: &api.GrabberInitPeerMessage{
-			PcConfig:     s.config.PeerConnectionConfig,
-			PingInterval: s.config.GrabberPingInterval,
+			PcConfigMessage: api.PcConfigMessage{PcConfig: s.config.PeerConnectionConfig},
+			PingInterval:    s.config.GrabberPingInterval,
 		},
 	}); err != nil {
 		log.Printf("failed to send init_peer%s", socketID)

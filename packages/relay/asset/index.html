@@ -224,10 +224,10 @@
         });
     }
 
-    // ws.on("init_peer", (pcConfig) => {
-    //     peerConnectionConfig = pcConfig;
-    //     console.log("set peerConnectionConfig");
-    // });
+    ws.on("init_peer", ({initPeer: {pcConfig}}) => {
+        peerConnectionConfig = pcConfig;
+        console.log("set peerConnectionConfig");
+    });
     ws.on("peers", ({peersStatus, participantsStatus}) => {
         peersInfo = [peersStatus ?? [], participantsStatus ?? []];
         renderParticipants(peersInfo);
