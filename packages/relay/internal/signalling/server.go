@@ -16,11 +16,12 @@ import (
 const PlayerSendPeerStatusInterval = time.Second * 5
 
 type Server struct {
-	app            *fiber.App
-	config         ServerConfig
-	storage        *Storage
-	playersSockets *sockets.SocketPool
-	grabberSockets *sockets.SocketPool
+	app             *fiber.App
+	config          ServerConfig
+	storage         *Storage
+	oldPeersCleaner utils.IntervalTimer
+	playersSockets  *sockets.SocketPool
+	grabberSockets  *sockets.SocketPool
 }
 
 type ServerConfig struct {
@@ -39,10 +40,12 @@ func NewServer(config ServerConfig, app *fiber.App) *Server {
 		storage:        NewStorage(),
 	}
 	server.storage.setParticipants(config.Participants)
+	server.oldPeersCleaner = utils.SetIntervalTimer(time.Minute, server.storage.deleteOldPeers)
 	return &server
 }
 
 func (s *Server) Close() {
+	s.oldPeersCleaner.Stop()
 	s.playersSockets.Close()
 	s.grabberSockets.Close()
 }

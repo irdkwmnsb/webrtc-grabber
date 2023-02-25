@@ -52,7 +52,7 @@ func (s *Storage) deletePeer(streamId sockets.SocketID) {
 
 func (s *Storage) deleteOldPeers() {
 	for peerSocketId, peer := range s.peers {
-		if peer.LastPing != nil && time.Until(*peer.LastPing).Seconds() > 60 {
+		if peer.LastPing != nil && time.Since(*peer.LastPing).Seconds() > 60 {
 			s.deletePeer(peerSocketId)
 		}
 	}
