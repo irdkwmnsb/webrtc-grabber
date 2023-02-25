@@ -7,6 +7,7 @@ const (
 	PlayerMessageEventAuth        = PlayerMessageEvent("auth")
 	PlayerMessageEventAuthRequest = PlayerMessageEvent("auth:request")
 	PlayerMessageEventAuthFailed  = PlayerMessageEvent("auth:failed")
+	PlayerMessageEventInitPeer    = PlayerMessageEvent("init_peer")
 	PlayerMessageEventPeerStatus  = PlayerMessageEvent("peers")
 	PlayerMessageEventOffer       = PlayerMessageEvent("offer")
 	PlayerMessageEventOfferAnswer = PlayerMessageEvent("offer_answer")
@@ -31,6 +32,7 @@ type PlayerMessage struct {
 	Offer              *OfferMessage       `json:"offer"`
 	OfferAnswer        *OfferAnswerMessage `json:"offerAnswer"`
 	Ice                *IceMessage         `json:"ice"`
+	InitPeer           *PcConfigMessage    `json:"initPeer"`
 }
 
 type PlayerAuthMessage struct {
@@ -51,8 +53,12 @@ type GrabberMessage struct {
 }
 
 type GrabberInitPeerMessage struct {
-	PcConfig     any `json:"pcConfig"`
+	PcConfigMessage
 	PingInterval int `json:"pingInterval"`
+}
+
+type PcConfigMessage struct {
+	PcConfig any `json:"pcConfig"`
 }
 
 type OfferMessage struct {
