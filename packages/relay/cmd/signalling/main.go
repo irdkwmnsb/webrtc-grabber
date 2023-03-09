@@ -17,6 +17,7 @@ func main() {
 
 	server.SetupWebSockets()
 	app.Static("/", "./asset")
+	app.Static("/player", "./asset/player.html")
 	app.Static("/capture", "./asset/capture.html")
 
 	log.Fatal(app.Listen(":8000"))

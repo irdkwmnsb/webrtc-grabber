@@ -68,7 +68,7 @@ func (s *Server) SetupWebSockets() {
 }
 
 func (s *Server) setupPlayerSockets() {
-	s.app.Get("/ws/admin", websocket.New(func(c *websocket.Conn) {
+	s.app.Get("/ws/player/admin", websocket.New(func(c *websocket.Conn) {
 		var message api.PlayerMessage
 		socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 		log.Printf("trying to connect %s", socketID)
@@ -92,11 +92,31 @@ func (s *Server) setupPlayerSockets() {
 			return
 		}
 
-		s.listenPlayerSocket(c)
+		s.listenPlayerAdminSocket(c)
+	}))
+	s.app.Get("/ws/player/play", websocket.New(func(c *websocket.Conn) {
+		var message api.PlayerMessage
+		socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
+		log.Printf("trying to connect %s", socketID)
+
+		// check authorisation
+		if err := c.ReadJSON(&message); err != nil {
+			log.Printf("disconnected %s", socketID)
+			return
+		}
+
+		if message.Event != api.PlayerMessageEventAuth || message.PlayerAuth == nil ||
+			!s.CheckPlayerCredential(message.PlayerAuth.Credential) {
+			_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventAuthFailed})
+			log.Printf("failed to authorize %s", socketID)
+			return
+		}
+
+		s.listenPlayerPlaySocket(c)
 	}))
 }
 
-func (s *Server) listenPlayerSocket(c *websocket.Conn) {
+func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.playersSockets.AddSocket(c)
 	log.Printf("authorized %s", socketID)
@@ -140,15 +160,55 @@ func (s *Server) listenPlayerSocket(c *websocket.Conn) {
 	}
 }
 
+func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
+	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
+	s.playersSockets.AddSocket(c)
+	log.Printf("authorized %s", socketID)
+
+	var message api.PlayerMessage
+	if err := c.WriteJSON(api.PlayerMessage{
+		Event:    api.PlayerMessageEventInitPeer,
+		InitPeer: &api.PcConfigMessage{PcConfig: s.config.PeerConnectionConfig},
+	}); err != nil {
+		log.Printf("failed to send init_peer%s", socketID)
+	}
+
+	for {
+		if err := c.ReadJSON(&message); err != nil {
+			log.Printf("disconnected %s caused by %s", socketID, err.Error())
+			s.playersSockets.CloseSocket(socketID)
+			break
+		}
+
+		answer := s.processPlayerMessage(socketID, message)
+		if answer == nil {
+			continue
+		}
+		if err := c.WriteJSON(answer); err != nil {
+			log.Printf("failed to send answer %v to %s", answer, socketID)
+		}
+	}
+}
+
 func (s *Server) processPlayerMessage(id sockets.SocketID, m api.PlayerMessage) *api.PlayerMessage {
+	playerSocketId := string(id)
 	switch m.Event {
 	case api.PlayerMessageEventOffer:
 		if m.Offer == nil {
 			return nil
 		}
-		socket := s.grabberSockets.GetSocket(sockets.SocketID(m.Offer.PeerId))
+		playerSocketId := string(id)
+		var socket *websocket.Conn
+		if m.Offer.PeerId != nil {
+			socket = s.grabberSockets.GetSocket(sockets.SocketID(*m.Offer.PeerId))
+		} else if m.Offer.PeerName != nil {
+			peer := s.storage.getPeerByName(*m.Offer.PeerName)
+			if peer != nil {
+				socket = s.grabberSockets.GetSocket(peer.SocketId)
+			}
+		}
 		if socket == nil {
-			log.Printf("no such grabber with id %s", m.Offer.PeerId)
+			log.Printf("no such grabber with id %v", m.Offer.PeerId)
 			return nil
 		}
 		_ = socket.WriteJSON(api.GrabberMessage{
@@ -156,21 +216,30 @@ func (s *Server) processPlayerMessage(id sockets.SocketID, m api.PlayerMessage) 
 			Offer: &api.OfferMessage{
 				Offer:      m.Offer.Offer,
 				StreamType: m.Offer.StreamType,
-				PeerId:     string(id),
+				PeerId:     &playerSocketId,
 			}})
 	case api.PlayerMessageEventPlayerIce:
 		if m.Ice == nil {
 			return nil
 		}
 
-		socket := s.grabberSockets.GetSocket(sockets.SocketID(m.Ice.PeerId))
+		var socket *websocket.Conn
+		if m.Offer.PeerId != nil {
+			socket = s.grabberSockets.GetSocket(sockets.SocketID(*m.Ice.PeerId))
+		} else if m.Offer.PeerName != nil {
+			peer := s.storage.getPeerByName(*m.Ice.PeerName)
+			if peer != nil {
+				socket = s.grabberSockets.GetSocket(peer.SocketId)
+			}
+		}
 		if socket == nil {
+			log.Printf("no such grabber with id %v to send ice", m.Offer.PeerId)
 			return nil
 		}
 		_ = socket.WriteJSON(api.GrabberMessage{
 			Event: api.GrabberMessageEventPlayerIce,
 			Ice: &api.IceMessage{
-				PeerId:    string(id),
+				PeerId:    &playerSocketId,
 				Candidate: m.Ice.Candidate,
 			}})
 	}
@@ -222,6 +291,7 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 }
 
 func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage) *api.GrabberMessage {
+	grabberId := string(id)
 	switch m.Event {
 	case api.GrabberMessageEventPing:
 		if m.Ping == nil {
@@ -240,22 +310,22 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 		_ = socket.WriteJSON(api.PlayerMessage{
 			Event: api.PlayerMessageEventOfferAnswer,
 			OfferAnswer: &api.OfferAnswerMessage{
-				PeerId: string(id),
+				PeerId: grabberId,
 				Answer: m.OfferAnswer.Answer,
 			},
 		})
 	case api.GrabberMessageEventGrabberIce:
-		if m.Ice == nil {
+		if m.Ice == nil || m.Ice.PeerId == nil {
 			return nil
 		}
-		socket := s.playersSockets.GetSocket(sockets.SocketID(m.Ice.PeerId))
+		socket := s.playersSockets.GetSocket(sockets.SocketID(*m.Ice.PeerId))
 		if socket == nil {
 			return nil
 		}
 		_ = socket.WriteJSON(api.PlayerMessage{
 			Event: api.PlayerMessageEventGrabberIce,
 			Ice: &api.IceMessage{
-				PeerId:    string(id),
+				PeerId:    &grabberId,
 				Candidate: m.Ice.Candidate,
 			},
 		})
