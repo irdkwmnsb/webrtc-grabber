@@ -1,6 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-const io = require('socket.io-client');
+const {GrabberCaptureClient} = require('./capture_client.js');
 const {app, BrowserWindow, desktopCapturer, ipcMain} = require('electron')
 const commandLineArgs = require('command-line-args')
 
@@ -65,38 +65,36 @@ function runGrabbing(window) {
         connectionsStatus = cs;
     });
 
-    const url = new URL(config.signalingUrl);
-    url.pathname = "peers";
-    url.searchParams.append("name", config.peerName);
-    const socketPath = url.toString();
+    const client = new GrabberCaptureClient(config.peerName, config.signalingUrl);
 
-    const socket = io(socketPath);
-    socket.on("connect", async () => {
-        console.log("init socket", socketPath);
-    });
     let pingTimerId;
-    socket.on("init_peer", (pcConfig, pingInterval) => {
+    client.target.addEventListener("init_peer", async ({detail: {pcConfig, pingInterval}}) => {
         peerConnectionConfig = pcConfig;
         pingInterval = pingInterval ?? 3000;
         if (pingTimerId) {
             clearInterval(pingTimerId);
         }
         pingTimerId = setInterval(() => {
-            socket.emit("ping", connectionsStatus);
+            client.send_ping(connectionsStatus.connectionsCount, connectionsStatus.streamTypes);
         }, pingInterval);
         console.log(`init peer (pingInterval = ${pingInterval})`);
     });
-    socket.on("offer", async (playerId, offer, streamType) => {
+
+    client.target.addEventListener("offer", async ({detail: {playerId, offer, streamType}}) => {
+        console.log(`create new peer connection for ${playerId}`);
         window.webContents.send("offer", playerId, offer, streamType, peerConnectionConfig);
     });
+
     ipcMain.handle('offer_answer', async (_, playerId, offer) => {
-        socket.emit("offer_answer", playerId, JSON.parse(offer));
+        client.send_offer_answer(playerId, JSON.parse(offer));
     });
-    socket.on("player_ice", (playerId, candidate) => {
-        window.webContents.send("player_ice", playerId, candidate);
-    })
+
+    client.target.addEventListener('player_ice', async ({detail: {peerId, candidate}}) => {
+        window.webContents.send("player_ice", peerId, candidate);
+    });
+
     ipcMain.handle("grabber_ice", (_, playerId, candidate) => {
-        socket.emit("grabber_ice", playerId, JSON.parse(candidate));
+        client.send_grabber_ice(playerId, JSON.parse(candidate));
     });
 }
 
