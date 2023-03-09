@@ -89,6 +89,7 @@
         }
     </style>
     <script src="/sockets.js"></script>
+    <script src="/grabber_player.js"></script>
 </head>
 <body>
 <div id="main">
@@ -121,78 +122,32 @@
         return credentialInput;
     }
 
-    let peerConnectionConfig;
-    const ws = new GrabberSocket("/ws/admin");
-    ws.on("auth:request", () => {
-        ws.emit("auth", {playerAuth: {credential: requireAuth()}});
-    });
-    ws.on("auth:failed", () => {
-        ws.close();
-        localStorage.removeItem("adminCredentials");
-        alert("Forbidden. Authorization failed");
-    });
-
-    let pc = null;
     let curGrabberId = null;
+    let selectedParticipantName = null;
 
     const peerState = (peer) =>
         peer.lastPing ? ((new Date() - new Date(peer.lastPing)) < 15000 ? "active" : "disconnected") : "offline";
 
-    let peersInfo = [[], []];
-    let selectedParticipantName = null;
+    const client = new GrabberPlayerClient();
+    client.target.addEventListener("auth:request", () => {
+        client.authorize(requireAuth());
+    });
+    client.target.addEventListener("auth:failed", () => {
+        localStorage.removeItem("adminCredentials");
+        alert("Forbidden. Authorization failed");
+    });
 
-    function renderPeerInfo(peer, isSelected) {
-        const lastPingStr = peer.lastPing ? (new Date(peer.lastPing)).toLocaleString() : "never";
-        const pStatus = document.createElement('div');
-        if (isSelected) {
-            pStatus.className += "peerInfo participantStatus " + peerState(peer);
-        } else {
-            pStatus.className += "peerInfo " + peerState(peer);
-        }
-        pStatus.innerText = `${peer.id ?? "???"} [${peer.name}] last ping: ${lastPingStr}`;
-
-        const connectStreamButton = (streamType, isSpirit) => {
-            const connectButton = document.createElement('button');
-            connectButton.innerText = (isSpirit && "?" || "") + streamType;
-            connectButton.onclick = () => connect(peer.id, streamType);
-            pStatus.appendChild(connectButton);
-            const playerLink = document.createElement('a');
-            playerLink.innerText = "" + (isSpirit && "?" || "") + streamType;
-            playerLink.href = `${window.location}player?` +
-                `peerName=${peer.name}&streamType=${streamType}&credential=${localStorage.getItem("adminCredentials")}`
-            pStatus.appendChild(playerLink);
-        }
-        if (peer.streamTypes && peer.streamTypes.length > 0) {
-            for (const streamType of peer.streamTypes) {
-                connectStreamButton(streamType);
-            }
-        } else {
-            connectStreamButton("desktop", true);
-            connectStreamButton("webcam", true);
-        }
-        return pStatus;
-    }
-
-    const renderSelectedPeer = (peer) => {
-        const anchor = document.getElementById("selectedParticipant");
-        anchor.innerText = "";
-        if (!peer) {
-            return;
-        }
-        anchor.appendChild(renderPeerInfo(peer, true));
-    }
-
-    const renderParticipants = ([peers, participantsStatus]) => {
+    const renderParticipants = (peers, participantsStatus) => {
         const allPeersAnchor = document.getElementById("peers");
         allPeersAnchor.innerHTML = "";
-        peers.forEach((peer) => {
+        peers && peers.forEach((peer) => {
             allPeersAnchor.innerHTML += "";
             allPeersAnchor.appendChild(renderPeerInfo(peer));
         });
 
         const participantsStatusAnchor = document.getElementById("participants");
         participantsStatusAnchor.innerHTML = "";
-        participantsStatus.forEach((peer) => {
+        participantsStatus && participantsStatus.forEach((peer) => {
             const pStatus = document.createElement('div');
             pStatus.className = "participantStatus " + peerState(peer);
             pStatus.innerText = peer.name;
@@ -217,66 +172,68 @@
                     pStatus.classList.add("selected");
                     renderSelectedPeer(peer);
                 }
-                renderParticipants(peersInfo);
+                renderParticipants(client.peersStatus, client.participantsStatus);
             };
             pStatus.style.cursor = "pointer";
             participantsStatusAnchor.appendChild(pStatus);
         });
     }
-
-    ws.on("init_peer", ({initPeer: {pcConfig}}) => {
-        peerConnectionConfig = pcConfig;
-        console.log("set peerConnectionConfig");
-    });
-    ws.on("peers", ({peersStatus, participantsStatus}) => {
-        peersInfo = [peersStatus ?? [], participantsStatus ?? []];
-        renderParticipants(peersInfo);
-    });
-
-    const connect = (peerId, streamType) => {
-        console.log(`send offer to ${peerId} ${streamType}`);
-        curGrabberId = peerId;
-        if (["connecting", "connected", undefined].indexOf(pc?.connectionState) !== -1) {
-            pc?.close();
+    const renderSelectedPeer = (peer) => {
+        const anchor = document.getElementById("selectedParticipant");
+        anchor.innerText = "";
+        if (!peer) {
+            return;
         }
-        pc = new RTCPeerConnection(peerConnectionConfig);
-        pc.addTransceiver("video");
-        pc.addTransceiver("audio");
+        anchor.appendChild(renderPeerInfo(peer, true));
+    }
+    client.target.addEventListener("peers", ({detail: [peersStatus, participantsStatus]}) => {
+        renderParticipants(peersStatus, participantsStatus);
+    });
 
-        pc.addEventListener("track", (e) => {
-            console.log("got track");
-            const remoteVideo = document.getElementById("video");
-            if (e.track.kind === "video" && e.streams.length > 0 && remoteVideo.srcObject !== e.streams[0]) {
-                remoteVideo.srcObject = null;
-                remoteVideo.srcObject = e.streams[0];
-                remoteVideo.play();
-                console.log('pc2 received remote stream', e.streams);
+    const onPeerTrack = (track, peerId, streamType) => {
+        console.log("got video track");
+        const remoteVideo = document.getElementById("video");
+        if (remoteVideo.srcObject !== track) {
+            remoteVideo.srcObject = null;
+            remoteVideo.srcObject = track;
+            remoteVideo.play();
+            console.log(`pc2 received remote stream (peerId ${peerId}) `, track);
+        }
+    };
+
+    function renderPeerInfo(peer, isSelected) {
+        const lastPingStr = peer.lastPing ? (new Date(peer.lastPing)).toLocaleString() : "never";
+        const pStatus = document.createElement('div');
+        if (isSelected) {
+            pStatus.className += "peerInfo participantStatus " + peerState(peer);
+        } else {
+            pStatus.className += "peerInfo " + peerState(peer);
+        }
+        pStatus.innerText = `${peer.id ?? "???"} [${peer.name}] last ping: ${lastPingStr}`;
+
+        const connectStreamButton = (streamType, isSpirit) => {
+            const connectButton = document.createElement('button');
+            connectButton.innerText = (isSpirit && "?" || "") + streamType;
+            connectButton.onclick = () => client.connect({peerId: peer.id}, streamType, onPeerTrack);
+            pStatus.appendChild(connectButton);
+            const playerLink = document.createElement('a');
+            playerLink.innerText = "" + (isSpirit && "?" || "") + streamType;
+            playerLink.href = `${window.location}player?` +
+                `peerName=${peer.name}&streamType=${streamType}&credential=${localStorage.getItem("adminCredentials")}`
+            pStatus.appendChild(playerLink);
+        }
+        if (peer.streamTypes && peer.streamTypes.length > 0) {
+            for (const streamType of peer.streamTypes) {
+                connectStreamButton(streamType);
             }
-        });
-
-        pc.createOffer().then(offer => {
-            pc.setLocalDescription(offer)
-            ws.emit("offer", {offer: {peerId, offer, streamType}});
-        });
-
-        pc.addEventListener("icecandidate", (event) => {
-            console.log(`sending ice to ${curGrabberId}`);
-            ws.emit("player_ice", {ice: {peerId: curGrabberId, candidate: event.candidate}});
-        });
+        } else {
+            connectStreamButton("desktop", true);
+            connectStreamButton("webcam", true);
+        }
+        return pStatus;
     }
 
-    ws.on("offer_answer", async ({offerAnswer: {peerId, answer}}) => {
-        console.log(`got offer_answer from ${peerId}`);
-        await pc.setRemoteDescription(answer);
-        console.log("got offer_answer as remote description");
-    })
-
-    ws.on("grabber_ice", async ({ice: {peerId, candidate}}) => {
-        console.log(`got grabber_ice from ${peerId}`);
-        await pc.addIceCandidate(candidate);
-    });
-
-    window.addEventListener("close", () => ps?.close());
+    window.addEventListener("close", () => client.close());
 </script>
 </body>
 </html>

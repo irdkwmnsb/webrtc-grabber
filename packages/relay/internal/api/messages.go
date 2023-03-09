@@ -62,9 +62,10 @@ type PcConfigMessage struct {
 }
 
 type OfferMessage struct {
-	PeerId     string `json:"peerId"`
-	Offer      any    `json:"offer"`
-	StreamType string `json:"streamType"`
+	PeerId     *string `json:"peerId"`
+	PeerName   *string `json:"peerName"`
+	Offer      any     `json:"offer"`
+	StreamType string  `json:"streamType"`
 }
 
 type OfferAnswerMessage struct {
@@ -73,6 +74,7 @@ type OfferAnswerMessage struct {
 }
 
 type IceMessage struct {
-	PeerId    string      `json:"peerId"`
+	PeerId    *string     `json:"peerId"`
+	PeerName  *string     `json:"peerName"`
 	Candidate interface{} `json:"candidate"`
 }
