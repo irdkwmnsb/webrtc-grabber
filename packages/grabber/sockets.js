@@ -32,11 +32,14 @@ class GrabberSocket {
             const payload = JSON.parse(data);
             _this.target.dispatchEvent(new CustomEvent(payload.event, {detail: payload}));
         }
+        ws.onerror = function (event) {
+            console.error(`WebSocket ${_this.url} ${event.type}: ${event.message}`);
+        }
         ws.onclose = function () {
             if (_this.isClosed) {
                 return;
             }
-            setTimeout(() => _this.connect(), 1000);
+            setTimeout(() => _this.connect(), 3000);
         }
         this.ws = ws;
     }

@@ -202,8 +202,7 @@ func (s *Server) processPlayerMessage(id sockets.SocketID, m api.PlayerMessage) 
 		if m.Offer.PeerId != nil {
 			socket = s.grabberSockets.GetSocket(sockets.SocketID(*m.Offer.PeerId))
 		} else if m.Offer.PeerName != nil {
-			peer := s.storage.getPeerByName(*m.Offer.PeerName)
-			if peer != nil {
+			if peer, ok := s.storage.getPeerByName(*m.Offer.PeerName); ok {
 				socket = s.grabberSockets.GetSocket(peer.SocketId)
 			}
 		}
@@ -227,8 +226,7 @@ func (s *Server) processPlayerMessage(id sockets.SocketID, m api.PlayerMessage) 
 		if m.Offer.PeerId != nil {
 			socket = s.grabberSockets.GetSocket(sockets.SocketID(*m.Ice.PeerId))
 		} else if m.Offer.PeerName != nil {
-			peer := s.storage.getPeerByName(*m.Ice.PeerName)
-			if peer != nil {
+			if peer, ok := s.storage.getPeerByName(*m.Ice.PeerName); ok {
 				socket = s.grabberSockets.GetSocket(peer.SocketId)
 			}
 		}
