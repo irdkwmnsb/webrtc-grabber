@@ -22,6 +22,7 @@ NC='\033[0m'
 
 # Check number of arguments
 if [ "$#" -ne 2 ]; then
+  echo "${RED}ERROR:${NC} Incorrect number of arguments."
   usage;
   exit 1;
 fi
@@ -73,5 +74,10 @@ if ! eval $NPM_RUN_CMD; then
 fi
 
 # Finish build
-eval "mv $OLD_BUILD_DIR $NEW_BUILD_DIR && cp -r scripts/*.sh $NEW_BUILD_DIR"
+eval "mv $OLD_BUILD_DIR $NEW_BUILD_DIR"
+if [ "$1" = "linux" ] || [ "$1" = "darwin" ]; then
+  eval "cp -r scripts/grabber-$1.sh $NEW_BUILD_DIR"
+else
+  eval "cp -r scripts/*.bat $NEW_BUILD_DIR"
+fi
 echo "${GRE}BUILD SUCCESSFUL${NC}"
