@@ -24,6 +24,7 @@ class GrabberPlayerClient {
         _client.ws.on("init_peer", ({initPeer: {pcConfig}}) => {
             _client.peerConnectionConfig = pcConfig;
             console.log("Grabber connection initialized");
+            _client.target.dispatchEvent(new CustomEvent("initialized", {}));
         });
 
         _client.ws.on("peers", ({peersStatus, participantsStatus}) => {
@@ -79,6 +80,10 @@ class GrabberPlayerClient {
             _client.ws.emit("offer", {offer: {...peerInfo, offer, streamType}});
             console.log(`sending offer to ${_client.formatPeerInfo(peerInfo)} ${streamType} ...`);
         });
+    }
+
+    on(eventName, callback) {
+        this.target.addEventListener(eventName, e => callback(e.detail));
     }
 
     close() {

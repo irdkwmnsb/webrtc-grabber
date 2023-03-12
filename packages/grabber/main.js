@@ -60,7 +60,7 @@ function runGrabbing(window) {
 
     runStreamsCapturing(window);
 
-    let connectionsStatus = {};
+    let connectionsStatus = {connectionsCount: 0, streamTypes: []};
     ipcMain.handle('status:connections', (_, cs) => {
         connectionsStatus = cs;
     });

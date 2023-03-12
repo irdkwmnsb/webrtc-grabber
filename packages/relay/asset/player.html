@@ -30,12 +30,14 @@
 
         const client = new GrabberPlayerClient("play");
         client.authorize(connectionArgs.credential);
-        client.connect({peerName: connectionArgs.peerName}, connectionArgs.streamType, (track) => {
-            console.log("got video track");
-            const remoteVideo = document.getElementById("video");
-            remoteVideo.srcObject = track;
-            remoteVideo.play();
-            console.log(`pc2 received remote stream (${connectionArgs.peerName}) `, track);
+        client.on("initialized", () => {
+            client.connect({peerName: connectionArgs.peerName}, connectionArgs.streamType, (track) => {
+                console.log("got video track");
+                const remoteVideo = document.getElementById("video");
+                remoteVideo.srcObject = track;
+                remoteVideo.play();
+                console.log(`pc2 received remote stream (${connectionArgs.peerName}) `, track);
+            });
         });
 
         window.addEventListener("close", () => pc?.close());

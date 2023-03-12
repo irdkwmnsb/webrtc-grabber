@@ -28,19 +28,21 @@ func (s *Storage) addPeer(name string, socketId sockets.SocketID) *Storage {
 	return s
 }
 
-func (s *Storage) getPeerByName(name string) *api.Peer {
-	var peer *api.Peer
+func (s *Storage) getPeerByName(name string) (api.Peer, bool) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	for _, v := range s.peers {
-		if v.Name != name {
+	var peer api.Peer
+	isFind := false
+	for _, p := range s.peers {
+		if p.Name != name {
 			continue
 		}
-		if peer == nil || v.LastPing != nil && peer.LastPing.Before(*v.LastPing) {
-			peer = &v
+		if !isFind || peer.LastPing == nil || p.LastPing != nil && peer.LastPing.Before(*p.LastPing) {
+			peer = p
+			isFind = true
 		}
 	}
-	return peer
+	return peer, isFind
 }
 
 func (s *Storage) deletePeer(streamId sockets.SocketID) {
@@ -84,9 +86,8 @@ func (s *Storage) getAll() []api.Peer {
 func (s *Storage) getParticipantsStatus() []api.Peer {
 	var peers []api.Peer
 	for _, participant := range s.participants {
-		peer := s.getPeerByName(participant)
-		if peer != nil {
-			peers = append(peers, *peer)
+		if peer, ok := s.getPeerByName(participant); ok {
+			peers = append(peers, peer)
 		} else {
 			peers = append(peers, api.Peer{Name: participant})
 		}
