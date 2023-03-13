@@ -1,6 +1,7 @@
 package player_client
 
 import (
+	"context"
 	"errors"
 	"github.com/fasthttp/websocket"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
@@ -14,58 +15,107 @@ type Config struct {
 	Credential    string
 }
 
+type ConnectionCtx struct {
+	context.Context
+	config   ConnectionConfig
+	ws       *websocket.Conn
+	PCConfig api.PeerConnectionConfig
+}
+
+func (ctx *ConnectionCtx) SendICECandidate(candidate *webrtc.ICECandidate) error {
+	if candidate == nil {
+		return nil
+	}
+	return ctx.ws.WriteJSON(api.PlayerMessage{
+		Event: api.PlayerMessageEventPlayerIce,
+		Ice: &api.IceMessage{
+			PeerName:  &ctx.config.PeerName,
+			Candidate: candidate.ToJSON(),
+		},
+	})
+}
+
+type OfferCallback func(ctx ConnectionCtx) (webrtc.SessionDescription, error)
+type OfferAnswerCallback func(ctx ConnectionCtx, answer webrtc.SessionDescription) error
+type GrabberIceCallback func(ctx ConnectionCtx, ice webrtc.ICECandidateInit) error
+type ConnectionConfig struct {
+	PeerName      string
+	StreamType    string
+	GetOffer      OfferCallback
+	OnOfferAnswer OfferAnswerCallback
+	OnGrabberIce  GrabberIceCallback
+}
+
 type Client interface {
-	ConnectToPeer(PeerName string, streamType string) error
+	ConnectToPeer(ctx context.Context, cfg ConnectionConfig) error
 }
 
 type grabberPlayerClient struct {
 	config Config
 }
 
-func (g *grabberPlayerClient) ConnectToPeer(peerName string, streamType string) error {
+func (g *grabberPlayerClient) ConnectToPeer(ctx_ context.Context, cfg ConnectionConfig) error {
+	ctx := ConnectionCtx{
+		Context: ctx_,
+		config:  cfg,
+	}
+
 	log.Printf("connecting to %s", g.getWebSocketClientUrl())
-	c, _, err := websocket.DefaultDialer.Dial(g.getWebSocketClientUrl(), nil)
+
+	ws, _, err := websocket.DefaultDialer.DialContext(ctx, g.getWebSocketClientUrl(), nil)
+	ctx.ws = ws
 	if err != nil {
 		return err
 	}
-	if err := c.WriteJSON(api.PlayerMessage{
+
+	go func() {
+		<-ctx.Done()
+		_ = ws.Close()
+	}()
+
+	if err := ws.WriteJSON(api.PlayerMessage{
 		Event:      api.PlayerMessageEventAuth,
 		PlayerAuth: &api.PlayerAuthMessage{Credential: g.config.Credential},
 	}); err != nil {
 		return err
 	}
 	var initPeerMessage api.PlayerMessage
-	if err := c.ReadJSON(&initPeerMessage); err != nil {
+	if err := ws.ReadJSON(&initPeerMessage); err != nil {
 		return err
 	} else if initPeerMessage.Event != api.PlayerMessageEventInitPeer || initPeerMessage.InitPeer == nil {
 		return errors.New("grabber_client: no init peer message")
 	}
+	ctx.PCConfig = initPeerMessage.InitPeer.PcConfig
 
-	config := parseWebrtcConfiguration(initPeerMessage.InitPeer.PcConfig)
-	peerConnection, err := webrtc.NewPeerConnection(config)
+	webrtcOffer, err := cfg.GetOffer(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = peerConnection.Close() }()
 
-	if _, err = peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio); err != nil {
-		return err
-	} else if _, err = peerConnection.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo); err != nil {
-		return err
-	}
-
-	createdOffer, err := peerConnection.CreateOffer(nil)
-	if err != nil {
-		return err
-	}
-	if err = c.WriteJSON(api.PlayerMessage{
+	if err := ws.WriteJSON(api.PlayerMessage{
 		Event: api.PlayerMessageEventOffer,
-		Offer: &api.OfferMessage{PeerName: &peerName, StreamType: streamType, Offer: createdOffer},
+		Offer: &api.OfferMessage{Offer: webrtcOffer, PeerName: &cfg.PeerName, StreamType: cfg.StreamType},
 	}); err != nil {
 		return err
 	}
 
-	return nil
+	var message api.PlayerMessage
+	for {
+		if err = ws.ReadJSON(&message); err != nil {
+			return err
+		}
+
+		switch {
+		case message.Event == api.PlayerMessageEventOfferAnswer && message.OfferAnswer != nil:
+			if err = cfg.OnOfferAnswer(ctx, message.OfferAnswer.Answer); err != nil {
+				return err
+			}
+		case message.Event == api.PlayerMessageEventGrabberIce && message.Ice != nil:
+			if err = cfg.OnGrabberIce(ctx, message.Ice.Candidate); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func (g *grabberPlayerClient) getWebSocketClientUrl() string {

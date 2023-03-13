@@ -25,10 +25,10 @@ type Server struct {
 }
 
 type ServerConfig struct {
-	PlayerCredential     *string  `json:"adminCredential"`
-	Participants         []string `json:"participants"`
-	PeerConnectionConfig any      `json:"peerConnectionConfig"`
-	GrabberPingInterval  int      `json:"grabberPingInterval"`
+	PlayerCredential     *string                  `json:"adminCredential"`
+	Participants         []string                 `json:"participants"`
+	PeerConnectionConfig api.PeerConnectionConfig `json:"peerConnectionConfig"`
+	GrabberPingInterval  int                      `json:"grabberPingInterval"`
 }
 
 func NewServer(config ServerConfig, app *fiber.App) *Server {

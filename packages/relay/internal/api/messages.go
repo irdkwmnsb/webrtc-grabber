@@ -1,5 +1,7 @@
 package api
 
+import "github.com/pion/webrtc/v3"
+
 type PlayerMessageEvent string
 type GrabberMessageEvent string
 
@@ -58,23 +60,23 @@ type GrabberInitPeerMessage struct {
 }
 
 type PcConfigMessage struct {
-	PcConfig any `json:"pcConfig"`
+	PcConfig PeerConnectionConfig `json:"pcConfig"`
 }
 
 type OfferMessage struct {
-	PeerId     *string `json:"peerId"`
-	PeerName   *string `json:"peerName"`
-	Offer      any     `json:"offer"`
-	StreamType string  `json:"streamType"`
+	PeerId     *string                   `json:"peerId"`
+	PeerName   *string                   `json:"peerName"`
+	Offer      webrtc.SessionDescription `json:"offer"`
+	StreamType string                    `json:"streamType"`
 }
 
 type OfferAnswerMessage struct {
-	PeerId string `json:"peerId"`
-	Answer any    `json:"answer"`
+	PeerId string                    `json:"peerId"`
+	Answer webrtc.SessionDescription `json:"answer"`
 }
 
 type IceMessage struct {
-	PeerId    *string     `json:"peerId"`
-	PeerName  *string     `json:"peerName"`
-	Candidate interface{} `json:"candidate"`
+	PeerId    *string                 `json:"peerId"`
+	PeerName  *string                 `json:"peerName"`
+	Candidate webrtc.ICECandidateInit `json:"candidate"`
 }

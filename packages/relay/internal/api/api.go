@@ -2,6 +2,7 @@ package api
 
 import (
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
+	"github.com/pion/webrtc/v3"
 	"time"
 )
 
@@ -27,4 +28,28 @@ type PeerStatus struct {
 
 type PlayerAuth struct {
 	Credential string `json:"credential"`
+}
+
+type PeerConnectionConfig struct {
+	IceServers []struct {
+		Urls       string  `json:"urls"`
+		Username   *string `json:"username"`
+		Credential *string `json:"credential"`
+	} `json:"iceServers"`
+}
+
+func (c PeerConnectionConfig) WebrtcConfiguration() webrtc.Configuration {
+	var conf webrtc.Configuration
+	for _, server := range c.IceServers {
+		var iceServer webrtc.ICEServer
+		iceServer.URLs = append(iceServer.URLs, server.Urls)
+		if server.Username != nil {
+			iceServer.Username = *server.Username
+		}
+		if server.Credential != nil {
+			iceServer.Credential = *server.Credential
+		}
+		conf.ICEServers = append(conf.ICEServers, iceServer)
+	}
+	return conf
 }

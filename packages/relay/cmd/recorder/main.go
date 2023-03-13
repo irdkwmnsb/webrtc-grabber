@@ -1,30 +1,37 @@
 package main
 
 import (
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/player_client"
+	"context"
+	"github.com/gofiber/fiber/v2"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/recorder"
 	"log"
+	"os"
+	"time"
 )
 
 func main() {
-	_, err := recorder.LoadRecorderConfig()
+	config, err := recorder.LoadRecorderConfig()
 	if err != nil {
 		log.Fatal(err)
 	}
-	//app := fiber.New()
-	//server := recorder.NewRecorder(config, app)
-	//defer server.Close()
 
-	//server.SetupRouting()
-	//app.Static("/", "./asset")
-	//app.Static("/player", "./asset/player.html")
-	//app.Static("/capture", "./asset/capture.html")
-
-	//log.Fatal(app.Listen(":8000"))
-	client := player_client.NewClient(player_client.Config{SignallingUrl: "http://localhost:8000", Credential: "live"})
-	err = client.ConnectToPeer("001", "desktop")
-	if err != nil {
-		log.Println(err)
-		return
+	if err = os.MkdirAll(config.RecordingsDirectory, os.ModePerm); err != nil {
+		log.Printf("failed to create output directory %s", err)
 	}
+
+	ctx, ctxCancel := context.WithCancel(context.Background())
+	defer ctxCancel()
+
+	app := fiber.New()
+	server := recorder.NewRecorderServer(config, app)
+
+	server.SetupRouting(ctx)
+	app.Static("/recordings", config.RecordingsDirectory, fiber.Static{
+		Browse:        true,
+		CacheDuration: time.Second,
+	})
+	app.Static("/record", "./asset/record.html")
+
+	log.Fatal(app.Listen(":8001"))
+
 }
