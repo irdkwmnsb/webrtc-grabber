@@ -1,12 +1,5 @@
 version: "3"
 services:
-  signaling:
-    build:
-      context: ./packages/signaling
-    ports:
-      - 3000:3000
-    volumes:
-      - ./packages/signaling/conf:/app/conf
   turn:
     image: coturn/coturn:latest
     command: -n --no-cli -z -f --listening-port 3478 --min-port=40000 --max-port=40199
