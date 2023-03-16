@@ -1,0 +1,20 @@
+{
+  "name": "webrtc-grabber-player-common",
+  "version": "0.1.0-alpha",
+  "description": "Common code for playing streams from webrtc grabber",
+  "main": "grabber_player.js",
+  "scripts": {
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/irdkwmnsb/webrtc-grabber.git"
+  },
+  "keywords": [
+    "webrtc", "webrtc-grabber"
+  ],
+  "author": "ICPC Live team",
+  "license": "ISC",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}
