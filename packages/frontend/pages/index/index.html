@@ -1,0 +1,29 @@
+<html lang="en">
+<head>
+    <title>WebRTC grabber</title>
+    <link href="index.scss" type="text/css" rel="stylesheet"/>
+</head>
+<body>
+<div id="main">
+    <div id="participants"></div>
+    <div id="selectedParticipant"></div>
+    <div id="peers"></div>
+    <div id="videoContainer">
+        <video id="video"></video>
+        <audio id="audio"></audio>
+    </div>
+    <div id="footer">
+        Legend:
+        <ul class="legend">
+            <li><span class="participantStatus offline">offline</span> no pings yet</li>
+            <li><span class="participantStatus disconnected">disconnected</span> last ping was 15 seconds ago</li>
+            <li><span class="participantStatus active">active</span> last ping was earlier than 15 seconds ago</li>
+            <li><span class="participantStatus viewed">viewed [connection count]</span> peer has at least one connection
+            </li>
+            <li><span class="participantStatus selected">selected</span> peer is selected</li>
+        </ul>
+    </div>
+</div>
+<script src="./index.ts" type="module"></script>
+</body>
+</html>
