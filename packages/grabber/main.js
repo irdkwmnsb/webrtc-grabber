@@ -4,9 +4,13 @@ const {GrabberCaptureClient} = require('./capture_client.js');
 const {app, BrowserWindow, desktopCapturer, ipcMain} = require('electron')
 const commandLineArgs = require('command-line-args')
 
+app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
+
 const configS = loadConfigS();
 const config = parseArguments();
 console.log("loaded config ", config, configS);
+
+let screenSourceId = null;
 
 function createWindow() {
     const window = new BrowserWindow({
@@ -25,22 +29,29 @@ function createWindow() {
     return window;
 }
 
+const sendSourceUpdate = (window) => {
+    window.webContents.send('source:update', {
+        screenSourceId: screenSourceId,
+        webcamConstraint: configS.webcamConstraint,
+        webcamAudioConstraint: configS.webcamAudioConstraint,
+        desktopConstraint: configS.desktopConstraint,
+    });
+}
+
 const sendAvailableStreams = (window) => {
+    if (screenSourceId) {
+        sendSourceUpdate(window);
+        return
+    }
+
     desktopCapturer.getSources({types: ['screen']})
         .then(async sources => {
-            let screenSourceId = null;
+            let id = null;
             for (const source of sources) {
-                screenSourceId = source.id ?? screenSourceId;
+                id = source.id ?? id;
             }
-            return screenSourceId;
-        })
-        .then(screenSourceId => {
-            window.webContents.send('source:update', {
-                screenSourceId: screenSourceId,
-                webcamConstraint: configS.webcamConstraint,
-                webcamAudioConstraint: configS.webcamAudioConstraint,
-                desktopConstraint: configS.desktopConstraint,
-            });
+            screenSourceId = id;
+            sendSourceUpdate(window);
         });
 }
 
