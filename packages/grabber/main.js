@@ -4,6 +4,7 @@ const {GrabberCaptureClient} = require('./capture_client.js');
 const {app, BrowserWindow, desktopCapturer, ipcMain} = require('electron')
 const commandLineArgs = require('command-line-args')
 
+
 app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
 
 const configS = loadConfigS();
