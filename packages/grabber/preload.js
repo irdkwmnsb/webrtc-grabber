@@ -7,7 +7,7 @@ setInterval(() => {
     ipcRenderer.invoke('status:connections', { connectionsCount: pcs.size, streamTypes: Object.keys(streams) });
 }, 3000);
 
-ipcRenderer.on('source:update', async (_, { screenSourceId, webcamConstraint, webcamAudioConstraint, desktopConstraint }) => {
+ipcRenderer.on('source:update', async (_, { webcamConstraint, webcamAudioConstraint, desktopConstraint }) => {
     const detectedStreams = {};
 
     const webcamStream = await navigator.mediaDevices.getUserMedia({
@@ -18,24 +18,20 @@ ipcRenderer.on('source:update', async (_, { screenSourceId, webcamConstraint, we
         detectedStreams["webcam"] = webcamStream;
     }
 
-    if (screenSourceId) {
-        const desktopStream = await navigator.mediaDevices.getUserMedia({
-            video: {
-                mandatory: {
-                    chromeMediaSource: 'desktop',
-                    chromeMediaSourceId: screenSourceId,
-                    desktopConstraint,
-                } ?? {
-                    chromeMediaSource: 'desktop',
-                    chromeMediaSourceId: screenSourceId,
-                    minWidth: 1920,
-                    minHeight: 1080,
-                }
+    const desktopStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+            mandatory: {
+                chromeMediaSource: 'desktop',
+                ...desktopConstraint,
+            } ?? {
+                chromeMediaSource: 'desktop',
+                minWidth: 1920,
+                minHeight: 1080,
             }
-        }).catch(() => undefined);
-        if (desktopStream) {
-            detectedStreams["desktop"] = desktopStream;
         }
+    }).catch(() => undefined);
+    if (desktopStream) {
+        detectedStreams["desktop"] = desktopStream;
     }
 
     streams = detectedStreams;

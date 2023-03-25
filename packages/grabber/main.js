@@ -11,8 +11,6 @@ const configS = loadConfigS();
 const config = parseArguments();
 console.log("loaded config ", config, configS);
 
-let screenSourceId = null;
-
 function createWindow() {
     const window = new BrowserWindow({
         width: 1080,
@@ -32,7 +30,6 @@ function createWindow() {
 
 const sendSourceUpdate = (window) => {
     window.webContents.send('source:update', {
-        screenSourceId: screenSourceId,
         webcamConstraint: configS.webcamConstraint,
         webcamAudioConstraint: configS.webcamAudioConstraint,
         desktopConstraint: configS.desktopConstraint,
@@ -40,20 +37,7 @@ const sendSourceUpdate = (window) => {
 }
 
 const sendAvailableStreams = (window) => {
-    if (screenSourceId) {
-        sendSourceUpdate(window);
-        return
-    }
-
-    desktopCapturer.getSources({types: ['screen']})
-        .then(async sources => {
-            let id = null;
-            for (const source of sources) {
-                id = source.id ?? id;
-            }
-            screenSourceId = id;
-            sendSourceUpdate(window);
-        });
+    sendSourceUpdate(window);
 }
 
 function runStreamsCapturing(window) {
