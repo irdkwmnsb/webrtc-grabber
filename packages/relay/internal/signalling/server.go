@@ -198,7 +198,7 @@ func (s *Server) processPlayerMessage(id sockets.SocketID, m api.PlayerMessage) 
 			return nil
 		}
 		playerSocketId := string(id)
-		var socket *websocket.Conn
+		var socket sockets.Socket
 		if m.Offer.PeerId != nil {
 			socket = s.grabberSockets.GetSocket(sockets.SocketID(*m.Offer.PeerId))
 		} else if m.Offer.PeerName != nil {
@@ -222,10 +222,10 @@ func (s *Server) processPlayerMessage(id sockets.SocketID, m api.PlayerMessage) 
 			return nil
 		}
 
-		var socket *websocket.Conn
-		if m.Offer.PeerId != nil {
+		var socket sockets.Socket
+		if m.Ice.PeerId != nil {
 			socket = s.grabberSockets.GetSocket(sockets.SocketID(*m.Ice.PeerId))
-		} else if m.Offer.PeerName != nil {
+		} else if m.Ice.PeerName != nil {
 			if peer, ok := s.storage.getPeerByName(*m.Ice.PeerName); ok {
 				socket = s.grabberSockets.GetSocket(peer.SocketId)
 			}
