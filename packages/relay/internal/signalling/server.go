@@ -231,7 +231,7 @@ func (s *Server) processPlayerMessage(id sockets.SocketID, m api.PlayerMessage) 
 			}
 		}
 		if socket == nil {
-			log.Printf("no such grabber with id %v to send ice", m.Offer.PeerId)
+			log.Printf("no such grabber with id %v to send ice", m.Ice.PeerId)
 			return nil
 		}
 		_ = socket.WriteJSON(api.GrabberMessage{
