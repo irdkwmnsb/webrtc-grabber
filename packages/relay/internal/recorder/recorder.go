@@ -3,6 +3,7 @@ package recorder
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/player_client"
 	"github.com/pion/webrtc/v3"
 	"github.com/pion/webrtc/v3/pkg/media"
@@ -38,7 +39,10 @@ type recordingInfo struct {
 }
 
 func (r *recorder) Record(ctx context.Context, key string, peerName string, streamType string, duration time.Duration) (string, error) {
-	recordingId := time.Now().Format("2006_01_02_15_04_05") + "_" + key
+	recordingId := fmt.Sprintf("%s_%s_%s", time.Now().Format("2006_01_02_15_04_05"), peerName, streamType)
+	if key != "" {
+		recordingId += "_" + key
+	}
 	recordingDuration := r.chooseDuration(duration)
 	innerCtx, cancelFunc := context.WithTimeout(ctx, recordingDuration)
 	rec := recordingInfo{
