@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/fasthttp/websocket"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"github.com/pion/webrtc/v3"
 	"log"
 	"strings"
@@ -18,7 +19,7 @@ type Config struct {
 type ConnectionCtx struct {
 	context.Context
 	config   ConnectionConfig
-	ws       *websocket.Conn
+	ws       sockets.Socket
 	PCConfig api.PeerConnectionConfig
 }
 
@@ -62,7 +63,8 @@ func (g *grabberPlayerClient) ConnectToPeer(ctx_ context.Context, cfg Connection
 
 	log.Printf("connecting to %s", g.getWebSocketClientUrl())
 
-	ws, _, err := websocket.DefaultDialer.DialContext(ctx, g.getWebSocketClientUrl(), nil)
+	_ws, _, err := websocket.DefaultDialer.DialContext(ctx, g.getWebSocketClientUrl(), nil)
+	ws := sockets.NewFastHttpSocket(_ws)
 	ctx.ws = ws
 	if err != nil {
 		return err

@@ -10,6 +10,7 @@ type SocketID string
 type Socket interface {
 	Close() error
 	WriteJSON(message any) error
+	ReadJSON(a any) error
 }
 
 type socketImpl struct {
@@ -25,4 +26,8 @@ func (s *socketImpl) WriteJSON(message any) error {
 	s.mx.Lock()
 	defer s.mx.Unlock()
 	return s.ws.WriteJSON(message)
+}
+
+func (s *socketImpl) ReadJSON(a any) error {
+	return s.ws.ReadJSON(a)
 }
