@@ -24,29 +24,25 @@ usage() {
 # RUN
 run_grabber() {
   # $4 is used only for testing. It is '--debugMode', if $4 is present.
-  if eval "$(dirname "$0")/grabber . --peerName=\"$2\" --signalingUrl=\"$3\" $4"; then
-    echo "${GRE}SUCCESS:${NC} grabber is run."
-    exit 0;
-  else
-    echo "${RED}Failed to run grabber.${NC}"
-    exit 1;
-  fi
+  eval "$(dirname "$0")/grabber . --peerName=\"$2\" --signalingUrl=\"$3\" $4 &"
+  echo -e "${GRE}SUCCESS:${NC} grabber is run."
+  exit 0;
 }
 
 # STOP
 stop_grabber() {
   if eval "pkill grabber"; then
-    echo "${GRE}Grabber was stopped.${NC}"
+    echo -e "${GRE}Grabber was stopped.${NC}"
     exit 0;
   else
-    echo "${RED}Failed to kill grabber.${NC}"
+    echo -e "${RED}Failed to kill grabber.${NC}"
     exit 1;
   fi
 }
 
 # Check number of arguments
 if [ "$#" -ne 1 ] && [ "$#" -ne 3 ]; then
-  echo "${RED}ERROR:${NC} Incorrect number of arguments."
+  echo -e "${RED}ERROR:${NC} Incorrect number of arguments."
   usage;
   exit 1;
 fi
@@ -56,7 +52,7 @@ if [ "$#" = 1 ]; then
   if [ "$1" = "stop" ]; then
     stop_grabber;
   else
-    echo "${RED}ERROR:${NC} Incorrect action '$1'."
+    echo -e "${RED}ERROR:${NC} Incorrect action '$1'."
     usage;
     exit 1;
   fi
@@ -70,7 +66,7 @@ if [ "$#" = 3 ]; then
     run_grabber "$1" "$2" "$3" "--debugMode";
     exit 1;
   else
-    echo "${RED}ERROR:${NC} Incorrect action '$1'."
+    echo -e "${RED}ERROR:${NC} Incorrect action '$1'."
     exit 1;
   fi
 fi
