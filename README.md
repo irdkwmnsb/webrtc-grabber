@@ -12,15 +12,13 @@ The main use case is streaming live screen video from contestants' screens on
     - [Configuration](#grabber-config)
     - [Build sources](#grabber-build)
     - [Run](#grabber-run)
-        - [Docker](#grabber-docker)
-        - [Executable (Windows, Linux, MacOS)](#grabber-exec)
 3. [Signaling](#Signaling)
     - [Configuration](#signaling-config)
     - [Build sources](#signaling-build)
     - [Run](#signaling-run)
-        - [Docker](#signaling-docker)
-        - [Executable (Windows, Linux, MacOS)](#signaling-exec)
 4. [TURN](#TURN)
+    - [Build sources](#turn-build)
+    - [Run](#turn-run)
 5. [FAQ](#FAQ)
 6. [License](#License)
 
@@ -37,11 +35,6 @@ electron applications that we use as a reference point in this project.
 
 WebRTC works by connecting each peer with each other to achieve peer to
 peer communication.
-In our example, peer A would be the team computer, and peer B would be our
-computer for live-streaming (since it’s the one that’s actually showing the
-feed).
-
-<img src="img/webrtc-example.png">
 
 In the environment of an ICPC competition, it’s hard to allow communication
 between a computer inside the “blue” network and “red” network. WebRTC
@@ -61,9 +54,12 @@ connect peers from the “blue” network with computers from the “red” netw
 
 The solution consisted of 3 main parts:
 
-- **Grabber**
-- **Signaling**
-- **TURN**
+- **Grabber** - standalone application for background capturing and sharing 
+  screen and webcam.
+- **Signaling** - webserver to exchange connection data between the grabber 
+  and players, capture video in browser and maintain a list of active grabbers.
+- **TURN** - server for forwarding video packages between grabber and 
+  players when they separated using NAT.
 
 ## Grabber
 ---
@@ -106,7 +102,7 @@ Clone the repository and run the following commands from the project root:
 #### Windows
 
 ```powershell
-% grabber_build_win64.bat
+$ grabber_build_win64.bat
 ```
 
 #### Linux & MacOS
@@ -123,38 +119,23 @@ where
 ### Run <a name="grabber-run"></a>
 
 On the contestants' PC you need to extract files from the
-`webrtc_grabber_grabber_<os>_<arch>.zip` archive, which you can find
-on
+`webrtc_grabber_grabber_<platform>_<arch>.zip` archive, which you can find on
 the [Release page](https://github.com/irdkwmnsb/webrtc-grabber/releases/latest).
 
-After that, you can run the grabber using docker or executable:
+After that, you can run the grabber using executable:
 
-#### Docker <a name="grabber-docker"></a>
+#### Windows
 
-Run the following commands from the project root:
-
-TODO: Edit commands.
-
-```shell
-$ docker build -t grabber .
-$ docker run -d -p 3000:3000 --name grabber grabber
-```
-
-#### Executable <a name="grabber-exec"></a>
-
-##### Windows
-
-- Launch in background (
-  see [`runner.bat`](packages/grabber/scripts/runner.bat)):
+- Launch in background (see
+  [`runner.bat`](packages/grabber/scripts/runner.bat)):
   ```
-  % ~dp0grabber.exe . --peerName={number of computer} --signalingUrl="
-  {signalling url}"
+  $ ~dp0grabber.exe . --peerName={number of computer} --signalingUrl="{signalling url}"
   ```
 
 - For testing use the
   script [`tester.bat`](packages/grabber/scripts/tester.bat):
   ```
-  % ~dp0grabber.exe . --debugMode --peerName={number of computer} 
+  $ ~dp0grabber.exe . --debugMode --peerName={number of computer} 
   --signalingUrl="{signalling url}"
   ```
 
@@ -162,7 +143,7 @@ $ docker run -d -p 3000:3000 --name grabber grabber
   the [`stopper.bat`](packages/grabber/scripts/stopper.bat)
   script.
 
-##### Linux
+#### Linux
 
 Use [`grabber-linux.sh`](packages/grabber/scripts/grabber-linux.sh) script:
 
@@ -181,7 +162,7 @@ Use [`grabber-linux.sh`](packages/grabber/scripts/grabber-linux.sh) script:
   $ bash grabber-linux.sh stop {computer number} {signalling url}
   ```
 
-##### MacOS
+#### MacOS
 
 The same as for Linux, but name of the script is
 [`grabber-darwin.sh`](packages/grabber/scripts/grabber-darwin.sh).
@@ -255,13 +236,23 @@ $ go build
 
 ### Run <a name="signaling-run"></a>
 
-#### Docker <a name="signaling-docker"></a>
+Extract files from the
+`webrtc_grabber_signaling_<platform>_<arch>.zip` archive, which you can find on
+the [Release page](https://github.com/irdkwmnsb/webrtc-grabber/releases/latest).
 
-TODO
+After that, you can run the signaling using scripts:
 
-#### Executable <a name="signaling-exec"></a>
+#### Windows
 
-TODO
+```powershell
+$ signaling.cmd
+```
+
+#### Linux & MacOS
+
+```shell
+$ sh signaling.sh
+```
 
 ## TURN
 ---
@@ -270,6 +261,38 @@ Turn server is used to transmit video/audio data across different networks.
 We use an open source implementation of turn
 called [coturn](https://github.com/coturn/coturn) inside docker with
 host network type.
+
+### Build sources <a name="turn-build"></a>
+
+Clone the repository and run the following commands from the
+`packages/go-turn`:
+
+```shell
+$ go mod tidy
+$ go build
+```
+
+### Run <a name="turn-run"></a>
+
+Extract files from the
+`webrtc_grabber_turn_<platform>_<arch>.zip` archive, which you can find on
+the [Release page](https://github.com/irdkwmnsb/webrtc-grabber/releases/latest).
+
+After that, you can run the signaling using scripts:
+
+#### Windows
+
+```powershell
+$ turn.cmd
+```
+
+#### Linux & MacOS
+
+```shell
+$ sh turn.sh
+```
+
+
 
 ## FAQ
 ---
