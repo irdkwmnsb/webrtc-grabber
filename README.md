@@ -274,7 +274,104 @@ host network type.
 ## FAQ
 ---
 
-TODO
+**General**
+
+> **Q:** Is it true that VLC is no longer needed on the participants' computers?
+> <br>
+> **A:** **Yes**.
+
+> **Q:** Is it true that when `webrtc-grabber` starts, it starts uploading the
+> image to the network without any additional requests?
+> <br>
+> **A:** **No**. It starts pinging the server with an interval of 3
+> seconds (can be configured in
+> signaling [`config.json`](packages/relay/conf/config.json),
+> `grabberPingInterval` parameter) and gives the stream only if it receives a
+> request.
+
+> **Q:** Is it true that during the update it will be necessary to
+> completely re-upload `grabber` executable (~100MB)?
+> <br>
+> **A:** **Yes**.
+
+> **Q:** How to test the performance of `webrtc-grabber` without access to
+> the Internet, on Ubuntu, Windows?
+> <br>
+> **A:** It is necessary to raise the signaling. This is
+> a [Go server](https://github.com/irdkwmnsb/webrtc-grabber/tree/main/packages/relay/signaling).
+> See instructions above: [How to run signaling](#signaling-run).
+> If the computers on the local network have direct access to each other 
+> (without intermediate **NAT**), then the turn server is not needed.
+
+> **Q:** How to check if the signaling is up and running?
+> <br>
+> **A:** If you run signaling, you will be able to see the interface 
+> on `localhost:8000`.
+
+**Connections and TURN-relay**
+
+> **Q:** How many (TCP/UDP) ports do you really need? Does their number 
+> depend on the number of streams and how?
+> <br>
+> **A:** We need to clarify how many ports are needed. The number of ports 
+> depends on the number of simultaneous connections.
+
+> **Q:** Is it true that clients only differ in `peerName` in `config.json`, 
+> and technically they all use the same port in `signalingUrl`?
+> <br>
+> **A:** **Yes**. All grabbers use the same `signalingUrl` port. In fact, the 
+> unique identifier of the grabber is the id of the socket with it. 
+> `peerName` is an acquisition above it, that is, the relationship between 
+> `peerId` and `peerName` occurs after the connection.
+
+> **Q:** What width of the channel is needed to the client?
+> <br>
+> **A:** It is claimed that one connection needs 2-3 Mbps.
+
+> **Q:** What delays are acceptable for normal operation \[1-100-10000ms\]?
+> <br>
+> **A:** Use SRTP connection for video, `http/websocket` connection for 
+> signaling. Accordingly, packet loss is allowed at all levels. The way 
+> this state (disconnected) is determined is implementation dependent. 
+> 
+> _Examples include:_ Losing the network interface for the connection in use; 
+> Repeatedly failing to receive a response to STUN requests. 
+> The question of the reliability of the connection is more relevant - what 
+> preconditions are needed for it. And this question is perfectly answered 
+> by the ability to call in Telegram / VK / Google meet from the subway. The 
+> connection will try to recover under the same conditions until we break 
+> it by force.
+
+> **Q:** Have you tested compatibility with OpenVPN?
+> <br>
+> **A:** We tried streaming over VPN, it worked.
+
+> **Q:** Is it true that the Turn-relay should be at the edge of the network
+> of participants, and the signaling server is in Live?
+> <br>
+> **A:** There should be access to the turn from the members network, and 
+> from the live network. Probably, turn may not necessarily be on the 
+> border, it is enough to proxy the necessary ports to the network of participants.
+
+> **Q:** How many, what (TCP/UDP) and in what direction (from or to the 
+> participants) ports do we need and is it true that in this case we can do 
+> without installing Turn-relay?
+> <br>
+> **A:** You can do without a turn-relay if the computers of the 
+> participants and the live are on the same network. Apparently, this will 
+> not work for us, because the networks are different, and proxying will 
+> not save. webrtc uses arbitrary udp port.
+> 
+> If we use Turn-relay, we need access from the network of participants to 
+> TCP port 3000 (signaling), port 3478 (TCP and UDP) and a certain range of 
+> UDP ports (As experiments have shown, one active connection consumes 2 
+> ports. Probably, 200 ports will be enough with more The numbers can be 
+> anything, for example 40000-40199).
+
+> **Q:** Which Turn-relay can be used under Windows (highly desirable 
+> without Cygwin)?
+> <br>
+> **A:** You can use our Turn-relay. See [Turn](#TURN).
 
 ## License
 ---
