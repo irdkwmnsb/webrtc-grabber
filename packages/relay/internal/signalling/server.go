@@ -29,6 +29,7 @@ type ServerConfig struct {
 	Participants         []string                 `json:"participants"`
 	PeerConnectionConfig api.PeerConnectionConfig `json:"peerConnectionConfig"`
 	GrabberPingInterval  int                      `json:"grabberPingInterval"`
+	ServerPort           int                      `json:"serverPort"`
 }
 
 func NewServer(config ServerConfig, app *fiber.App) *Server {
@@ -338,5 +339,8 @@ func LoadServerConfig() (config ServerConfig, err error) {
 	}
 	defer func() { _ = configFile.Close() }()
 	err = json.NewDecoder(bufio.NewReader(configFile)).Decode(&config)
+	if config.ServerPort == 0 {
+		config.ServerPort = 8000
+	}
 	return
 }

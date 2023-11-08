@@ -4,6 +4,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/signalling"
 	"log"
+	"strconv"
 )
 
 func main() {
@@ -20,5 +21,5 @@ func main() {
 	app.Static("/player", "./asset/player.html")
 	app.Static("/capture", "./asset/capture.html")
 
-	log.Fatal(app.Listen(":8000"))
+	log.Fatal(app.Listen(":" + strconv.Itoa(config.ServerPort)))
 }

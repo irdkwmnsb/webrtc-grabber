@@ -5,12 +5,13 @@
   "peerConnectionConfig": {
     "iceServers": [
       {
-        "urls": "turn:193.233.204.163:3478",
+        "urls": "turn:54.37.132.38:3478",
         "username": "admin",
         "credential": "credential"
       }
     ]
   },
   "grabberPingInterval": 3000,
-  "adminCredential": "live"
+  "adminCredential": "live",
+  "serverPort": 13478
 }
