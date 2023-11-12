@@ -326,9 +326,9 @@ $ sh turn.sh
 > If the computers on the local network have direct access to each other 
 > (without intermediate **NAT**), then the turn server is not needed.
 
-> **Q:** How to check if the signaling is up and running?
+> **Q:** How to check if the signaling service is up and running?
 > <br>
-> **A:** If you run signaling, you will be able to see the interface 
+> **A:** If you run signaling service, you will be able to see the interface 
 > on `localhost:8000`.
 
 **Connections and TURN-relay**
@@ -336,8 +336,7 @@ $ sh turn.sh
 > **Q:** How many (TCP/UDP) ports do you really need? Does their number 
 > depend on the number of streams and how?
 > <br>
-> **A:** We need to clarify how many ports are needed. The number of ports 
-> depends on the number of simultaneous connections.
+> **A:** The number of ports depends on the number of simultaneous connections.
 
 > **Q:** Is it true that clients only differ in `peerName` in `config.json`, 
 > and technically they all use the same port in `signalingUrl`?
@@ -353,15 +352,20 @@ $ sh turn.sh
 
 > **Q:** What delays are acceptable for normal operation \[1-100-10000ms\]?
 > <br>
-> **A:** Use SRTP connection for video, `http/websocket` connection for 
-> signaling. Accordingly, packet loss is allowed at all levels. The way 
-> this state (disconnected) is determined is implementation dependent. 
+> **A:** We use SRTP connection for video, `http/websocket` connection for 
+> signaling. So packet loss is allowed at all levels. The way 
+> the peers can tell if they are connected or not depending on the latency
+> is controlled by the underlying WebRTC implementation of Chromium and
+> the browser on the viewer side.
+>
+> We didn't do any testing with adding latency to the connection, but we know
+> that grabber successfully connects and shows a reliable stream over the internet
+> using wifi.
+> That proves that it can be used in local networks even over wifi.
 > 
-> _Examples include:_ Losing the network interface for the connection in use; 
-> Repeatedly failing to receive a response to STUN requests. 
-> The question of the reliability of the connection is more relevant - what 
-> preconditions are needed for it. And this question is perfectly answered 
-> by the ability to call in Telegram / VK / Google meet from the subway. The 
+> Another relevant question to ask is how *reliable* the connection must be.
+> And this question is perfectly answered by the ability to have video calls
+> in Telegram / VK / Discord / Google meet from the subway. The 
 > connection will try to recover under the same conditions until we break 
 > it by force.
 
@@ -372,20 +376,23 @@ $ sh turn.sh
 > **Q:** Is it true that the Turn-relay should be at the edge of the network
 > of participants, and the signaling server is in Live?
 > <br>
-> **A:** There should be access to the turn from the members network, and 
-> from the live network. Probably, turn may not necessarily be on the 
-> border, it is enough to proxy the necessary ports to the network of participants.
+> **A:** There should be access to the turn service from the contestants network, and 
+> from the live network. Theoretically, turn may not necessarily be on the 
+> border if all the required packets of the WebRTC protocol are properly proxied/redirected.
 
 > **Q:** How many, what (TCP/UDP) and in what direction (from or to the 
-> participants) ports do we need and is it true that in this case we can do 
+> contestants) packets with which ports do we need to allow through the firewall and is it true that in this case we can do 
 > without installing Turn-relay?
+> Or in other words: how to make it work without the turn service and what
+> changes must be made to the firewall for that to happen?
 > <br>
-> **A:** You can do without a turn-relay if the computers of the 
-> participants and the live are on the same network. Apparently, this will 
-> not work for us, because the networks are different, and proxying will 
-> not save. webrtc uses arbitrary udp port.
+> **A:** You can see the screens without a turn-relay if the computers of the 
+> contestants, the signaling server and the viewer computer are reachable from
+> the same network. It's easy to see that this doesn't fit the conditions of
+> the competition, because of the way the network is usually set up.
+> It's easier to assume that WebRTC uses an arbitrary UDP port when the two peers connect.
 > 
-> If we use Turn-relay, we need access from the network of participants to 
+> If we use Turn-relay, we need to allow traffic from the participants network to 
 > TCP port 3000 (signaling), port 3478 (TCP and UDP) and a certain range of 
 > UDP ports (As experiments have shown, one active connection consumes 2 
 > ports. Probably, 200 ports will be enough with more The numbers can be 
