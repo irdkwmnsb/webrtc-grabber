@@ -7,7 +7,7 @@
 %define video_group video
 
 Name:           webrtc-grabber
-Version:        0.1.0_beta_10_g98eb6f4
+Version:        0.1.0_beta_13_gb0a75ac
 Release:        1%{?dist}
 Summary:        Grabber application for stealthily peeking at other computer's screens
 Group:          ContestTools
@@ -16,7 +16,7 @@ License:        MIT
 URL:            https://github.com/irdkwmnsb/webrtc-grabber
 
 # Make archive with:
-# git archive --prefix  webrtc-grabber-0.1.0_beta_10_g98eb6f4/ --output  webrtc-grabber-0.1.0_beta_10_g98eb6f4.tar 98eb6f468462f9fe5f1a7e3c90e724309fc30cea
+# git archive --prefix  webrtc-grabber-0.1.0_beta_13_gb0a75ac/ --output  webrtc-grabber-0.1.0_beta_13_gb0a75ac.tar b0a75ac
 Source0:        %{name}-%{version}.tar
 
 %description
@@ -86,6 +86,8 @@ cp -a webrtc-grabber-agent-dbus-policy.conf $RPM_BUILD_ROOT/etc/dbus-1/session.d
 # Install agent example env-configuration
 mkdir -p $RPM_BUILD_ROOT/etc/default
 cp -a webrtc-grabber-agent.env $RPM_BUILD_ROOT/etc/default/webrtc-grabber-agent
+# FIXME: disable audio until it doesn't block webcam access
+cp -a config.json $RPM_BUILD_ROOT%{prefix_agent}/resources/app/config.json
 
 ##
 ## Relay
