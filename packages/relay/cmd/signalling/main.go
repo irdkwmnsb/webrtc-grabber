@@ -21,5 +21,10 @@ func main() {
 	app.Static("/player", "./asset/player.html")
 	app.Static("/capture", "./asset/capture.html")
 
-	log.Fatal(app.Listen(":" + strconv.Itoa(config.ServerPort)))
+	if config.ServerTLSCrtFile != nil && config.ServerTLSKeyFile != nil {
+		log.Printf("Running TLS http server...")
+		log.Fatal(app.ListenTLS(":"+strconv.Itoa(config.ServerPort), *config.ServerTLSCrtFile, *config.ServerTLSKeyFile))
+	} else {
+		log.Fatal(app.Listen(":" + strconv.Itoa(config.ServerPort)))
+	}
 }

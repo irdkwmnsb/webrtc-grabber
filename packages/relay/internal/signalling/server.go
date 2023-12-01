@@ -30,6 +30,8 @@ type ServerConfig struct {
 	PeerConnectionConfig api.PeerConnectionConfig `json:"peerConnectionConfig"`
 	GrabberPingInterval  int                      `json:"grabberPingInterval"`
 	ServerPort           int                      `json:"serverPort"`
+	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile"`
+	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
 }
 
 func NewServer(config ServerConfig, app *fiber.App) *Server {
