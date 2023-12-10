@@ -18,27 +18,27 @@ import (
 const PlayerSendPeerStatusInterval = time.Second * 5
 
 type Server struct {
-	app                  *fiber.App
-	config               ServerConfig
-	storage              *Storage
-	participantsNetworks []netip.Prefix
-	oldPeersCleaner      utils.IntervalTimer
-	playersSockets       *sockets.SocketPool
-	grabberSockets       *sockets.SocketPool
+	app             *fiber.App
+	config          ServerConfig
+	storage         *Storage
+	adminsNetworks  []netip.Prefix
+	oldPeersCleaner utils.IntervalTimer
+	playersSockets  *sockets.SocketPool
+	grabberSockets  *sockets.SocketPool
 }
 
 type ServerConfig struct {
-	PlayerCredential        *string                  `json:"adminCredential"`
-	Participants            []string                 `json:"participants"`
-	ParticipantsRawNetworks []string                 `json:"participantsNetworks"`
-	PeerConnectionConfig    api.PeerConnectionConfig `json:"peerConnectionConfig"`
-	GrabberPingInterval     int                      `json:"grabberPingInterval"`
-	ServerPort              int                      `json:"serverPort"`
-	ServerTLSCrtFile        *string                  `json:"serverTLSCrtFile"`
-	ServerTLSKeyFile        *string                  `json:"serverTLSKeyFile"`
+	PlayerCredential     *string                  `json:"adminCredential"`
+	Participants         []string                 `json:"participants"`
+	AdminsRawNetworks    []string                 `json:"adminsNetworks"`
+	PeerConnectionConfig api.PeerConnectionConfig `json:"peerConnectionConfig"`
+	GrabberPingInterval  int                      `json:"grabberPingInterval"`
+	ServerPort           int                      `json:"serverPort"`
+	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile"`
+	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
 }
 
-func NewServer(config ServerConfig, app *fiber.App) *Server {
+func NewServer(config ServerConfig, app *fiber.App) (*Server, error) {
 	server := Server{
 		config:         config,
 		app:            app,
@@ -49,16 +49,15 @@ func NewServer(config ServerConfig, app *fiber.App) *Server {
 	server.storage.setParticipants(config.Participants)
 	server.oldPeersCleaner = utils.SetIntervalTimer(time.Minute, server.storage.deleteOldPeers)
 
-	participantsNetworks, err := parseParticipantsNetworks(server.config.ParticipantsRawNetworks)
+	adminsNetworks, err := parseAdminsNetworks(server.config.AdminsRawNetworks)
 
 	if err != nil {
-		// not critical stage
-		log.Printf("can not parse participants networks, error - %v", err)
+		return nil, fmt.Errorf("can not parse admins networks, error - %v", err)
 	}
 
-	server.participantsNetworks = participantsNetworks
+	server.adminsNetworks = adminsNetworks
 
-	return &server
+	return &server, nil
 }
 
 func (s *Server) Close() {
@@ -84,14 +83,14 @@ func (s *Server) SetupWebSockets() {
 	s.setupGrabberSockets()
 }
 
-func (s *Server) isParticipantIpAddr(addrPort string) (bool, error) {
+func (s *Server) isAdminIpAddr(addrPort string) (bool, error) {
 	ip, err := netip.ParseAddrPort(addrPort)
 
 	if err != nil {
-		return false, fmt.Errorf("can not parse participant ipaddr, error - %v", err)
+		return false, fmt.Errorf("can not parse admin ipaddr, error - %v", err)
 	}
 
-	for _, n := range s.participantsNetworks {
+	for _, n := range s.adminsNetworks {
 		if n.Contains(ip.Addr()) {
 			return true, nil
 		}
@@ -112,17 +111,16 @@ func (s *Server) setupPlayerSockets() {
 
 		var message api.PlayerMessage
 
-		ipaddr := c.NetConn().RemoteAddr().String()
-		isParticipant, err := s.isParticipantIpAddr(ipaddr)
+		ipAddr := c.NetConn().RemoteAddr().String()
+		isAdminIpAddr, err := s.isAdminIpAddr(ipAddr)
 
 		if err != nil {
-			log.Printf("can not parse participant ipaddr %s, error - %v", ipaddr, err)
-			// not critical stage
-			isParticipant = false
+			log.Printf("can not parse ipaddr %s, error - %v", ipAddr, err)
+			return
 		}
 
-		if isParticipant {
-			log.Printf("blocking access to the admin panel for a participant %s", ipaddr)
+		if !isAdminIpAddr {
+			log.Printf("blocking access to the admin panel for %s", ipAddr)
 
 			message.Event = api.PlayerMessageEventBlackListed
 
@@ -133,7 +131,7 @@ func (s *Server) setupPlayerSockets() {
 			return
 		}
 
-		socketID := sockets.SocketID(ipaddr)
+		socketID := sockets.SocketID(ipAddr)
 		log.Printf("trying to connect %s", socketID)
 
 		message.Event = api.PlayerMessageEventAuthRequest
@@ -415,7 +413,7 @@ func LoadServerConfig() (config ServerConfig, err error) {
 	return
 }
 
-func parseParticipantsNetworks(rawNetworks []string) ([]netip.Prefix, error) {
+func parseAdminsNetworks(rawNetworks []string) ([]netip.Prefix, error) {
 	result := make([]netip.Prefix, 0, len(rawNetworks))
 
 	for _, r := range rawNetworks {
