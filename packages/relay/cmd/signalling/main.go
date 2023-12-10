@@ -13,7 +13,12 @@ func main() {
 		log.Fatal(err)
 	}
 	app := fiber.New()
-	server := signalling.NewServer(config, app)
+	server, err := signalling.NewServer(config, app)
+
+	if err != nil {
+		log.Fatalf("can not start signalling server, error - %v", err)
+	}
+
 	defer server.Close()
 
 	server.SetupWebSockets()
