@@ -21,6 +21,11 @@ class GrabberPlayerClient {
             _client.target.dispatchEvent(new CustomEvent("auth:failed", {}));
         });
 
+        _client.ws.on("auth:black_listed", () => {
+            _client.ws.close()
+            _client.target.dispatchEvent(new CustomEvent("auth:failed", {}));
+        });
+
         _client.ws.on("init_peer", ({ initPeer: { pcConfig } }) => {
             _client.peerConnectionConfig = pcConfig;
             console.debug("WebRTCGrabber: connection initialized");

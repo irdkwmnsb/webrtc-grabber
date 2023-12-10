@@ -3,3 +3,4 @@
 **/*.iml
 packages/signaling/config.json
 packages/grabber/build
+packages/relay/go.sum
