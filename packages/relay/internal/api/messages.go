@@ -15,6 +15,7 @@ const (
 	PlayerMessageEventOfferAnswer = PlayerMessageEvent("offer_answer")
 	PlayerMessageEventGrabberIce  = PlayerMessageEvent("grabber_ice")
 	PlayerMessageEventPlayerIce   = PlayerMessageEvent("player_ice")
+	PlayerMessageEventBlackListed = PlayerMessageEvent("auth:black_listed")
 )
 
 const (

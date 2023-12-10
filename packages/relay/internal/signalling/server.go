@@ -3,12 +3,14 @@ package signalling
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/utils"
 	"log"
+	"net/netip"
 	"os"
 	"time"
 )
@@ -16,22 +18,24 @@ import (
 const PlayerSendPeerStatusInterval = time.Second * 5
 
 type Server struct {
-	app             *fiber.App
-	config          ServerConfig
-	storage         *Storage
-	oldPeersCleaner utils.IntervalTimer
-	playersSockets  *sockets.SocketPool
-	grabberSockets  *sockets.SocketPool
+	app                  *fiber.App
+	config               ServerConfig
+	storage              *Storage
+	participantsNetworks []netip.Prefix
+	oldPeersCleaner      utils.IntervalTimer
+	playersSockets       *sockets.SocketPool
+	grabberSockets       *sockets.SocketPool
 }
 
 type ServerConfig struct {
-	PlayerCredential     *string                  `json:"adminCredential"`
-	Participants         []string                 `json:"participants"`
-	PeerConnectionConfig api.PeerConnectionConfig `json:"peerConnectionConfig"`
-	GrabberPingInterval  int                      `json:"grabberPingInterval"`
-	ServerPort           int                      `json:"serverPort"`
-	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile"`
-	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
+	PlayerCredential        *string                  `json:"adminCredential"`
+	Participants            []string                 `json:"participants"`
+	ParticipantsRawNetworks []string                 `json:"participantsNetworks"`
+	PeerConnectionConfig    api.PeerConnectionConfig `json:"peerConnectionConfig"`
+	GrabberPingInterval     int                      `json:"grabberPingInterval"`
+	ServerPort              int                      `json:"serverPort"`
+	ServerTLSCrtFile        *string                  `json:"serverTLSCrtFile"`
+	ServerTLSKeyFile        *string                  `json:"serverTLSKeyFile"`
 }
 
 func NewServer(config ServerConfig, app *fiber.App) *Server {
@@ -44,6 +48,16 @@ func NewServer(config ServerConfig, app *fiber.App) *Server {
 	}
 	server.storage.setParticipants(config.Participants)
 	server.oldPeersCleaner = utils.SetIntervalTimer(time.Minute, server.storage.deleteOldPeers)
+
+	participantsNetworks, err := parseParticipantsNetworks(server.config.ParticipantsRawNetworks)
+
+	if err != nil {
+		// not critical stage
+		log.Printf("can not parse participants networks, error - %v", err)
+	}
+
+	server.participantsNetworks = participantsNetworks
+
 	return &server
 }
 
@@ -70,9 +84,47 @@ func (s *Server) SetupWebSockets() {
 	s.setupGrabberSockets()
 }
 
+func (s *Server) isParticipantIpAddr(addrPort string) (bool, error) {
+	ip, err := netip.ParseAddrPort(addrPort)
+
+	if err != nil {
+		return false, fmt.Errorf("can not parse participant ipaddr, error - %v", err)
+	}
+
+	for _, n := range s.participantsNetworks {
+		if n.Contains(ip.Addr()) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 func (s *Server) setupPlayerSockets() {
 	s.app.Get("/ws/player/admin", websocket.New(func(c *websocket.Conn) {
 		var message api.PlayerMessage
+
+		ipaddr := c.NetConn().RemoteAddr().String()
+		isParticipant, err := s.isParticipantIpAddr(ipaddr)
+
+		if err != nil {
+			log.Printf("can not parse participant ipaddr %s, error - %v", ipaddr, err)
+			// not critical stage
+			isParticipant = false
+		}
+
+		if isParticipant {
+			log.Printf("blocking access to the admin panel for a participant %s", ipaddr)
+
+			message.Event = api.PlayerMessageEventBlackListed
+
+			if err = c.WriteJSON(&message); err != nil {
+				return
+			}
+
+			return
+		}
+
 		socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 		log.Printf("trying to connect %s", socketID)
 
@@ -345,4 +397,20 @@ func LoadServerConfig() (config ServerConfig, err error) {
 		config.ServerPort = 8000
 	}
 	return
+}
+
+func parseParticipantsNetworks(rawNetworks []string) ([]netip.Prefix, error) {
+	result := make([]netip.Prefix, 0, len(rawNetworks))
+
+	for _, r := range rawNetworks {
+		network, err := netip.ParsePrefix(r)
+
+		if err != nil {
+			return nil, err
+		}
+
+		result = append(result, network)
+	}
+
+	return result, nil
 }
