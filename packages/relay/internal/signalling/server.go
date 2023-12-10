@@ -125,7 +125,7 @@ func (s *Server) setupPlayerSockets() {
 			return
 		}
 
-		socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
+		socketID := sockets.SocketID(ipaddr)
 		log.Printf("trying to connect %s", socketID)
 
 		message.Event = api.PlayerMessageEventAuthRequest
