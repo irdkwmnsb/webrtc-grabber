@@ -102,6 +102,14 @@ func (s *Server) isParticipantIpAddr(addrPort string) (bool, error) {
 
 func (s *Server) setupPlayerSockets() {
 	s.app.Get("/ws/player/admin", websocket.New(func(c *websocket.Conn) {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Printf("panic in /ws/player/admin: %v", err)
+
+				return
+			}
+		}()
+
 		var message api.PlayerMessage
 
 		ipaddr := c.NetConn().RemoteAddr().String()
@@ -150,6 +158,14 @@ func (s *Server) setupPlayerSockets() {
 		s.listenPlayerAdminSocket(c)
 	}))
 	s.app.Get("/ws/player/play", websocket.New(func(c *websocket.Conn) {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Printf("panic in /ws/player/play: %v", err)
+
+				return
+			}
+		}()
+
 		var message api.PlayerMessage
 		socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 		log.Printf("trying to connect %s", socketID)
