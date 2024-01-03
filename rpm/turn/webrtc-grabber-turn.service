@@ -1,0 +1,12 @@
+[Unit]
+Description = TURN part of webrtc-grabber
+
+[Service]
+User = webrtc-grabber-turn
+EnvironmentFile = /etc/default/webrtc-grabber-turn
+Restart = on-failure
+WorkingDirectory = /opt/webrtc-grabber-turn
+ExecStart = /bin/sh -ec "/opt/webrtc-grabber-turn/go-turn -public-ip=$PUBLIC_IP -users=$USERS -realm=$REALM -port=$PORT -udp-port-from=$UDP_PORT_FROM -udp-port-to=$UDP_PORT_TO"
+
+[Install]
+WantedBy = multi-user.target

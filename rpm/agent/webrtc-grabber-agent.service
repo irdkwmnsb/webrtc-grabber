@@ -1,0 +1,31 @@
+[Unit]
+Description = Agent part of webrtc-grabber
+After = display-manager.service
+After = network-online.target
+Requires = display-manager.service
+Requires = network-online.target
+# If start fails 10 times in 10 sec, despair and give up
+StartLimitIntervalSec = 10
+StartLimitBurst = 10
+
+[Service]
+User = webrtc-grabber-agent
+EnvironmentFile = /etc/default/webrtc-grabber-agent
+Restart = on-failure
+# Retry start after 5 sec
+RestartSec = 5
+# Kill after 10 sec
+TimeoutStopSec = 10
+
+# Run ExecStartPre as root, then drop privilege before ExecStart
+PermissionsStartOnly = true
+ExecStartPre = /bin/sh -ec "/usr/bin/setfacl -m u:webrtc-grabber-agent:r $XAUTHORITY"
+ExecStartPre = /bin/sh -ec "/usr/bin/setfacl -m u:webrtc-grabber-agent:x $(dirname $XAUTHORITY)"
+ExecStartPre = /bin/sh -ec "/usr/bin/setfacl -m u:webrtc-grabber-agent:rw $DBUS_SESSION_BUS_SOCKET_PATH__"
+ExecStartPre = /bin/sh -ec "/usr/bin/setfacl -m u:webrtc-grabber-agent:x $(dirname $DBUS_SESSION_BUS_SOCKET_PATH__)"
+
+ExecStart = /opt/webrtc-grabber-agent/grabber . -n $PEER_NAME -s $SIGNALING_URL
+
+[Install]
+Alias = webrtc-grabber.service
+WantedBy = multi-user.target

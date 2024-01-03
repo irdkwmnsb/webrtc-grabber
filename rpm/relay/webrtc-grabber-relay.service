@@ -1,0 +1,12 @@
+[Unit]
+Description = Signalling part of webrtc-grabber
+
+[Service]
+User = webrtc-grabber-relay
+Restart = on-failure
+WorkingDirectory = /opt/webrtc-grabber-relay
+ExecStart = /opt/webrtc-grabber-relay/signalling
+
+[Install]
+Alias = webrtc-grabber-signaling.service
+WantedBy = multi-user.target
