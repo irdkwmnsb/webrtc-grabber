@@ -1,4 +1,4 @@
-import {GrabberPlayerClient} from "../../lib/grabber_player";
+import {GrabberPlayerClient} from "webrtc-grabber-sdk/lib/grabber_player";
 
 const extractPlayerArguments = () => {
     const params = new URLSearchParams(window.location.search);

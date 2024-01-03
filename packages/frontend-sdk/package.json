@@ -1,0 +1,23 @@
+{
+  "name": "webrtc-grabber-sdk",
+  "version": "0.0.1",
+  "description": "SDK for creating and playing streams for webrtc-grabber",
+  "main": "index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/irdkwmnsb/webrtc-grabber.git"
+  },
+  "keywords": [
+    "webrtc",
+    "webrtc-grabber"
+  ],
+  "author": "ICPC Live team",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/irdkwmnsb/webrtc-grabber/issues"
+  },
+  "homepage": "https://github.com/irdkwmnsb/webrtc-grabber#readme"
+}

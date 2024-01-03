@@ -1,4 +1,4 @@
-import { GrabberSocket } from "../../lib/sockets";
+import { GrabberSocket } from "webrtc-grabber-sdk/lib/sockets";
 
 const webcamConstraint = {aspectRatio: 16 / 9};
 const webcamAudioConstraint = true;
