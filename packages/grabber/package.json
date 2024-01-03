@@ -20,6 +20,7 @@
     "command-line-args": "^5.2.1",
     "socket.io-client": "^4.5.2",
     "webrtc": "^1.14.1",
-    "ws": "^8.12.1"
+    "ws": "^8.12.1",
+    "webrtc-grabber-sdk": "^0.0.1"
   }
 }

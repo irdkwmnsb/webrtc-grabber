@@ -1,3 +1,4 @@
 packages:
   - 'packages/frontend'
   - 'packages/frontend-sdk'
+  - 'packages/grabber'

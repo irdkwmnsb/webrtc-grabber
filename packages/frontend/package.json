@@ -3,6 +3,7 @@
   "version": "0.1.0-alpha",
   "type": "module",
   "description": "Common code for playing streams from webrtc grabber",
+  "packageManager": "pnpm@8.14.0",
   "scripts": {
     "build": "vite build",
     "start": "vite",

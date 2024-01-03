@@ -1,6 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-const {GrabberCaptureClient} = require('./capture_client.js');
+const {GrabberCaptureClient} = require('webrtc-grabber-sdk/lib/grabber_capture');
 const {app, BrowserWindow, desktopCapturer, ipcMain} = require('electron')
 const commandLineArgs = require('command-line-args')
 
