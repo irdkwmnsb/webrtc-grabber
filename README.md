@@ -245,13 +245,13 @@ After that, you can run the signaling using scripts:
 #### Windows
 
 ```powershell
-$ signaling.cmd
+$ signalling.cmd
 ```
 
 #### Linux & MacOS
 
 ```shell
-$ sh signaling.sh
+$ sh signalling.sh
 ```
 
 ## TURN
