@@ -1,17 +1,19 @@
-const path = require('path');
-const fs = require('fs');
-const {GrabberCaptureClient} = require('webrtc-grabber-sdk/lib/grabber_capture');
-const {app, BrowserWindow, desktopCapturer, ipcMain} = require('electron')
-const commandLineArgs = require('command-line-args')
+"use strict";
+
+import path from 'path';
+import fs from 'fs/promises';
+import { fileURLToPath } from 'url';
+import {GrabberCaptureClient} from 'webrtc-grabber-sdk';
+import {app, BrowserWindow, desktopCapturer, ipcMain} from 'electron';
+import commandLineArgs from 'command-line-args';
 
 
 app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
 
-const configS = loadConfigS();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const config = parseArguments();
-console.log("loaded config ", config, configS);
-
-let screenSourceId = null;
+console.log(process.versions);
 
 function createWindow() {
     const window = new BrowserWindow({
@@ -30,47 +32,32 @@ function createWindow() {
     return window;
 }
 
-const sendSourceUpdate = (window) => {
-    window.webContents.send('source:update', {
-        screenSourceId: screenSourceId,
-        webcamConstraint: configS.webcamConstraint,
-        webcamAudioConstraint: configS.webcamAudioConstraint,
-        desktopConstraint: configS.desktopConstraint,
-    });
-}
-
-const sendAvailableStreams = (window) => {
-    if (screenSourceId) {
-        sendSourceUpdate(window);
-        return
-    }
-
-    desktopCapturer.getSources({types: ['screen']})
-        .then(async sources => {
-            let id = null;
-            for (const source of sources) {
-                id = source.id ?? id;
-            }
-            screenSourceId = id;
-            sendSourceUpdate(window);
+async function runStreamsCapturing(window) {
+    const sendAvailableStreams = async () => {
+        const sources = await desktopCapturer.getSources({types: ['screen']});
+        const configS = await loadConfigS();
+        console.log("loaded config ", config, configS);
+        window.webContents.send('source:update', {
+            screenSourceId: sources[0]?.id,
+            webcamConstraint: configS.webcamConstraint,
+            webcamAudioConstraint: configS.webcamAudioConstraint,
+            desktopConstraint: configS.desktopConstraint,
         });
+    }
+    setInterval(() => sendAvailableStreams(window), 10000);
+    await sendAvailableStreams(window);
 }
 
-function runStreamsCapturing(window) {
-    setInterval(() => sendAvailableStreams(window), 10000);
-    sendAvailableStreams(window);
+async function runGrabber(window) {
+    let peerConnectionConfig = undefined;
+
+    await runStreamsCapturing(window);
 
     if (config.debug) {
         setTimeout(() => {
             window.webContents.send("source:show_debug");
         }, 3000);
     }
-}
-
-function runGrabbing(window) {
-    let peerConnectionConfig = undefined;
-
-    runStreamsCapturing(window);
 
     let connectionsStatus = {connectionsCount: 0, streamTypes: []};
     ipcMain.handle('status:connections', (_, cs) => {
@@ -110,7 +97,7 @@ function runGrabbing(window) {
     });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
     let window = createWindow();
 
     // app.on('activate', () => {
@@ -119,7 +106,7 @@ app.whenReady().then(() => {
     //     }
     // })
 
-    runGrabbing(window);
+    await runGrabber(window);
 
     app.on('before-quit', () => {
         window.removeAllListeners('close');
@@ -134,9 +121,10 @@ app.on('window-all-closed', () => {
 })
 
 
-function loadConfigS() {
+async function loadConfigS() {
     try {
-        return JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), {encoding: "utf8"}));
+        const rawContent = await fs.readFile(path.join(__dirname, "config.json"), {encoding: "utf8"})
+        return JSON.parse(rawContent);
     } catch (e) {
         console.warn("Failed to load config.json", e)
     }
