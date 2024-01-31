@@ -1,4 +1,4 @@
-import {GrabberCaptureClient} from "webrtc-grabber-sdk/lib/grabber_capture";
+import {GrabberCaptureClient} from "webrtc-grabber-sdk";
 
 const webcamConstraint = {aspectRatio: 16 / 9};
 const webcamAudioConstraint = true;

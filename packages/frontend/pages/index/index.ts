@@ -1,5 +1,5 @@
-import {GrabberPlayerClient} from "webrtc-grabber-sdk/lib/grabber_player";
-import {requireAuth} from "webrtc-grabber-sdk/lib/util";
+import {GrabberPlayerClient} from "webrtc-grabber-sdk";
+import {requireAuth} from "webrtc-grabber-sdk";
 
 let curGrabberId = null;
 let selectedParticipantName: string | null = null;
