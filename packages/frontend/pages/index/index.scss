@@ -1,0 +1,85 @@
+body {
+  margin: 0;
+}
+
+#main {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  padding: 4px 8px;
+}
+
+#participants {
+  margin-bottom: 4px;
+  grid-column-start: 1;
+  grid-column-end: 3;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 5px;
+}
+
+.peerInfo {
+  padding: 2px 8px;
+}
+
+.peerInfo button, .participantStatus button {
+  margin-left: 4px;
+  padding: 2px 8px;
+}
+
+.peerInfo a, .participantStatus a {
+  margin-left: 4px;
+}
+
+.participantStatus {
+  border: black 1px solid;
+}
+
+#participants .participantStatus {
+  text-align: center;
+}
+
+.participantStatus.offline {
+  background: #ff7272;
+}
+
+.participantStatus.disconnected {
+  background: #ffff75;
+}
+
+.participantStatus.active {
+  background: #91ff54;
+}
+
+.participantStatus.viewed {
+  background: #e798ff;
+}
+
+.participantStatus.selected {
+  background: #81b6ff;
+}
+
+#selectedParticipant {
+  margin-bottom: 4px;
+  grid-column-start: 1;
+  grid-column-end: 3;
+}
+
+#video {
+  width: 100%;
+}
+
+#footer {
+  grid-column-start: 1;
+  grid-column-end: 3;
+}
+
+.legend {
+  padding-inline-start: 0;
+  margin-block-start: 0;
+  margin-block-end: 0;
+}
+
+.legend li {
+  list-style: none;
+  margin: 8px 0;
+}

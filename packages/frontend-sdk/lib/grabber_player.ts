@@ -1,10 +1,21 @@
-class GrabberPlayerClient {
-    constructor(mode, url) {
-        this.pc = null;
-        this.peerConnectionConfig = null;
-        this.peersStatus = null;
-        this.participantsStatus = null;
+import {GrabberSocket} from "./sockets";
 
+type PeerInfo = any;
+type GrabberPlayerClientEventTypes = "auth:request" | "auth:failed" | "initialized" | "peers"
+export class GrabberPlayerClient {
+    private ws: GrabberSocket<any>; // FIXME use more strict typing. Declare the protocol in typescript. Later.
+    private pc?: RTCPeerConnection;
+    private peerConnectionConfig?: RTCConfiguration
+    private _peersStatus?: any[]; // Why is this stored in Client?
+    get peersStatus() { // FIXME: remove once proper types are implemented
+        return this._peersStatus
+    }
+    private _participantsStatus?: any[]; // Why is this stored in Client?
+    get participantsStatus() {
+        return this._participantsStatus
+    }
+    private target: EventTarget;
+    constructor(mode: "play" | "admin" = "admin", url?: string) {
         this.target = new EventTarget();
 
         this.ws = new GrabberSocket((url ?? "") + "/ws/player/" + (mode === "play" ? "play" : "admin"));
@@ -28,31 +39,31 @@ class GrabberPlayerClient {
         });
 
         _client.ws.on("peers", ({ peersStatus, participantsStatus }) => {
-            _client.peersStatus = peersStatus ?? [];
-            _client.participantsStatus = participantsStatus ?? [];
+            _client._peersStatus = peersStatus ?? [];
+            _client._participantsStatus = participantsStatus ?? [];
             _client.target.dispatchEvent(new CustomEvent("peers", { detail: [ peersStatus, participantsStatus ] }));
         });
 
         _client.ws.on("offer_answer", async ({ offerAnswer: { peerId, answer } }) => {
             console.debug(`WebRTCGrabber: got offer_answer from ${peerId}`);
-            await _client?.pc.setRemoteDescription(answer);
+            await _client?.pc?.setRemoteDescription(answer);
         });
 
         _client.ws.on("grabber_ice", async ({ ice: { peerId, candidate } }) => {
             console.debug(`WebRTCGrabber: got grabber_ice from ${peerId}`);
-            await _client?.pc.addIceCandidate(candidate);
+            await _client?.pc?.addIceCandidate(candidate);
         });
     }
 
-    formatPeerInfo(peerInfo) {
+    formatPeerInfo(peerInfo: PeerInfo) {
         return peerInfo.peerId ?? (`{${peerInfo.peerName}}`);
     }
 
-    authorize(credential) {
+    authorize(credential: string | null) {
         this.ws.emit("auth", { playerAuth: { credential: credential } });
     }
 
-    connect(peerInfo, streamType, onVideoTrack) {
+    connect(peerInfo: PeerInfo, streamType: any, onVideoTrack: (arg0: MediaStream, arg1: any, arg2: any) => void) {
         const _client = this;
 
         const pc = new RTCPeerConnection(_client.peerConnectionConfig);
@@ -81,17 +92,12 @@ class GrabberPlayerClient {
         });
     }
 
-    on(eventName, callback) {
-        this.target.addEventListener(eventName, e => callback(e.detail));
+    on(eventName: GrabberPlayerClientEventTypes, callback: (arg0: any) => void) {
+        this.target.addEventListener(eventName, ({detail}: any) => callback(detail));
     }
 
     close() {
         this.pc?.close();
-        this.pc = null;
+        this.pc = undefined;
     }
 }
-
-module.exports = {
-    GrabberPlayerClient,
-    GrabberSocket,
-};

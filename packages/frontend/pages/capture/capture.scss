@@ -1,0 +1,50 @@
+button {
+  font-size: 24pt;
+  text-decoration: none;
+  display: inline-block;
+  padding: 10px 30px;
+  margin: 10px 20px;
+  position: relative;
+  overflow: hidden;
+  border: 2px solid #b12a1c;
+  border-radius: 8px;
+  color: #b12a1c;
+  transition: .2s ease-in-out;
+  background: inherit;
+}
+
+button:hover {
+  background: #b12a1c;
+  color: #ffffff;
+}
+
+#captureButton:hover {
+  color: #ffffff !important;
+}
+
+#captureButton.detecting {
+  border-color: #4a82c3;
+  color: #4a82c3;
+}
+
+#captureButton.detecting:hover {
+  background: #4a82c3;
+}
+
+#captureButton.connecting {
+  border-color: #fdba31;
+  color: #fdba31;
+}
+
+#captureButton.connecting:hover {
+  background: #fdba31;
+}
+
+#captureButton.active {
+  border-color: #1eb11c;
+  color: #1eb11c;
+}
+
+#captureButton.active:hover {
+  background: #1eb11c;
+}

@@ -1,5 +1,10 @@
-class GrabberSocket {
-    constructor(url) {
+export class GrabberSocket<T> {
+    private readonly url: string;
+    private target: EventTarget;
+    private messageQueue: any[];
+    private isClosed: boolean;
+    private ws?: WebSocket;
+    constructor(url: string) {
         if (!url.startsWith("ws")) {
             url = (window.location.protocol === "http:" ? "ws:" : "wss:") + window.location.host + url;
         }
@@ -35,17 +40,17 @@ class GrabberSocket {
         this.ws = ws;
     }
 
-    emit(event, payload) {
+    emit(event: string, payload: T) {
         const data = {...payload, "event": event};
-        if (this.ws.readyState === this.ws.OPEN) {
+        if (this.ws && this.ws.readyState === this.ws.OPEN) {
             this.ws.send(JSON.stringify(data));
         } else {
             this.messageQueue.push(data);
         }
     }
 
-    on(event, callback) {
-        this.target.addEventListener(event, e => callback(e.detail));
+    on(event: string, callback: (payload: T) => void) {
+        this.target.addEventListener(event, ({detail}: any) => callback(detail));
     }
 
     close() {
