@@ -12,6 +12,7 @@ const (
 	PlayerMessageEventInitPeer    = PlayerMessageEvent("init_peer")
 	PlayerMessageEventPeerStatus  = PlayerMessageEvent("peers")
 	PlayerMessageEventOffer       = PlayerMessageEvent("offer")
+	PlayerMessageEventOfferFailed = PlayerMessageEvent("offer:failed")
 	PlayerMessageEventOfferAnswer = PlayerMessageEvent("offer_answer")
 	PlayerMessageEventGrabberIce  = PlayerMessageEvent("grabber_ice")
 	PlayerMessageEventPlayerIce   = PlayerMessageEvent("player_ice")

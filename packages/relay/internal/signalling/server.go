@@ -9,6 +9,7 @@ import (
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/utils"
 	"log"
 	"net/netip"
+	"slices"
 	"time"
 )
 
@@ -199,7 +200,7 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 			break
 		}
 
-		answer := s.processPlayerMessage(socketID, message)
+		answer := s.processPlayerMessage(c, socketID, message)
 		if answer == nil {
 			continue
 		}
@@ -223,7 +224,7 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 			break
 		}
 
-		answer := s.processPlayerMessage(socketID, message)
+		answer := s.processPlayerMessage(c, socketID, message)
 		if answer == nil {
 			continue
 		}
@@ -233,7 +234,7 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	}
 }
 
-func (s *Server) processPlayerMessage(id sockets.SocketID, m api.PlayerMessage) *api.PlayerMessage {
+func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m api.PlayerMessage) *api.PlayerMessage {
 	playerSocketId := string(id)
 	switch m.Event {
 	case api.PlayerMessageEventOffer:
@@ -246,10 +247,23 @@ func (s *Server) processPlayerMessage(id sockets.SocketID, m api.PlayerMessage) 
 			socket = s.grabberSockets.GetSocket(sockets.SocketID(*m.Offer.PeerId))
 		} else if m.Offer.PeerName != nil {
 			if peer, ok := s.storage.getPeerByName(*m.Offer.PeerName); ok {
+				if !slices.Contains(peer.StreamTypes, api.StreamType(m.Offer.StreamType)) {
+					_ = c.WriteJSON(api.PlayerMessage{
+						Event: api.PlayerMessageEventOfferFailed,
+						// TODO: add message cause
+					})
+					log.Printf("no such stream type %v in grabber with id %v",
+						m.Offer.StreamType, m.Offer.PeerId)
+					return nil
+				}
 				socket = s.grabberSockets.GetSocket(peer.SocketId)
 			}
 		}
 		if socket == nil {
+			_ = c.WriteJSON(api.PlayerMessage{
+				Event: api.PlayerMessageEventOfferFailed,
+				// TODO: add message cause
+			})
 			log.Printf("no such grabber with id %v", m.Offer.PeerId)
 			return nil
 		}
