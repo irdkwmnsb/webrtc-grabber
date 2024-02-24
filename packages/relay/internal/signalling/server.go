@@ -86,61 +86,13 @@ func (s *Server) setupPlayerSockets() {
 			}
 		}()
 
-		var message api.PlayerMessage
-
-		ipAddr := c.NetConn().RemoteAddr().String()
-		isAdminIpAddr, err := s.isAdminIpAddr(ipAddr)
-
-		if err != nil {
-			log.Printf("can not parse ipaddr %s, error - %v", ipAddr, err)
-			return
-		}
-
-		if !isAdminIpAddr {
-			log.Printf("blocking access to the admin panel for %s", ipAddr)
-
-			message.Event = api.PlayerMessageEventAuthFailed
-			accessMessage := "Forbidden. IP address black listed"
-			message.AccessMessage = &accessMessage
-
-			if err = c.WriteJSON(&message); err != nil {
-				log.Printf("can not send message %v, error - %v", message, err)
-			}
-
-			return
-		}
-
-		socketID := sockets.SocketID(ipAddr)
-		log.Printf("trying to connect %s", socketID)
-
-		message.Event = api.PlayerMessageEventAuthRequest
-		if err := c.WriteJSON(&message); err != nil {
-			return
-		}
-		log.Println("Requested auth")
-
-		// check authorisation
-		if err := c.ReadJSON(&message); err != nil {
-			log.Printf("disconnected %s", socketID)
-			return
-		}
-
-		if message.Event != api.PlayerMessageEventAuth || message.PlayerAuth == nil ||
-			!s.CheckPlayerCredential(message.PlayerAuth.Credential) {
-
-			accessMessage := "Forbidden. Incorrect credential"
-
-			_ = c.WriteJSON(api.PlayerMessage{
-				Event:         api.PlayerMessageEventAuthFailed,
-				AccessMessage: &accessMessage,
-			})
-
-			log.Printf("failed to authorize %s", socketID)
+		if !s.checkPlayerAdmissions(c) {
 			return
 		}
 
 		s.listenPlayerAdminSocket(c)
 	}))
+
 	s.app.Get("/ws/player/play", websocket.New(func(c *websocket.Conn) {
 		defer func() {
 			if err := recover(); err != nil {
@@ -150,25 +102,74 @@ func (s *Server) setupPlayerSockets() {
 			}
 		}()
 
-		var message api.PlayerMessage
-		socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
-		log.Printf("trying to connect %s", socketID)
-
-		// check authorisation
-		if err := c.ReadJSON(&message); err != nil {
-			log.Printf("disconnected %s", socketID)
-			return
-		}
-
-		if message.Event != api.PlayerMessageEventAuth || message.PlayerAuth == nil ||
-			!s.CheckPlayerCredential(message.PlayerAuth.Credential) {
-			_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventAuthFailed})
-			log.Printf("failed to authorize %s", socketID)
+		if !s.checkPlayerAdmissions(c) {
 			return
 		}
 
 		s.listenPlayerPlaySocket(c)
 	}))
+}
+
+func (s *Server) checkPlayerAdmissions(c *websocket.Conn) bool {
+	var message api.PlayerMessage
+	ipAddr := c.NetConn().RemoteAddr().String()
+	socketID := sockets.SocketID(ipAddr)
+	log.Printf("trying to connect %s", socketID)
+
+	isAdminIpAddr, err := s.isAdminIpAddr(ipAddr)
+
+	if err != nil {
+		log.Printf("can not parse ipaddr %s, error - %v", ipAddr, err)
+		return false
+	}
+
+	if !isAdminIpAddr {
+		log.Printf("blocking access to the admin panel for %s", ipAddr)
+
+		message.Event = api.PlayerMessageEventAuthFailed
+		accessMessage := "Forbidden. IP address black listed"
+		message.AccessMessage = &accessMessage
+
+		if err = c.WriteJSON(&message); err != nil {
+			log.Printf("can not send message %v, error - %v", message, err)
+		}
+
+		return false
+	}
+
+	message.Event = api.PlayerMessageEventAuthRequest
+	if err := c.WriteJSON(&message); err != nil {
+		return false
+	}
+	log.Println("Requested auth")
+
+	// check authorisation
+	if err := c.ReadJSON(&message); err != nil {
+		log.Printf("disconnected %s", socketID)
+		return false
+	}
+
+	if message.Event != api.PlayerMessageEventAuth || message.PlayerAuth == nil ||
+		!s.CheckPlayerCredential(message.PlayerAuth.Credential) {
+
+		accessMessage := "Forbidden. Incorrect credential"
+
+		_ = c.WriteJSON(api.PlayerMessage{
+			Event:         api.PlayerMessageEventAuthFailed,
+			AccessMessage: &accessMessage,
+		})
+
+		log.Printf("failed to authorize %s", socketID)
+		return false
+	}
+
+	if err := c.WriteJSON(api.PlayerMessage{
+		Event:    api.PlayerMessageEventInitPeer,
+		InitPeer: &api.PcConfigMessage{PcConfig: s.config.PeerConnectionConfig},
+	}); err != nil {
+		log.Printf("failed to send init_peer%s", socketID)
+	}
+	return true
 }
 
 func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
@@ -189,13 +190,6 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 	}
 	sendPeerStatus()
 	timer := utils.SetIntervalTimer(PlayerSendPeerStatusInterval, sendPeerStatus)
-
-	if err := c.WriteJSON(api.PlayerMessage{
-		Event:    api.PlayerMessageEventInitPeer,
-		InitPeer: &api.PcConfigMessage{PcConfig: s.config.PeerConnectionConfig},
-	}); err != nil {
-		log.Printf("failed to send init_peer%s", socketID)
-	}
 
 	for {
 		if err := c.ReadJSON(&message); err != nil {
@@ -221,12 +215,6 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	log.Printf("authorized %s", socketID)
 
 	var message api.PlayerMessage
-	if err := c.WriteJSON(api.PlayerMessage{
-		Event:    api.PlayerMessageEventInitPeer,
-		InitPeer: &api.PcConfigMessage{PcConfig: s.config.PeerConnectionConfig},
-	}); err != nil {
-		log.Printf("failed to send init_peer%s", socketID)
-	}
 
 	for {
 		if err := c.ReadJSON(&message); err != nil {
