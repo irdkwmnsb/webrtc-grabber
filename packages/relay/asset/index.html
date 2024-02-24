@@ -132,9 +132,9 @@
     client.target.addEventListener("auth:request", () => {
         client.authorize(requireAuth());
     });
-    client.target.addEventListener("auth:failed", () => {
+    client.target.addEventListener("auth:failed", ({detail: [accessMessage]}) => {
         localStorage.removeItem("adminCredentials");
-        alert("Forbidden. Authorization failed");
+        alert(accessMessage);
     });
 
     const renderParticipants = (peers, participantsStatus) => {
