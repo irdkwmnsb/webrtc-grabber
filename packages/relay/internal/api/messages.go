@@ -15,7 +15,6 @@ const (
 	PlayerMessageEventOfferAnswer = PlayerMessageEvent("offer_answer")
 	PlayerMessageEventGrabberIce  = PlayerMessageEvent("grabber_ice")
 	PlayerMessageEventPlayerIce   = PlayerMessageEvent("player_ice")
-	PlayerMessageEventBlackListed = PlayerMessageEvent("auth:black_listed")
 )
 
 const (
@@ -36,6 +35,7 @@ type PlayerMessage struct {
 	OfferAnswer        *OfferAnswerMessage `json:"offerAnswer"`
 	Ice                *IceMessage         `json:"ice"`
 	InitPeer           *PcConfigMessage    `json:"initPeer"`
+	AccessMessage      *string             `json:"accessMessage"`
 }
 
 type PlayerAuthMessage struct {

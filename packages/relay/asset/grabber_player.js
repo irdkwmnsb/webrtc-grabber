@@ -4,6 +4,7 @@ class GrabberPlayerClient {
         this.peerConnectionConfig = null;
         this.peersStatus = null;
         this.participantsStatus = null;
+        this.accessMessage = null;
 
         this.target = new EventTarget();
 
@@ -16,9 +17,9 @@ class GrabberPlayerClient {
         this.ws.on("auth:request", () => {
             _client.target.dispatchEvent(new CustomEvent("auth:request", {}));
         });
-        _client.ws.on("auth:failed", () => {
+        _client.ws.on("auth:failed", ({accessMessage : message}) => {
             _client.ws.close();
-            _client.target.dispatchEvent(new CustomEvent("auth:failed", {}));
+            _client.target.dispatchEvent(new CustomEvent("auth:failed", {detail: [message]}));
         });
 
         _client.ws.on("init_peer", ({ initPeer: { pcConfig } }) => {

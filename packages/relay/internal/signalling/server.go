@@ -1,8 +1,6 @@
 package signalling
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
@@ -11,7 +9,6 @@ import (
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/utils"
 	"log"
 	"net/netip"
-	"os"
 	"time"
 )
 
@@ -21,21 +18,9 @@ type Server struct {
 	app             *fiber.App
 	config          ServerConfig
 	storage         *Storage
-	adminsNetworks  []netip.Prefix
 	oldPeersCleaner utils.IntervalTimer
 	playersSockets  *sockets.SocketPool
 	grabberSockets  *sockets.SocketPool
-}
-
-type ServerConfig struct {
-	PlayerCredential     *string                  `json:"adminCredential"`
-	Participants         []string                 `json:"participants"`
-	AdminsRawNetworks    []string                 `json:"adminsNetworks"`
-	PeerConnectionConfig api.PeerConnectionConfig `json:"peerConnectionConfig"`
-	GrabberPingInterval  int                      `json:"grabberPingInterval"`
-	ServerPort           int                      `json:"serverPort"`
-	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile"`
-	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
 }
 
 func NewServer(config ServerConfig, app *fiber.App) (*Server, error) {
@@ -48,14 +33,6 @@ func NewServer(config ServerConfig, app *fiber.App) (*Server, error) {
 	}
 	server.storage.setParticipants(config.Participants)
 	server.oldPeersCleaner = utils.SetIntervalTimer(time.Minute, server.storage.deleteOldPeers)
-
-	adminsNetworks, err := parseAdminsNetworks(server.config.AdminsRawNetworks)
-
-	if err != nil {
-		return nil, fmt.Errorf("can not parse admins networks, error - %v", err)
-	}
-
-	server.adminsNetworks = adminsNetworks
 
 	return &server, nil
 }
@@ -90,7 +67,7 @@ func (s *Server) isAdminIpAddr(addrPort string) (bool, error) {
 		return false, fmt.Errorf("can not parse admin ipaddr, error - %v", err)
 	}
 
-	for _, n := range s.adminsNetworks {
+	for _, n := range s.config.AdminsRawNetworks {
 		if n.Contains(ip.Addr()) {
 			return true, nil
 		}
@@ -122,10 +99,12 @@ func (s *Server) setupPlayerSockets() {
 		if !isAdminIpAddr {
 			log.Printf("blocking access to the admin panel for %s", ipAddr)
 
-			message.Event = api.PlayerMessageEventBlackListed
+			message.Event = api.PlayerMessageEventAuthFailed
+			accessMessage := "Forbidden. IP address black listed"
+			message.AccessMessage = &accessMessage
 
 			if err = c.WriteJSON(&message); err != nil {
-				return
+				log.Printf("can not send message %v, error - %v", message, err)
 			}
 
 			return
@@ -148,7 +127,14 @@ func (s *Server) setupPlayerSockets() {
 
 		if message.Event != api.PlayerMessageEventAuth || message.PlayerAuth == nil ||
 			!s.CheckPlayerCredential(message.PlayerAuth.Credential) {
-			_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventAuthFailed})
+
+			accessMessage := "Forbidden. Incorrect credential"
+
+			_ = c.WriteJSON(api.PlayerMessage{
+				Event:         api.PlayerMessageEventAuthFailed,
+				AccessMessage: &accessMessage,
+			})
+
 			log.Printf("failed to authorize %s", socketID)
 			return
 		}
@@ -398,33 +384,4 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 		})
 	}
 	return nil
-}
-
-func LoadServerConfig() (config ServerConfig, err error) {
-	configFile, err := os.Open("conf/config.json")
-	if err != nil {
-		return
-	}
-	defer func() { _ = configFile.Close() }()
-	err = json.NewDecoder(bufio.NewReader(configFile)).Decode(&config)
-	if config.ServerPort == 0 {
-		config.ServerPort = 8000
-	}
-	return
-}
-
-func parseAdminsNetworks(rawNetworks []string) ([]netip.Prefix, error) {
-	result := make([]netip.Prefix, 0, len(rawNetworks))
-
-	for _, r := range rawNetworks {
-		network, err := netip.ParsePrefix(r)
-
-		if err != nil {
-			return nil, err
-		}
-
-		result = append(result, network)
-	}
-
-	return result, nil
 }
