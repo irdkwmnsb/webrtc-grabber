@@ -98,7 +98,8 @@ export class GrabberPlayerClient {
     }
 
     on(eventName: GrabberPlayerClientEventTypes, callback: (arg0: any) => void) {
-        this.emitter.on(eventName, ({detail}: any) => callback(detail));
+        this.emitter.addListener(eventName, ({detail}: any) => callback(detail));
+        // this.emitter.on(eventName, ({detail}: any) => callback(detail));
         // this.target.addEventListener(eventName, ({detail}: any) => callback(detail));
     }
 

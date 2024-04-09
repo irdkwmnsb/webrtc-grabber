@@ -1,3 +1,5 @@
+import {WebSocket} from "ws";
+
 export class GrabberSocket<T> {
     private readonly url: string;
     private target: EventTarget;
@@ -5,10 +7,15 @@ export class GrabberSocket<T> {
     private isClosed: boolean;
     private ws?: WebSocket;
     constructor(url: string) {
-        if (!url.startsWith("ws")) {
-            url = (window.location.protocol === "http:" ? "ws:" : "wss:") + window.location.host + url;
-        }
-        this.url = url;
+        // if (!url.startsWith("ws")) { 
+        //     if (typeof window !== "undefined") {
+        //         url = (window.location.protocol === "http:" ? "ws:" : "wss:") + window.location.host + url;
+        //     } else {
+        //         console.error("Please use ws or wss in signalling url!");
+        //         throw DOMException;
+        //     }
+        // }
+        this.url = url.startsWith("http") ? "ws" + url.substring(4) : url;
         this.target = new EventTarget();
         this.messageQueue = [];
         this.isClosed = false;

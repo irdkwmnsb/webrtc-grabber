@@ -38,6 +38,9 @@ importers:
       tsup:
         specifier: ^8.0.1
         version: 8.0.1
+      ws:
+        specifier: ^8.12.1
+        version: 8.16.0
 
   packages/grabber:
     devDependencies:
@@ -57,8 +60,8 @@ importers:
         specifier: ^1.14.1
         version: 1.14.1
       webrtc-grabber-sdk:
-        specifier: ^0.0.1
-        version: 0.0.1
+        specifier: ^0.0.2
+        version: link:../frontend-sdk
       ws:
         specifier: ^8.12.1
         version: 8.16.0
@@ -3420,10 +3423,6 @@ packages:
     engines: {npm: ^3.10.0}
     dependencies:
       sdp: 1.5.4
-    dev: true
-
-  /webrtc-grabber-sdk@0.0.1:
-    resolution: {integrity: sha512-f/4AynlS2WGsQ90mHos0YvlnkXT/P8alkxVWluVO5ZuZkO1Ti8YUDn+63jhyI/2zPUs/MIocOHgjQUIO7+yuVw==}
     dev: true
 
   /webrtc@1.14.1:
