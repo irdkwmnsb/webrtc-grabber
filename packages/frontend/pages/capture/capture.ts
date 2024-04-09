@@ -72,7 +72,7 @@ const capture = async () => {
         }
         pingTimerId = setInterval((() => {
             console.log("ping");
-            client.send_ping(pcs.size, Object.keys(streams));
+            client.sendPing(pcs.size, Object.keys(streams));
         }) as TimerHandler, pingInterval);
         console.log(`init peer (pingInterval = ${pingInterval})`);
         updateState("active");
@@ -102,7 +102,7 @@ const capture = async () => {
 
         pc.addEventListener("icecandidate", (event: any) => { // FIXME: remove once proper types are implemented
             console.log(`send ice for player ${playerId}`);
-            client.send_grabber_ice(playerId, event.candidate);
+            client.sendGrabberICE(playerId, event.candidate);
         })
 
         pc.addEventListener('connectionstatechange', ({target: connection}: any) => { // FIXME: remove once proper types are implemented
@@ -118,7 +118,7 @@ const capture = async () => {
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
-        client.send_offer_answer(playerId, answer);
+        client.sendOfferAnswer(playerId, answer);
         console.log(`send offer_answer for ${playerId}`);
     });
 

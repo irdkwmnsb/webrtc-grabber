@@ -13,7 +13,7 @@ export default defineConfig({
         lib: {
             // Could also be a dictionary or array of multiple entry points
             entry: {
-                sdk: resolve(__dirname, 'lib/main.ts'),
+                // sdk: resolve(__dirname, 'lib/main.ts'),
                 capture: resolve(__dirname, 'pages/capture/capture.html'),
                 index: resolve(__dirname, 'pages/index/index.html'),
                 player: resolve(__dirname, 'pages/player/player.html')
