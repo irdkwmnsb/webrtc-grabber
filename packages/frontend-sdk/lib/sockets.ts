@@ -1,28 +1,48 @@
 import {WebSocket} from "ws";
+import EventEmitter from "events";
+import TypedEmitter from "typed-emitter";
+
+type GrabberSocketEvents<T> = {
+    "auth:request": (payload: T) => void;
+    "auth:failed": (payload: T) => void;
+    "auth:black_listed": (payload: T) => void;
+    "init_peer": (payload: T) => void;
+    "peers": (payload: T) => void;
+    "offer_answer": (payload: T) => Promise<void>;
+    "grabber_ice": (payload: T) => Promise<void>;
+    "connect": (payload: T) => Promise<void>;
+    "offer_handle": (payload: T) => Promise<void>;
+    "player_ice": (payload: T) => Promise<void>; 
+};
 
 export class GrabberSocket<T> {
     private readonly url: string;
-    private target: EventTarget;
     private messageQueue: any[];
     private isClosed: boolean;
     private ws?: WebSocket;
+    private messageEmitter: TypedEmitter<GrabberSocketEvents<T>>;
+    // private target: EventTarget;
+
+
     constructor(url: string) {
-        // if (!url.startsWith("ws")) { 
-        //     if (typeof window !== "undefined") {
-        //         url = (window.location.protocol === "http:" ? "ws:" : "wss:") + window.location.host + url;
-        //     } else {
-        //         console.error("Please use ws or wss in signalling url!");
-        //         throw DOMException;
-        //     }
-        // }
-        this.url = url.startsWith("http") ? "ws" + url.substring(4) : url;
-        this.target = new EventTarget();
+        if (!url.startsWith("ws")) { 
+            if (typeof window !== "undefined") {
+                url = (window.location.protocol === "http:" ? "ws:" : "wss:") + window.location.host + url;
+            } else {
+                console.error("Please use ws or wss in signalling url!");
+                throw DOMException;
+            }
+        }
+        // this.target = new EventTarget();
+        this.url = url;
+        this.messageEmitter = new EventEmitter();
         this.messageQueue = [];
         this.isClosed = false;
         this.connect();
     }
 
     connect() {
+        console.log("connecting....");
         if (this.isClosed) {
             return;
         }
@@ -36,13 +56,11 @@ export class GrabberSocket<T> {
         }
         ws.onmessage = function ({data}) {
             const payload = JSON.parse(data);
-            _this.target.dispatchEvent(new CustomEvent(payload.event, {detail: payload}));
+            console.log(payload);
+            _this.messageEmitter.emit(payload.event, {detail: payload});
+            // _this.target.dispatchEvent(new CustomEvent(payload.event, {detail: payload}));
         }
         ws.onclose = function () {
-            if (_this.isClosed) {
-                return;
-            }
-            setTimeout(() => _this.connect(), 1000);
         }
         this.ws = ws;
     }
@@ -56,8 +74,9 @@ export class GrabberSocket<T> {
         }
     }
 
-    on(event: string, callback: (payload: T) => void) {
-        this.target.addEventListener(event, ({detail}: any) => callback(detail));
+    on(event, callback: (payload: T) => void) {
+        this.messageEmitter.on(event, callback);
+        // this.target.addEventListener(event, ({detail}: any) => callback(detail));
     }
 
     close() {

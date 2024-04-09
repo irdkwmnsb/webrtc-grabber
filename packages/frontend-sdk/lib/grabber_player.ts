@@ -1,5 +1,5 @@
 import {GrabberSocket} from "./sockets";
-import { TypedEmitter } from "tiny-typed-emitter"
+import EventEmitter from "events"
 
 type PeerInfo = any;
 type GrabberPlayerClientEventTypes = "auth:request" | "auth:failed" | "initialized" | "peers"
@@ -8,7 +8,7 @@ export class GrabberPlayerClient {
     private pc?: RTCPeerConnection;
     private peerConnectionConfig?: RTCConfiguration
     private _peersStatus?: any[]; // Why is this stored in Client?
-    private emitter: TypedEmitter;
+    private emitter: EventEmitter;
 
     get peersStatus() { // FIXME: remove once proper types are implemented
         return this._peersStatus
@@ -20,7 +20,6 @@ export class GrabberPlayerClient {
     // private target: EventTarget;
     constructor(mode: "play" | "admin" = "admin", url?: string) {
         // this.target = new EventTarget();
-        this.emitter = new TypedEmitter();
 
         this.ws = new GrabberSocket((url ?? "") + "/ws/player/" + (mode === "play" ? "play" : "admin"));
         this._setupWS();
@@ -98,7 +97,7 @@ export class GrabberPlayerClient {
     }
 
     on(eventName: GrabberPlayerClientEventTypes, callback: (arg0: any) => void) {
-        this.emitter.addListener(eventName, ({detail}: any) => callback(detail));
+        this.emitter.on(eventName, ({detail}: any) => callback(detail));
         // this.emitter.on(eventName, ({detail}: any) => callback(detail));
         // this.target.addEventListener(eventName, ({detail}: any) => callback(detail));
     }

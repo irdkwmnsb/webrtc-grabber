@@ -54,6 +54,7 @@ const updateState = (newState: State) => {
 }
 
 const capture = async () => {
+    console.log(1231321231312231);
     if (currentState !== "inactive") return;
     updateState("detecting");
 

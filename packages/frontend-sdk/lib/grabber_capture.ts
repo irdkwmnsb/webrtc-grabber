@@ -1,16 +1,17 @@
 import {GrabberSocket} from "./sockets";
 import {IOfferReceiveResponder, StreamType} from "./api";
-import { TypedEmitter } from "tiny-typed-emitter";
+import EventEmitter from "events";
+
 
 export class GrabberCaptureClient { // FIXME inherit from the other client
     private peerName: string;
     public target: EventTarget; // FIXME: make this private and make proper on function
     private socket: GrabberSocket<any>;
     private offerReceiveResponder?: IOfferReceiveResponder;
-    private emitter: TypedEmitter;
+    private emitter: EventEmitter;
 
     constructor(peerName: string, signallingUrl?: string) {
-        this.emitter = new TypedEmitter();
+        this.emitter = new EventEmitter();
         this.peerName = peerName;
         this.target = new EventTarget();
         this.emitter.emit("hi", {});
@@ -24,6 +25,7 @@ export class GrabberCaptureClient { // FIXME inherit from the other client
         });
 
         const init_peer_handle = ({initPeer: {pcConfig, pingInterval}}: any) => { // FIXME: remove once proper types are implemented
+            console.log(pcConfig);
             this.emitter.emit("init_peer", {detail: {pcConfig, pingInterval}});
             // this.target.dispatchEvent(new CustomEvent('init_peer', {detail: {pcConfig, pingInterval}}));
         };
@@ -41,9 +43,9 @@ export class GrabberCaptureClient { // FIXME inherit from the other client
             // this.target.dispatchEvent(new CustomEvent('player_ice', {detail: {peerId, candidate}}));
         }
 
-        this.socket.on("init_peer", init_peer_handle);
-        this.socket.on("offer", offer_handle);
-        this.socket.on("player_ice", player_ice_handle);
+        this.socket.on("init_peer", (...args) => { console.log(args); console.log(args[0].detail.initPeer); init_peer_handle(args[0].detail)});
+        this.socket.on("offer", (...args) => { console.log(args); offer_handle(...args); });
+        this.socket.on("player_ice", (...args) => { console.log(args); player_ice_handle(...args); });
     }
 
     onOfferReceived(getAnswer: IOfferReceiveResponder) {
