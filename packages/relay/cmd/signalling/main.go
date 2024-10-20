@@ -23,7 +23,7 @@ func main() {
 
 	defer server.Close()
 
-	server.SetupWebSockets()
+	server.SetupWebSocketsAndApi()
 	app.Use(pprof.New())
 	app.Static("/", "./asset")
 	app.Static("/player", "./asset/player.html")

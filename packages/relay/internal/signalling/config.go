@@ -22,6 +22,7 @@ type ServerConfig struct {
 	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
 	Codecs               []Codec                  `json:"codecs"`
 	WebcamTrackCount     int                      `json:"webcamTrackCount"`
+	RecordTimeout        uint                     `json:"recordTimeout"`
 }
 
 type RawCodec struct {
@@ -50,6 +51,7 @@ type RawServerConfig struct {
 	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
 	Codecs               []RawCodec               `json:"codecs"`
 	WebcamTrackCount     int                      `json:"webcamTrackCount"`
+	RecordTimeout        uint                     `json:"recordTimeout"`
 }
 
 func LoadServerConfig() (ServerConfig, error) {
@@ -83,6 +85,10 @@ func LoadServerConfig() (ServerConfig, error) {
 		return ServerConfig{}, fmt.Errorf("can not parse admins networks, error - %w", err)
 	}
 
+	if rawConfig.RecordTimeout <= 0 {
+		rawConfig.RecordTimeout = 180000
+	}
+
 	return ServerConfig{
 		PlayerCredential:     rawConfig.PlayerCredential,
 		Participants:         rawConfig.Participants,
@@ -94,6 +100,7 @@ func LoadServerConfig() (ServerConfig, error) {
 		ServerTLSKeyFile:     rawConfig.ServerTLSKeyFile,
 		Codecs:               parseCodecs(rawConfig.Codecs),
 		WebcamTrackCount:     rawConfig.WebcamTrackCount,
+		RecordTimeout:        rawConfig.RecordTimeout,
 	}, nil
 }
 
