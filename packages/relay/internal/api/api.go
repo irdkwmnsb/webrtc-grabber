@@ -12,6 +12,7 @@ type Peer struct {
 	LastPing         *time.Time       `json:"lastPing"`
 	ConnectionsCount int              `json:"connectionsCount"`
 	StreamTypes      []StreamType     `json:"streamTypes"`
+	CurrentRecordId  *string          `json:"currentRecordId"`
 }
 
 type StreamType string
@@ -22,8 +23,9 @@ const (
 )
 
 type PeerStatus struct {
-	ConnectionsCount int
-	StreamTypes      []StreamType
+	ConnectionsCount int          `json:"connectionsCount"`
+	StreamTypes      []StreamType `json:"streamTypes"`
+	CurrentRecordId  *string      `json:"currentRecordId"`
 }
 
 type PlayerAuth struct {

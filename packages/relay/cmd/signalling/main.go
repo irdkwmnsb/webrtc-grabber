@@ -21,7 +21,7 @@ func main() {
 
 	defer server.Close()
 
-	server.SetupWebSockets()
+	server.SetupWebSocketsAndApi()
 	app.Static("/", "./asset")
 	app.Static("/player", "./asset/player.html")
 	app.Static("/capture", "./asset/capture.html")

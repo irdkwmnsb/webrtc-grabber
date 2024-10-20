@@ -1,6 +1,6 @@
 module github.com/irdkwmnsb/webrtc-grabber/packages/relay
 
-go 1.19
+go 1.21
 
 require (
 	github.com/fasthttp/websocket v1.5.7
