@@ -18,6 +18,7 @@ type ServerConfig struct {
 	ServerPort           int                      `json:"serverPort"`
 	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile"`
 	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
+	RecordTimeout        uint                     `json:"recordTimeout"`
 }
 
 type RawServerConfig struct {
@@ -29,6 +30,7 @@ type RawServerConfig struct {
 	ServerPort           int                      `json:"serverPort"`
 	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile"`
 	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
+	RecordTimeout        uint                     `json:"recordTimeout"`
 }
 
 func LoadServerConfig() (ServerConfig, error) {
@@ -54,6 +56,10 @@ func LoadServerConfig() (ServerConfig, error) {
 		return ServerConfig{}, fmt.Errorf("can not parse admins networks, error - %w", err)
 	}
 
+	if rawConfig.RecordTimeout <= 0 {
+		rawConfig.RecordTimeout = 180000
+	}
+
 	return ServerConfig{
 		PlayerCredential:     rawConfig.PlayerCredential,
 		Participants:         rawConfig.Participants,
@@ -63,6 +69,7 @@ func LoadServerConfig() (ServerConfig, error) {
 		ServerPort:           rawConfig.ServerPort,
 		ServerTLSCrtFile:     rawConfig.ServerTLSCrtFile,
 		ServerTLSKeyFile:     rawConfig.ServerTLSKeyFile,
+		RecordTimeout:        rawConfig.RecordTimeout,
 	}, nil
 }
 

@@ -2,9 +2,13 @@ const { ipcRenderer } = require('electron')
 
 let streams = {};
 const pcs = new Map();
+const activeRecoding = {
+    recorders: [],
+    recordId: null,
+};
 
 setInterval(() => {
-    ipcRenderer.invoke('status:connections', { connectionsCount: pcs.size, streamTypes: Object.keys(streams) });
+    ipcRenderer.invoke('status:connections', { connectionsCount: pcs.size, streamTypes: Object.keys(streams), currentRecordId: activeRecoding.recordId });
 }, 3000);
 
 ipcRenderer.on('source:update', async (_, { screenSourceId, webcamConstraint, webcamAudioConstraint, desktopConstraint }) => {
@@ -98,4 +102,62 @@ ipcRenderer.on('offer', async (_, playerId, offer, streamType, configuration) =>
 ipcRenderer.on('player_ice', (_, playerId, candidate) => {
     pcs.get(playerId).addIceCandidate(candidate)
         .then(() => console.log(`add player_ice from ${playerId}`));
+});
+
+const stopRecord = (recordId) => {
+    if (activeRecoding.recordId === null || activeRecoding.recordId !== recordId) {
+        return ;
+    }
+    activeRecoding.recorders.forEach(r => r.stop());
+    activeRecoding.recorders = [];
+    activeRecoding.recordId = null;
+    console.info(`Stopped recording ${recordId}`);
+}
+
+ipcRenderer.on('record_start', (_, recordId, timeout) => {
+    stopRecord(activeRecoding.recordId);
+    activeRecoding.recordId = recordId;
+    activeRecoding.recorders = [];
+
+    Object.entries(streams).forEach(([streamKey, stream]) => {
+        const mediaRecorder = new MediaRecorder(stream, {
+            mimeType: 'video/webm',
+        })
+
+        mediaRecorder.addEventListener('dataavailable', event => {
+            // TODO: collect all chanks
+            console.log(`dataavailable [${streamKey}]`)
+            const blob = new Blob([event.data]);
+            let fr = new FileReader();
+            fr.onload = async _ => {
+                await ipcRenderer.invoke('record_save', recordId, streamKey, new Buffer(fr.result));
+            }
+            fr.readAsArrayBuffer(blob);
+        })
+
+        mediaRecorder.start();
+        activeRecoding.recorders.push(mediaRecorder)
+        console.info(`Start recording ${recordId} [${streamKey}]`);
+    });
+
+    setTimeout(() => {
+        stopRecord(recordId);
+    }, timeout);
+});
+
+ipcRenderer.on('record_stop', (_, recordId) => {
+    stopRecord(recordId);
+});
+
+ipcRenderer.on('player_disconnect', (_) => {
+    console.log("player_disconnect")
+    pcs.forEach((connection, playerId) => {
+        try {
+            connection.close();
+            console.log(`close connection for ${playerId}`);
+        } catch (e) {
+            console.error(`failed to close connection for ${playerId}`);
+        }
+    });
+    pcs.clear();
 });

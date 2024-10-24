@@ -48,7 +48,7 @@ func (s *Server) CheckPlayerCredential(credentials string) bool {
 	return s.config.PlayerCredential == nil || *s.config.PlayerCredential == credentials
 }
 
-func (s *Server) SetupWebSockets() {
+func (s *Server) SetupWebSocketsAndApi() {
 	s.app.Use("/ws", func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
 			c.Locals("allowed", true)
@@ -59,6 +59,8 @@ func (s *Server) SetupWebSockets() {
 
 	s.setupPlayerSockets()
 	s.setupGrabberSockets()
+
+	s.setupAdminApi()
 }
 
 func (s *Server) isAdminIpAddr(addrPort string) (bool, error) {
@@ -349,6 +351,7 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 	grabberId := string(id)
 	switch m.Event {
 	case api.GrabberMessageEventPing:
+		log.Printf("grabber ping received %v", m.Ping)
 		if m.Ping == nil {
 			return nil
 		}
