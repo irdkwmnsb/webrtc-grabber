@@ -12,7 +12,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		BodyLimit: 50 * 1024 * 1024,
+	})
+
 	server, err := signalling.NewServer(config, app)
 
 	if err != nil {

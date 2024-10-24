@@ -19,6 +19,7 @@ type ServerConfig struct {
 	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile"`
 	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
 	RecordTimeout        uint                     `json:"recordTimeout"`
+	RecordStorageDir     string                   `json:"recordStorageDirectory"`
 }
 
 type RawServerConfig struct {
@@ -31,6 +32,7 @@ type RawServerConfig struct {
 	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile"`
 	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
 	RecordTimeout        uint                     `json:"recordTimeout"`
+	RecordStorageDir     string                   `json:"RecordStorageDirectory"`
 }
 
 func LoadServerConfig() (ServerConfig, error) {
@@ -53,11 +55,17 @@ func LoadServerConfig() (ServerConfig, error) {
 	adminsNetworks, err := parseAdminsNetworks(rawConfig.AdminsRawNetworks)
 
 	if err != nil {
-		return ServerConfig{}, fmt.Errorf("can not parse admins networks, error - %w", err)
+		return ServerConfig{}, fmt.Errorf("can not parse admins networks, error - %v", err)
 	}
 
 	if rawConfig.RecordTimeout <= 0 {
 		rawConfig.RecordTimeout = 180000
+	}
+	if rawConfig.RecordStorageDir != "" {
+		err := os.MkdirAll(rawConfig.RecordStorageDir, os.ModePerm)
+		if err != nil {
+			return ServerConfig{}, fmt.Errorf("can create record directory, error - %v", err)
+		}
 	}
 
 	return ServerConfig{
@@ -70,6 +78,7 @@ func LoadServerConfig() (ServerConfig, error) {
 		ServerTLSCrtFile:     rawConfig.ServerTLSCrtFile,
 		ServerTLSKeyFile:     rawConfig.ServerTLSKeyFile,
 		RecordTimeout:        rawConfig.RecordTimeout,
+		RecordStorageDir:     rawConfig.RecordStorageDir,
 	}, nil
 }
 
