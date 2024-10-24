@@ -22,15 +22,19 @@ jobs:
         working-directory: .
         run: |
           bash ./grabber_build.sh linux x64
-          ls ./packages/grabber/build
+          tar -czvf ./webrtc_grabber_grabber_linux_x64.tar.gz ./packages/grabber/build/
+      - uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: webrtc_grabber_grabber_linux_x64.tar.gz
+          path: ./webrtc_grabber_grabber_linux_x64.tar.gz
+          retention-days: 7
 
   build_windows:
     runs-on: windows-2019
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v3
-
       - uses: actions/setup-node@v4
 
       - name: Install agent dependencies
@@ -42,7 +46,6 @@ jobs:
         shell: cmd
         run: |
           grabber_build_win64.bat
-          
           dir .\packages\grabber\build\
 #      - name: Assemble with Gradle
 #        env:
