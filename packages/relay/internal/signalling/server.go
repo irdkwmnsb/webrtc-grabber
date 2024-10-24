@@ -72,6 +72,7 @@ func (s *Server) SetupWebSocketsAndApi() {
 	s.setupGrabberSockets()
 
 	s.setupAdminApi()
+	s.setupAgentApi()
 }
 
 func (s *Server) isAdminIpAddr(addrPort string) (bool, error) {
