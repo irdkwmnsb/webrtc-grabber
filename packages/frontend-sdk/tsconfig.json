@@ -1,0 +1,9 @@
+{
+    "compilerOptions": {
+      "moduleResolution": "node",
+      "paths": {
+        "*": ["./node_modules/*"]
+      }
+    }
+  }
+  
