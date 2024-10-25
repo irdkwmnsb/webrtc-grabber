@@ -120,6 +120,25 @@ function runGrabbing(window) {
         window.webContents.send("record_stop", recordId);
     });
 
+    client.target.addEventListener("record_upload", async ({detail: {recordId}}) => {
+        for (const recordType of ["desktop", "webcam"]) {
+            const fileName = `${recordId}_${recordType}.webm`;
+            fs.readFile(fileName, function (err, data) {
+                if (!err) {
+                    const fileBlob = new Blob([data], {type: 'video/webm'})
+                    const promise = client.record_upload(fileName, fileBlob)
+                    promise.then(r => {
+                        r.text().then(text => {
+                            console.log(`Reaction upload ${fileName} to server: ${text}`)
+                        });
+                    }).catch(e => console.error(`Reaction uploading to server error: ${e}`));
+                } else {
+                    console.error(`Reaction upload ${fileName} error: ${err}`);
+                }
+            });
+        }
+    });
+
     client.target.addEventListener("players_disconnect", async () => {
         window.webContents.send("player_disconnect");
     });

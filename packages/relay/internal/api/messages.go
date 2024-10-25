@@ -29,6 +29,7 @@ const (
 	GrabberMessageEventPlayerIce         = GrabberMessageEvent("player_ice")
 	GrabberMessageEventRecordStart       = GrabberMessageEvent("record_start")
 	GrabberMessageEventRecordStop        = GrabberMessageEvent("record_stop")
+	GrabberMessageEventRecordUpload      = GrabberMessageEvent("record_upload")
 	GrabberMessageEventPlayersDisconnect = GrabberMessageEvent("players_disconnect")
 )
 
@@ -54,14 +55,15 @@ type PlayerAuthMessage struct {
 }
 
 type GrabberMessage struct {
-	Event       GrabberMessageEvent     `json:"event"`
-	Ping        *PeerStatus             `json:"ping"`
-	InitPeer    *GrabberInitPeerMessage `json:"initPeer"`
-	Offer       *OfferMessage           `json:"offer"`
-	OfferAnswer *OfferAnswerMessage     `json:"offerAnswer"`
-	Ice         *IceMessage             `json:"ice"`
-	RecordStart *RecordStartMessage     `json:"recordStart"`
-	RecordStop  *RecordStopMessage      `json:"recordStop"`
+	Event        GrabberMessageEvent     `json:"event"`
+	Ping         *PeerStatus             `json:"ping"`
+	InitPeer     *GrabberInitPeerMessage `json:"initPeer"`
+	Offer        *OfferMessage           `json:"offer"`
+	OfferAnswer  *OfferAnswerMessage     `json:"offerAnswer"`
+	Ice          *IceMessage             `json:"ice"`
+	RecordStart  *RecordStartMessage     `json:"recordStart"`
+	RecordStop   *RecordStopMessage      `json:"recordStop"`
+	RecordUpload *RecordUploadMessage    `json:"recordUpload"`
 	//PlayerAuth         *PlayerAuthMessage `json:"playerAuth"`
 	//PeersStatus        []Peer             `json:"peersStatus"`
 	//ParticipantsStatus []Peer             `json:"participantsStatus"`
@@ -101,5 +103,9 @@ type RecordStartMessage struct {
 }
 
 type RecordStopMessage struct {
+	RecordId string `json:"recordId"`
+}
+
+type RecordUploadMessage struct {
 	RecordId string `json:"recordId"`
 }

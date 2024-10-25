@@ -70,6 +70,29 @@ func (s *Server) setupAdminApi() {
 			return c.Status(fiber.StatusOK).SendString("Ok")
 		})
 
+		router.Post("/record_upload", func(c *fiber.Ctx) error {
+			var req uploadRecordRequest
+			if err := c.BodyParser(&req); err != nil {
+				return c.Status(fiber.StatusBadRequest).SendString("Bad Request")
+			}
+
+			var socket sockets.Socket = nil
+			if peer, ok := s.storage.getPeerByName(req.PeerName); ok {
+				socket = s.grabberSockets.GetSocket(peer.SocketId)
+			}
+			if socket == nil {
+				return c.Status(fiber.StatusNotFound).SendString("Peer not found")
+			}
+
+			err := socket.WriteJSON(api.GrabberMessage{
+				Event:        api.GrabberMessageEventRecordUpload,
+				RecordUpload: &api.RecordUploadMessage{RecordId: req.RecordId}})
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).SendString("Failed to send stop recoding request")
+			}
+			return c.Status(fiber.StatusOK).SendString("Ok")
+		})
+
 		router.Post("/players_disconnect/:peerName", func(c *fiber.Ctx) error {
 			peerName := c.Params("peerName")
 
@@ -97,6 +120,11 @@ type startRecordRequest struct {
 }
 
 type stopRecordRequest struct {
+	PeerName string `json:"peerName"`
+	RecordId string `json:"recordId"`
+}
+
+type uploadRecordRequest struct {
 	PeerName string `json:"peerName"`
 	RecordId string `json:"recordId"`
 }

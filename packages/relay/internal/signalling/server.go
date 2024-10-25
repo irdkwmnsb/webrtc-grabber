@@ -380,7 +380,6 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage) *api.GrabberMessage {
 	switch m.Event {
 	case api.GrabberMessageEventPing:
-		log.Printf("grabber ping received %v", m.Ping)
 		if m.Ping == nil {
 			return nil
 		}
