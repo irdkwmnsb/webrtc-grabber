@@ -31,7 +31,7 @@ func (s *Server) setupAgentApi() {
 				return c.Status(fiber.StatusBadRequest).SendString("Failed to upload file")
 			}
 
-			return nil
+			return c.Status(fiber.StatusOK).SendString("OK")
 		})
 	})
 }

@@ -239,7 +239,8 @@
                 const recordButton = document.createElement('button');
                 recordButton.innerText = "Record";
                 recordButton.onclick = () => {
-                    adminClient.recordStart(peer.name, peer.name + "_" + Date.now(), 30 * 1000);
+                    let recordId = prompt("Please enter record id", peer.name + "_test");
+                    adminClient.recordStart(peer.name, recordId, 30 * 1000);
                 }
                 pStatus.appendChild(recordButton);
 
@@ -251,6 +252,14 @@
                     }
                     pStatus.appendChild(recordStopButton);
                 }
+
+                const recordUploadButton = document.createElement('button');
+                recordUploadButton.innerText = "Record upload";
+                recordUploadButton.onclick = () => {
+                    let recordId = prompt("Please enter record id", peer.name + "_test");
+                    adminClient.recordUpload(peer.name, recordId);
+                }
+                pStatus.appendChild(recordUploadButton);
             }
         } else {
             connectStreamButton("desktop", true);

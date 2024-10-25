@@ -352,7 +352,6 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 	grabberId := string(id)
 	switch m.Event {
 	case api.GrabberMessageEventPing:
-		log.Printf("grabber ping received %v", m.Ping)
 		if m.Ping == nil {
 			return nil
 		}
