@@ -122,7 +122,7 @@ function runGrabbing(window) {
 
     client.target.addEventListener("record_upload", async ({detail: {recordId}}) => {
         for (const recordType of ["desktop", "webcam"]) {
-            const fileName = `${recordId}_${recordType}.webm`;
+            const fileName = path.join(configS.recordingsDirectory ?? ".", `${recordId}_${recordType}.webm`);
             fs.readFile(fileName, function (err, data) {
                 if (!err) {
                     const fileBlob = new Blob([data], {type: 'video/webm'})
