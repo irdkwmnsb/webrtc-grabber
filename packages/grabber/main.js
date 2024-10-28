@@ -147,7 +147,7 @@ function runGrabbing(window) {
         try {
             fs.writeFileSync(path.join(configS.recordingsDirectory ?? ".", recordId + "_" + streamKey + ".webm"), buffer);
         } catch(e) {
-            console.error(`Failed to save record file ${recordId} [${streamKey}]`);
+            console.error(`Failed to save record file ${recordId} [${streamKey}]: ${e}`);
         }
     });
 }
