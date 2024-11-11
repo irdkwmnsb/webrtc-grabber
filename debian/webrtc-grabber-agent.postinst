@@ -1,0 +1,20 @@
+PREFIX=/opt/webrtc-grabber-agent
+DIR=$PREFIX/homedir
+USER=webrtc-grabber-agent
+if [ "$1" = configure ]; then
+    if getent passwd $USER; then
+    :
+    else
+        # User & homedir
+        useradd -r -d $DIR -s /sbin/nologin $USER
+        #usermod -a -G %{video_group} $USER
+        mkdir -p $DIR
+        chown $USER $DIR
+        chmod 0700 $DIR
+        # agent-readable env
+        chgrp $USER /etc/default/webrtc-grabber-agent
+        chmod 0640 /etc/default/webrtc-grabber-agent
+        # suid for chromium sandbox
+        chmod +s $PREFIX/chrome-sandbox
+    fi
+fi

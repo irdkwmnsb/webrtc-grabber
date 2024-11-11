@@ -1,0 +1,5 @@
+# Binaries
+packages/relay/{asset,conf,cmd/signalling/signalling} /opt/webrtc-grabber-relay
+
+# Systemd unit
+rpm/relay/webrtc-grabber-relay.service usr/lib/systemd/system

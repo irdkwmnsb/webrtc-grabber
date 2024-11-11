@@ -1,0 +1,17 @@
+PREFIX=/opt/webrtc-grabber-relay
+DIR=$PREFIX/homedir
+USER=webrtc-grabber-relay
+if [ "$1" = configure ]; then
+    if getent passwd $USER; then
+    :
+    else
+        # User & homedir
+        useradd -r -d $DIR -s /sbin/nologin $USER
+        mkdir -p $DIR
+        chown $USER $DIR
+        chmod 0700 $DIR
+        # relay-readable config
+        chgrp $USER $PREFIX/conf/config.json
+        chmod 0640 $PREFIX/conf/config.json
+    fi
+fi

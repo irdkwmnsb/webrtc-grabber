@@ -1,0 +1,12 @@
+# Binaries
+packages/grabber/build/grabber-linux-x64/* opt/webrtc-grabber-agent
+
+# Systemd unit
+rpm/agent/webrtc-grabber-agent.service usr/lib/systemd/system
+
+# D-Bus policy
+rpm/agent/webrtc-grabber-agent-dbus-policy.conf usr/share/dbus-1/session.d
+
+# Config
+rpm/agent/config.json opt/webrtc-grabber-agent/resources/app
+rpm/agent/webrtc-grabber-agent etc/default
