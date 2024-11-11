@@ -39,14 +39,14 @@ echo $version
 git archive --output ../webrtc-grabber_$version.orig.tar.gz $rev
 ```
 
-3. Checkout deb release branch, update version & changelog:
+3. Update version & changelog:
 
 ```sh
-dist=jammy
-dch -v $version
+build=1
+dch -v $version-$build
 ```
 
-4. Build unreleased test package:
+4. Build unreleased package:
 
 ```sh
 # --use-network for npm install
@@ -56,15 +56,17 @@ pdebuild --buildresult . -- --basetgz ~/pbuilder/jammy-base.tgz --use-network ye
 5. Install & test unreleased package
 
 ```sh
-sudo apt-get install webrtc-grabber-{agent,relay}_${version}_amd64.deb
+sudo apt-get install webrtc-grabber-{agent,relay}_${version}-${build}_amd64.deb
 # Test here
 sudo apt-get remove webrtc-grabber-{agent,relay}
 sudo apt-get purge webrtc-grabber-{agent,relay}
 ```
 
-6. Release & build release package:
+6. Finalize changelog, build release package, commit changelog:
 
 ```sh
 dch -r
 pdebuild --buildresult . -- --basetgz ~/pbuilder/jammy-base.tgz --use-network yes
+git add debian/changelog
+git commit -m "debian $version-$build"
 ```
