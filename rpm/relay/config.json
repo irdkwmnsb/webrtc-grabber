@@ -1,0 +1,21 @@
+{
+  "participants": [
+    "001", "002", "003", "004", "005", "006", "007", "008"
+  ],
+  "adminsNetworks": [
+    "0.0.0.0/0"
+  ],
+  "peerConnectionConfig": {
+    "iceServers": [
+      {
+        "urls": "turn:127.0.0.1:3478",
+        "username": "admin",
+        "credential": "credential"
+      }
+    ]
+  },
+  "grabberPingInterval": 3000,
+  "adminCredential": "live",
+  "serverPort": 13478,
+  "RecordStorageDirectory": "/opt/webrtc-grabber-relay/homedir/records"
+}

@@ -11,6 +11,7 @@ override_dh_auto_install:
 # agent: rename env
 	mv rpm/agent/webrtc-grabber-agent.env rpm/agent/webrtc-grabber-agent
 # relay: remove unused default config
+	rm packages/relay/conf/config.json
 	rm packages/relay/conf/recorder.json
 # turn : rename env
 	mv rpm/turn/webrtc-grabber-turn.env rpm/turn/webrtc-grabber-turn

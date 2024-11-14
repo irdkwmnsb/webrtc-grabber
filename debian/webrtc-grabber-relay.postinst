@@ -7,9 +7,9 @@ if [ "$1" = configure ]; then
     else
         # User & homedir
         useradd -r -d $DIR -s /sbin/nologin $USER
-        mkdir -p $DIR
-        chown $USER $DIR
-        chmod 0700 $DIR
+        mkdir -p $DIR $DIR/records
+        chown $USER $DIR $DIR/records
+        chmod 0700 $DIR $DIR/records
         # relay-readable config
         chgrp $USER $PREFIX/conf/config.json
         chmod 0640 $PREFIX/conf/config.json

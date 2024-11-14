@@ -1,3 +1,9 @@
+webrtc-grabber (1.0.1.alpha.1.ge879a07-3) jammy; urgency=medium
+
+  * Test webcam, audio, recording support.
+
+ -- Dmitrii Kuptsov <demulkup@ya.ru>  Fri, 11 Nov 2024 00:00:11 +0300
+
 webrtc-grabber (1.0.1.alpha.1.ge879a07-2) jammy; urgency=medium
 
   * Test versioning.
