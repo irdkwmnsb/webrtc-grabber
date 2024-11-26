@@ -11,6 +11,8 @@ StartLimitBurst = 10
 [Service]
 User = webrtc-grabber-agent
 EnvironmentFile = /etc/default/webrtc-grabber-agent
+WorkingDirectory = /opt/webrtc-grabber-agent/homedir
+
 Restart = on-failure
 # Retry start after 5 sec
 RestartSec = 5

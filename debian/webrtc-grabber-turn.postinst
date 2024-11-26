@@ -1,0 +1,14 @@
+PREFIX=/opt/webrtc-grabber-turn
+DIR=$PREFIX/homedir
+USER=webrtc-grabber-turn
+if [ "$1" = configure ]; then
+    if getent passwd $USER; then
+    :
+    else
+        # User & homedir
+        useradd -r -d $DIR -s /sbin/nologin $USER
+        mkdir -p $DIR
+        chown $USER $DIR
+        chmod 0700 $DIR
+    fi
+fi

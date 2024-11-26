@@ -1,0 +1,34 @@
+Source: webrtc-grabber
+Maintainer: Dmitrii Kuptsov <demulkup@ya.ru>
+Section: misc
+Priority: optional
+Standards-Version: 4.7.0
+Build-Depends: debhelper-compat (= 11), nodejs (>= 20), adduser, curl, libglib2.0-0, libnss3, libnspr4, libatk1.0-0, libatk-bridge2.0-0, libcups2, libdbus-1-3, libdrm2, libgtk-3-0, libpango-1.0-0, libcairo2, libx11-6, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxrandr2, libgbm1, libxcb1, libxkbcommon-x11-0, libasound2, libatspi2.0-0, libwayland-client0
+
+Package: webrtc-grabber-agent
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}, acl, adduser, libc-bin, passwd
+Description: Grabber application for stealthily peeking at other computer's screens
+ The main use case is streaming live screen video from contestants' screens on ICPC World Finals as a part of ICPC Live broadcast.
+ Grabber is an electron application that is running in the background and listens for incoming calls from signaling.
+
+Package: webrtc-grabber-relay
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Grabber application for stealthily peeking at other computer's screens
+ The main use case is streaming live screen video from contestants' screens on ICPC World Finals as a part of ICPC Live broadcast.
+ Signaling part of the suite is a statefull express http server with two socket.io endpoints.
+ One for connecting the peers - /peer, and another to connect the viewers - /admin.
+ The admin endpoint can be protected with a token that is specified in the config file.
+ Signaling is also responsible in providing the peers with the peer config which contains the ICE servers to establish a connection between the peers.
+ The peer endpoint is used to talk to the team computers.
+ A peerConfig is sent to the grabber upon initial connection.
+ The admin endpoint is used to see all available peers and initiate the connection to the peers.
+
+Package: webrtc-grabber-turn
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Grabber application for stealthily peeking at other computer's screens
+ The main use case is streaming live screen video from contestants' screens on ICPC World Finals as a part of ICPC Live broadcast.
+ A pion-based TURN server.
+ Used to transmit video/audio data across different networks.

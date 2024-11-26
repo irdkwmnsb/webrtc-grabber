@@ -1,0 +1,31 @@
+webrtc-grabber (1.0.1.alpha.6.g90b1562-1) jammy; urgency=medium
+
+  * Finalize webcam, audio, recording support.
+  * Better defaults.
+
+ -- Dmitrii Kuptsov <demulkup@ya.ru>  Fri, 15 Nov 2024 00:36:26 +0300
+
+webrtc-grabber (1.0.1.alpha.1.ge879a07-3) jammy; urgency=medium
+
+  * Test webcam, audio, recording support.
+
+ -- Dmitrii Kuptsov <demulkup@ya.ru>  Fri, 11 Nov 2024 00:00:11 +0300
+
+webrtc-grabber (1.0.1.alpha.1.ge879a07-2) jammy; urgency=medium
+
+  * Test versioning.
+
+ -- Dmitrii Kuptsov <demulkup@ya.ru>  Mon, 11 Nov 2024 22:12:20 +0300
+
+webrtc-grabber (1.0.1.alpha.1.ge879a07-1) focal jammy; urgency=medium
+
+  * Test versioning.
+
+ -- Dmitrii Kuptsov <demulkup@ya.ru>  Mon, 11 Nov 2024 22:09:37 +0300
+
+webrtc-grabber (1.0.1.alpha-1) jammy; urgency=medium
+
+  * Application version 1.0.1-alpha.
+  * Initial release (agent, relay & turn binary packages).
+
+ -- Dmitrii Kupsov <demulkup@ya.ru>  Sun, 10 Nov 2024 21:07:08 +0300

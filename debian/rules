@@ -1,0 +1,46 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+override_dh_auto_install:
+# agent: remove unused executable js
+	rm packages/grabber/build/grabber-linux-x64/resources/app/node_modules/sha.js/bin.js
+	rm packages/grabber/build/grabber-linux-x64/resources/app/node_modules/async/support/sync-package-managers.js
+# agent: remove unused default config
+	rm packages/grabber/build/grabber-linux-x64/resources/app/config.json
+# agent: rename env
+	mv rpm/agent/webrtc-grabber-agent.env rpm/agent/webrtc-grabber-agent
+# relay: remove unused default config
+	rm packages/relay/conf/config.json
+	rm packages/relay/conf/recorder.json
+# turn : rename env
+	mv rpm/turn/webrtc-grabber-turn.env rpm/turn/webrtc-grabber-turn
+# actual install
+	dh_install --sourcedir .
+
+override_dh_auto_build:
+	mkdir -p tmpdir
+	curl -LO https://go.dev/dl/go1.23.3.linux-amd64.tar.gz
+	echo 'a0afb9744c00648bafb1b90b4aba5bdb86f424f02f9275399ce0c20b93a2c3a8  go1.23.3.linux-amd64.tar.gz' | sha256sum --check
+	tar xf go1.23.3.linux-amd64.tar.gz
+	\
+		tmpdir=$(shell pwd)/tmpdir ; \
+		export XDG_CACHE_HOME=$$tmpdir XDG_RUNTIME_DIR=$$tmpdir HOME=$$tmpdir ; \
+		cd packages/grabber ; \
+		npm ci && npm run build_linux_x64
+	\
+		tmpdir=$(shell pwd)/tmpdir ; \
+		export XDG_CACHE_HOME=$$tmpdir XDG_RUNTIME_DIR=$$tmpdir HOME=$$tmpdir ; \
+		goroot=$(shell pwd)/go ; \
+		export GOROOT=$$goroot PATH=$$goroot/bin:$$PATH ; \
+		cd packages/relay/cmd/signalling ; \
+		go mod tidy ; \
+		go build
+	\
+		tmpdir=$(shell pwd)/tmpdir ; \
+		export XDG_CACHE_HOME=$$tmpdir XDG_RUNTIME_DIR=$$tmpdir HOME=$$tmpdir ; \
+		goroot=$(shell pwd)/go ; \
+		export GOROOT=$$goroot PATH=$$goroot/bin:$$PATH ; \
+		cd packages/go-turn ; \
+		go mod tidy ; \
+		go build

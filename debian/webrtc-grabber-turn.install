@@ -1,0 +1,8 @@
+# Binaries
+packages/go-turn/go-turn /opt/webrtc-grabber-turn
+
+# Systemd unit
+rpm/turn/webrtc-grabber-turn.service usr/lib/systemd/system
+
+# Config
+rpm/turn/webrtc-grabber-turn etc/default

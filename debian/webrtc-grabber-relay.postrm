@@ -1,0 +1,9 @@
+DIR=/opt/webrtc-grabber-relay/homedir
+USER=webrtc-grabber-relay
+if [ "$1" = purge ]; then
+    # User & homedir
+    rm -rf $DIR
+    if getent passwd $USER; then
+        userdel $USER
+    fi
+fi
