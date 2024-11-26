@@ -1,0 +1,54 @@
+{
+  "name": "webrtc-grabber-sdk",
+  "version": "0.0.2",
+  "description": "SDK for creating and playing streams for webrtc-grabber",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "target": [
+    "node18",
+    "es2020"
+  ],
+  "tsup": {
+    "entry": [
+      "index.ts"
+    ],
+    "target": [
+      "node18",
+      "es2020"
+    ],
+    "splitting": false,
+    "sourcemap": true,
+    "clean": true,
+    "dts": true,
+    "format": [
+      "cjs",
+      "esm"
+    ]
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/irdkwmnsb/webrtc-grabber.git"
+  },
+  "keywords": [
+    "webrtc",
+    "webrtc-grabber"
+  ],
+  "author": "ICPC Live team",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/irdkwmnsb/webrtc-grabber/issues"
+  },
+  "homepage": "https://github.com/irdkwmnsb/webrtc-grabber#readme",
+  "devDependencies": {
+    "events": "^3.3.0",
+    "tsup": "^8.0.1",
+    "typed-emitter": "^2.1.0",
+    "ws": "^8.12.1"
+  }
+}
