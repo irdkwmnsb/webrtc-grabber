@@ -1,6 +1,17 @@
 const {GrabberSocket, CustomEvent} = require("./sockets.js");
 
 
+function uploadRecord(fileBlob, fileName, signallingUrl, peerName) {
+    const formData = new FormData()
+    formData.append('file', fileBlob, fileName)
+
+    return fetch(`${signallingUrl}/api/agent/${peerName}/record_upload`,
+        {
+            method: "POST",
+            body: formData,
+        });
+}
+
 class GrabberCaptureClient {
     constructor(peerName, signallingUrl) {
         this.peerName = peerName;
@@ -70,14 +81,7 @@ class GrabberCaptureClient {
     }
 
     record_upload(fileName, fileBlob) {
-        const formData = new FormData()
-        formData.append('file', fileBlob, fileName)
-
-        return fetch(`${this.signallingUrl}/api/agent/${this.peerName}/record_upload`,
-            {
-                method: "POST",
-                body: formData,
-            });
+        return uploadRecord(fileBlob, fileName, this.signallingUrl, this.peerName);
     }
 }
 

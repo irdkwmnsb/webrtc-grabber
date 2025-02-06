@@ -125,13 +125,8 @@ function runGrabbing(window) {
             const fileName = `${recordId}_${recordType}.webm`;
             fs.readFile(path.join(configS.recordingsDirectory ?? ".", fileName), function (err, data) {
                 if (!err) {
-                    const fileBlob = new Blob([data], {type: 'video/webm'})
-                    const promise = client.record_upload(fileName, fileBlob)
-                    promise.then(r => {
-                        r.text().then(text => {
-                            console.log(`Reaction upload ${fileName} to server: ${text}`)
-                        });
-                    }).catch(e => console.error(`Reaction uploading to server error: ${e}`));
+                    console.log(`Uploading reaction ${fileName} to server (main)`)
+                    window.webContents.send("upload_record", data, fileName, client.signallingUrl, client.peerName);
                 } else {
                     console.error(`Reaction upload ${fileName} error: ${err}`);
                 }
@@ -165,7 +160,7 @@ app.whenReady().then(() => {
 
     app.on('before-quit', () => {
         window.removeAllListeners('close');
-        window.close();
+        // window.close();
     });
 })
 
@@ -200,3 +195,6 @@ function parseArguments() {
 
     return config;
 }
+
+console.log("Grabber version: 2024-12-14")
+console.log(`Versions: ${JSON.stringify(process.versions)}`)

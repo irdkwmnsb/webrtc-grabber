@@ -1,4 +1,5 @@
 const { ipcRenderer } = require('electron')
+// const {Blob} = require("node:buffer");
 
 let streams = {};
 const pcs = new Map();
@@ -28,7 +29,7 @@ ipcRenderer.on('source:update', async (_, { screenSourceId, webcamConstraint, we
                 mandatory: {
                     chromeMediaSource: 'desktop',
                     chromeMediaSourceId: screenSourceId,
-                    desktopConstraint,
+                    ...desktopConstraint,
                 } ?? {
                     chromeMediaSource: 'desktop',
                     chromeMediaSourceId: screenSourceId,
@@ -43,6 +44,20 @@ ipcRenderer.on('source:update', async (_, { screenSourceId, webcamConstraint, we
     }
 
     streams = detectedStreams;
+});
+
+ipcRenderer.on("upload_record", async (_, data, fileName, signallingUrl, peerName) => {
+    console.log(`Uploading reaction ${fileName} to server: (preload)`)
+    const fileBlob = new Blob([data], {type: 'video/webm'})
+    const formData = new FormData()
+    formData.append('file', fileBlob, fileName)
+
+    fetch(`${signallingUrl}/api/agent/${peerName}/record_upload`, {method: "POST", body: formData})
+        .then(r => {
+            r.text().then(text => {
+                console.log(`Reaction upload ${fileName} to server: ${text}`)
+            });
+        }).catch(e => console.error(`Reaction uploading to server error: ${e}`));
 });
 
 ipcRenderer.on('source:show_debug', async () => {
@@ -161,3 +176,7 @@ ipcRenderer.on('player_disconnect', (_) => {
     });
     pcs.clear();
 });
+
+
+console.log("Grabber version: 2024-12-14")
+console.log(`Versions: ${JSON.stringify(process.versions)}`)

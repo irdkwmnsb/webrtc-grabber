@@ -13,8 +13,8 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "devDependencies": {
-    "electron": "^33.0.1",
-    "@electron/packager": "^18.3.5"
+    "electron": "^21.0.1",
+    "electron-packager": "^16.0.0"
   },
   "dependencies": {
     "command-line-args": "^5.2.1",
