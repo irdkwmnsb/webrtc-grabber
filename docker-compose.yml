@@ -1,6 +1,16 @@
 version: "3"
 services:
   turn:
-    image: coturn/coturn:latest
-    command: -n --no-cli -z -f --listening-port 3478 --min-port=40000 --max-port=40199
-    network_mode: host
+    image: ghcr.io/irdkwmnsb/webrtc-grabber-go-turn:latest
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "40000-40199:40000-40199/udp"
+    environment:
+      - PUBLIC_IP=0.0.0.0  # Replace with your public IP
+      - PORT=3478
+      - USERS=admin=credential
+      - REALM=nef.turn
+      - UDP_PORT_FROM=40000
+      - UDP_PORT_TO=40199
+    restart: unless-stopped

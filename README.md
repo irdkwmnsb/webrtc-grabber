@@ -1,4 +1,5 @@
 # WebRTC-grabber
+
 ---
 
 The main use case is streaming live screen video from contestants' screens on
@@ -9,20 +10,22 @@ The main use case is streaming live screen video from contestants' screens on
 
 1. [WebRTC Protocol](#WebRTC-Protocol)
 2. [Grabber](#Grabber)
-    - [Configuration](#grabber-config)
-    - [Build sources](#grabber-build)
-    - [Run](#grabber-run)
+   - [Configuration](#grabber-config)
+   - [Build sources](#grabber-build)
+   - [Run](#grabber-run)
 3. [Signaling](#Signaling)
-    - [Configuration](#signaling-config)
-    - [Build sources](#signaling-build)
-    - [Run](#signaling-run)
+   - [Configuration](#signaling-config)
+   - [Build sources](#signaling-build)
+   - [Run](#signaling-run)
 4. [TURN](#TURN)
-    - [Build sources](#turn-build)
-    - [Run](#turn-run)
+   - [Using Docker](#turn-docker)
+   - [Build sources](#turn-build)
+   - [Run](#turn-run)
 5. [FAQ](#FAQ)
 6. [License](#License)
 
 ## WebRTC Protocol
+
 ---
 
 [WebRTC](https://webrtc.org/) is a new protocol widely used for video
@@ -54,14 +57,15 @@ connect peers from the “blue” network with computers from the “red” netw
 
 The solution consisted of 3 main parts:
 
-- **Grabber** - standalone application for background capturing and sharing 
+- **Grabber** - standalone application for background capturing and sharing
   screen and webcam.
-- **Signaling** - webserver to exchange connection data between the grabber 
+- **Signaling** - webserver to exchange connection data between the grabber
   and players, capture video in browser and maintain a list of active grabbers.
-- **TURN** - server for forwarding video packages between grabber and 
+- **TURN** - server for forwarding video packages between grabber and
   players when they separated using NAT.
 
 ## Grabber
+
 ---
 
 Grabber is an electron application that is running in the background and listens
@@ -87,7 +91,7 @@ Grabber [`config.json`](packages/grabber/config.json):
 where
 
 | Property                | Description                                       | Type        |
-|-------------------------|---------------------------------------------------|-------------|
+| ----------------------- | ------------------------------------------------- | ----------- |
 | `webcamConstraint`      | Webcam constraints                                | **object**  |
 | `aspectRatio`           | Source aspect ratio                               | **number**  |
 | `webcamAudioConstraint` | Sets the constraints on contestant's webcam audio | **boolean** |
@@ -128,14 +132,16 @@ After that, you can run the grabber using executable:
 
 - Launch in background (see
   [`runner.bat`](packages/grabber/scripts/runner.bat)):
+
   ```
   $ ~dp0grabber.exe . --peerName={number of computer} --signalingUrl="{signalling url}"
   ```
 
 - For testing use the
   script [`tester.bat`](packages/grabber/scripts/tester.bat):
+
   ```
-  $ ~dp0grabber.exe . --debugMode --peerName={number of computer} 
+  $ ~dp0grabber.exe . --debugMode --peerName={number of computer}
   --signalingUrl="{signalling url}"
   ```
 
@@ -148,11 +154,13 @@ After that, you can run the grabber using executable:
 Use [`grabber-linux.sh`](packages/grabber/scripts/grabber-linux.sh) script:
 
 - Launch in background:
+
   ```shell
   $ bash grabber-linux.sh run {computer number} {signalling url}
   ```
 
 - For testing use
+
   ```shell
   $ bash grabber-linux.sh test {computer number} {signalling url}
   ```
@@ -168,6 +176,7 @@ The same as for Linux, but name of the script is
 [`grabber-darwin.sh`](packages/grabber/scripts/grabber-darwin.sh).
 
 ## Signaling
+
 ---
 
 Signaling part of the suite is a statefull express http server with two
@@ -187,16 +196,7 @@ Signaling [`config.json`](packages/relay/conf/config.json):
 
 ```json
 {
-  "participants": [
-    "001",
-    "002",
-    "003",
-    "004",
-    "005",
-    "006",
-    "007",
-    "008"
-  ],
+  "participants": ["001", "002", "003", "004", "005", "006", "007", "008"],
   "peerConnectionConfig": {
     "iceServers": [
       {
@@ -214,7 +214,7 @@ Signaling [`config.json`](packages/relay/conf/config.json):
 where
 
 | Property               | Description                     | Type             |
-|------------------------|---------------------------------|------------------|
+| ---------------------- | ------------------------------- | ---------------- |
 | `participants`         | Participant names               | **string array** |
 | `peerConnectionConfig` | Connection config               | **object**       |
 | `iceServers`           | Turn servers                    | **object array** |
@@ -255,12 +255,12 @@ $ sh signalling.sh
 ```
 
 ## TURN
+
 ---
 
 Turn server is used to transmit video/audio data across different networks.
-We use an open source implementation of turn
-called [coturn](https://github.com/coturn/coturn) inside docker with
-host network type.
+We provide a lightweight Go-based TURN server implementation that can be run either
+as a standalone binary or using Docker.
 
 ### Build sources <a name="turn-build"></a>
 
@@ -292,21 +292,18 @@ $ turn.cmd
 $ sh turn.sh
 ```
 
-
-
 ## FAQ
+
 ---
 
 **General**
 
 > **Q:** Is it true that VLC is no longer needed on the participants' computers?
-> <br>
-> **A:** **Yes**.
+> <br> > **A:** **Yes**.
 
 > **Q:** Is it true that when `webrtc-grabber` starts, it starts uploading the
 > image to the network without any additional requests?
-> <br>
-> **A:** **No**. It starts pinging the server with an interval of 3
+> <br> > **A:** **No**. It starts pinging the server with an interval of 3
 > seconds (can be configured in
 > signaling [`config.json`](packages/relay/conf/config.json),
 > `grabberPingInterval` parameter) and gives the stream only if it receives a
@@ -314,46 +311,39 @@ $ sh turn.sh
 
 > **Q:** Is it true that during the update it will be necessary to
 > completely re-upload `grabber` executable (~100MB)?
-> <br>
-> **A:** **Yes**.
+> <br> > **A:** **Yes**.
 
 > **Q:** How to test the performance of `webrtc-grabber` without access to
 > the Internet, on Ubuntu, Windows?
-> <br>
-> **A:** It is necessary to raise the signaling. This is
+> <br> > **A:** It is necessary to raise the signaling. This is
 > a [Go server](https://github.com/irdkwmnsb/webrtc-grabber/tree/main/packages/relay/signaling).
 > See instructions above: [How to run signaling](#signaling-run).
-> If the computers on the local network have direct access to each other 
+> If the computers on the local network have direct access to each other
 > (without intermediate **NAT**), then the turn server is not needed.
 
 > **Q:** How to check if the signaling service is up and running?
-> <br>
-> **A:** If you run signaling service, you will be able to see the interface 
+> <br> > **A:** If you run signaling service, you will be able to see the interface
 > on `localhost:8000`.
 
 **Connections and TURN-relay**
 
-> **Q:** How many (TCP/UDP) ports do you really need? Does their number 
+> **Q:** How many (TCP/UDP) ports do you really need? Does their number
 > depend on the number of streams and how?
-> <br>
-> **A:** The number of ports depends on the number of simultaneous connections.
+> <br> > **A:** The number of ports depends on the number of simultaneous connections.
 
-> **Q:** Is it true that clients only differ in `peerName` in `config.json`, 
+> **Q:** Is it true that clients only differ in `peerName` in `config.json`,
 > and technically they all use the same port in `signalingUrl`?
-> <br>
-> **A:** **Yes**. All grabbers use the same `signalingUrl` port. In fact, the 
-> unique identifier of the grabber is the id of the socket with it. 
-> `peerName` is an acquisition above it, that is, the relationship between 
+> <br> > **A:** **Yes**. All grabbers use the same `signalingUrl` port. In fact, the
+> unique identifier of the grabber is the id of the socket with it.
+> `peerName` is an acquisition above it, that is, the relationship between
 > `peerId` and `peerName` occurs after the connection.
 
 > **Q:** What width of the channel is needed to the client?
-> <br>
-> **A:** It is claimed that one connection needs 2-3 Mbps.
+> <br> > **A:** It is claimed that one connection needs 2-3 Mbps.
 
 > **Q:** What delays are acceptable for normal operation \[1-100-10000ms\]?
-> <br>
-> **A:** We use SRTP connection for video, `http/websocket` connection for 
-> signaling. So packet loss is allowed at all levels. The way 
+> <br> > **A:** We use SRTP connection for video, `http/websocket` connection for
+> signaling. So packet loss is allowed at all levels. The way
 > the peers can tell if they are connected or not depending on the latency
 > is controlled by the underlying WebRTC implementation of Chromium and
 > the browser on the viewer side.
@@ -362,48 +352,45 @@ $ sh turn.sh
 > that grabber successfully connects and shows a reliable stream over the internet
 > using wifi.
 > That proves that it can be used in local networks even over wifi.
-> 
-> Another relevant question to ask is how *reliable* the connection must be.
+>
+> Another relevant question to ask is how _reliable_ the connection must be.
 > And this question is perfectly answered by the ability to have video calls
-> in Telegram / VK / Discord / Google meet from the subway. The 
-> connection will try to recover under the same conditions until we break 
+> in Telegram / VK / Discord / Google meet from the subway. The
+> connection will try to recover under the same conditions until we break
 > it by force.
 
 > **Q:** Have you tested compatibility with OpenVPN?
-> <br>
-> **A:** We tried streaming over VPN, it worked.
+> <br> > **A:** We tried streaming over VPN, it worked.
 
 > **Q:** Is it true that the Turn-relay should be at the edge of the network
 > of participants, and the signaling server is in Live?
-> <br>
-> **A:** There should be access to the turn service from the contestants network, and 
-> from the live network. Theoretically, turn may not necessarily be on the 
+> <br> > **A:** There should be access to the turn service from the contestants network, and
+> from the live network. Theoretically, turn may not necessarily be on the
 > border if all the required packets of the WebRTC protocol are properly proxied/redirected.
 
-> **Q:** How many, what (TCP/UDP) and in what direction (from or to the 
-> contestants) packets with which ports do we need to allow through the firewall and is it true that in this case we can do 
+> **Q:** How many, what (TCP/UDP) and in what direction (from or to the
+> contestants) packets with which ports do we need to allow through the firewall and is it true that in this case we can do
 > without installing Turn-relay?
 > Or in other words: how to make it work without the turn service and what
 > changes must be made to the firewall for that to happen?
-> <br>
-> **A:** You can see the screens without a turn-relay if the computers of the 
+> <br> > **A:** You can see the screens without a turn-relay if the computers of the
 > contestants, the signaling server and the viewer computer are reachable from
 > the same network. It's easy to see that this doesn't fit the conditions of
 > the competition, because of the way the network is usually set up.
 > It's easier to assume that WebRTC uses an arbitrary UDP port when the two peers connect.
-> 
-> If we use Turn-relay, we need to allow traffic from the participants network to 
-> TCP port 3000 (signaling), port 3478 (TCP and UDP) and a certain range of 
-> UDP ports (As experiments have shown, one active connection consumes 2 
-> ports. Probably, 200 ports will be enough with more The numbers can be 
+>
+> If we use Turn-relay, we need to allow traffic from the participants network to
+> TCP port 3000 (signaling), port 3478 (TCP and UDP) and a certain range of
+> UDP ports (As experiments have shown, one active connection consumes 2
+> ports. Probably, 200 ports will be enough with more The numbers can be
 > anything, for example 40000-40199).
 
-> **Q:** Which Turn-relay can be used under Windows (highly desirable 
+> **Q:** Which Turn-relay can be used under Windows (highly desirable
 > without Cygwin)?
-> <br>
-> **A:** You can use our Turn-relay. See [Turn](#TURN).
+> <br> > **A:** You can use our Turn-relay. See [Turn](#TURN).
 
 ## License
+
 ---
 
 This project is licensed under
