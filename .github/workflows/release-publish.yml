@@ -1,0 +1,134 @@
+name: Release Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version name (e.g., v1.0.0)"
+        required: true
+  release:
+    types: [created]
+
+jobs:
+  build_linux:
+    name: Build Linux Artifact
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+      - name: Install agent dependencies
+        working-directory: ./packages/grabber
+        run: npm ci
+      - name: Run Linux build
+        run: bash ./grabber_build.sh linux x64
+      - name: Create tar archive for Linux build
+        working-directory: ./packages/grabber/build/
+        run: tar -czvf ../webrtc_grabber_agent_linux_x64.tar.gz .
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: packages/grabber/webrtc_grabber_agent_linux_x64.tar.gz
+
+  build_windows:
+    name: Build Windows Artifact
+    runs-on: windows-2019
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+      - name: Install agent dependencies
+        working-directory: .\packages\grabber
+        run: npm ci
+      - name: Run Windows build
+        working-directory: .
+        shell: cmd
+        run: |
+          grabber_build_win64.bat
+      - name: Archive Windows build
+        run: powershell Compress-Archive -Path .\packages\grabber\build\* -DestinationPath .\packages\grabber\webrtc_grabber_agent_win_x64.zip
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: packages/grabber/webrtc_grabber_agent_win_x64.zip
+
+  create_release:
+    name: Create GitHub Release
+    needs: [build_linux, build_windows]
+    # Only run this job when triggered by workflow_dispatch
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          release_name: "Release ${{ github.event.inputs.version }}"
+          draft: false
+          prerelease: false
+
+  upload_assets:
+    name: Upload Assets to Release
+    needs: [build_linux, build_windows]
+    # This job runs for both triggers, but uses different release info based on trigger type
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: ./release-assets/
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+          path: ./release-assets/
+
+      # For workflow_dispatch, get the upload URL from the create_release job
+      - name: Get Release Info from workflow_dispatch
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/github-script@v6
+        id: get_release_info_workflow
+        with:
+          script: |
+            const releases = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            const release = releases.data.find(r => r.tag_name === '${{ github.event.inputs.version }}');
+            if (!release) throw new Error('Release not found');
+            return { upload_url: release.upload_url, id: release.id };
+          result-encoding: string
+
+      # For release event, get upload URL directly from the event
+      - name: Get Release Info from release event
+        if: github.event_name == 'release'
+        id: get_release_info_event
+        run: echo "UPLOAD_URL=${{ github.event.release.upload_url }}" >> $GITHUB_ENV
+
+      - name: Upload Linux Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event_name == 'workflow_dispatch' && fromJSON(steps.get_release_info_workflow.outputs.result).upload_url || github.event.release.upload_url }}
+          asset_path: ./release-assets/webrtc_grabber_agent_linux_x64.tar.gz
+          asset_name: webrtc_grabber_agent_linux_x64.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload Windows Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event_name == 'workflow_dispatch' && fromJSON(steps.get_release_info_workflow.outputs.result).upload_url || github.event.release.upload_url }}
+          asset_path: ./release-assets/webrtc_grabber_agent_win_x64.zip
+          asset_name: webrtc_grabber_agent_win_x64.zip
+          asset_content_type: application/zip
