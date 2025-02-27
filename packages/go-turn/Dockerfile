@@ -19,4 +19,4 @@ EXPOSE 3478/udp
 EXPOSE 40000-40199/udp
 
 ENTRYPOINT ["/go-turn"]
-CMD ["-public-ip=${PUBLIC_IP}", "-port=${PORT}", "-users=${USERS}", "-realm=${REALM}", "-udp-port-from=${UDP_PORT_FROM}", "-udp-port-to=${UDP_PORT_TO}"]
+CMD -public-ip=${PUBLIC_IP} -port=${PORT} -users=${USERS} -realm=${REALM} -udp-port-from=${UDP_PORT_FROM} -udp-port-to=${UDP_PORT_TO}
