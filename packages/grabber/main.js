@@ -31,12 +31,14 @@ function createWindow() {
 }
 
 const sendSourceUpdate = (window) => {
-    window.webContents.send('source:update', {
-        screenSourceId: screenSourceId,
-        webcamConstraint: configS.webcamConstraint,
-        webcamAudioConstraint: configS.webcamAudioConstraint,
-        desktopConstraint: configS.desktopConstraint,
-    });
+    if (window && !window.isDestroyed()) {
+        window.webContents.send('source:update', {
+            screenSourceId: screenSourceId,
+            webcamConstraint: configS.webcamConstraint,
+            webcamAudioConstraint: configS.webcamAudioConstraint,
+            desktopConstraint: configS.desktopConstraint,
+        });
+    }
 }
 
 const sendAvailableStreams = (window) => {
