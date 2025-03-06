@@ -8,6 +8,7 @@ services:
       - "40000-40199:40000-40199/udp"
     environment:
       - PUBLIC_IP=0.0.0.0  # Replace with your public IP
+      - PUBLIC_IPv6=""     # Add a value if you have an IPv6 address
       - PORT=3478
       - USERS=admin=credential
       - REALM=nef.turn
