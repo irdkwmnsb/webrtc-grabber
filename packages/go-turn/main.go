@@ -14,7 +14,8 @@ import (
 )
 
 func main() {
-	publicIP := flag.String("public-ip", "", "IP Address that TURN can be contacted by.")
+	publicIP := flag.String("public-ip", "", "IPv4 Address that TURN can be contacted by.")
+	publicIPv6 := flag.String("public-ipv6", "", "IPv6 Address that TURN can be contacted by.")
 	port := flag.Int("port", 3478, "Listening port.")
 	users := flag.String("users", "", "List of username and password (e.g. \"user=pass,user=pass\")")
 	realm := flag.String("realm", "nef.turn", "Realm (defaults to \"pion.ly\")")
@@ -33,7 +34,17 @@ func main() {
 	// this allows us to add logging, storage or modify inbound/outbound traffic
 	udpListener, err := net.ListenPacket("udp4", "0.0.0.0:"+strconv.Itoa(*port))
 	if err != nil {
-		log.Panicf("Failed to create TURN server listener: %s", err)
+		log.Panicf("Failed to create TURN server IPv4 listener: %s", err)
+	}
+
+	var udpListenerIPv6 net.PacketConn
+	if len(*publicIPv6) > 0 {
+		udpListenerIPv6, err = net.ListenPacket("udp6", "[::]:"+strconv.Itoa(*port))
+		if err != nil {
+			log.Printf("Failed to create TURN server IPv6 listener: %s", err)
+			log.Println("Continuing with IPv4 only")
+			udpListenerIPv6 = nil
+		}
 	}
 
 	// Cache -users flag for easy lookup later
@@ -41,6 +52,30 @@ func main() {
 	usersMap := map[string][]byte{}
 	for _, kv := range regexp.MustCompile(`(\w+)=(\w+)`).FindAllStringSubmatch(*users, -1) {
 		usersMap[kv[1]] = turn.GenerateAuthKey(kv[1], *realm, kv[2])
+	}
+
+	packetConnConfigs := []turn.PacketConnConfig{
+		{
+			PacketConn: udpListener,
+			RelayAddressGenerator: &turn.RelayAddressGeneratorPortRange{
+				RelayAddress: net.ParseIP(*publicIP), // Claim that we are listening on IP passed by user (This should be your Public IP)
+				Address:      "0.0.0.0",              // But actually be listening on every interface
+				MinPort:      uint16(*udpPortForm),
+				MaxPort:      uint16(*udpPortTo),
+			},
+		},
+	}
+
+	if udpListenerIPv6 != nil {
+		packetConnConfigs = append(packetConnConfigs, turn.PacketConnConfig{
+			PacketConn: udpListenerIPv6,
+			RelayAddressGenerator: &turn.RelayAddressGeneratorPortRange{
+				RelayAddress: net.ParseIP(*publicIPv6),
+				Address:      "::",
+				MinPort:      uint16(*udpPortForm),
+				MaxPort:      uint16(*udpPortTo),
+			},
+		})
 	}
 
 	s, err := turn.NewServer(turn.ServerConfig{
@@ -54,18 +89,7 @@ func main() {
 			}
 			return nil, false
 		},
-		// PacketConnConfigs is a list of UDP Listeners and the configuration around them
-		PacketConnConfigs: []turn.PacketConnConfig{
-			{
-				PacketConn: udpListener,
-				RelayAddressGenerator: &turn.RelayAddressGeneratorPortRange{
-					RelayAddress: net.ParseIP(*publicIP), // Claim that we are listening on IP passed by user (This should be your Public IP)
-					Address:      "0.0.0.0",              // But actually be listening on every interface
-					MinPort:      uint16(*udpPortForm),
-					MaxPort:      uint16(*udpPortTo),
-				},
-			},
-		},
+		PacketConnConfigs: packetConnConfigs,
 	})
 	if err != nil {
 		log.Panic(err)

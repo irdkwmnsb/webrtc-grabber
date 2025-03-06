@@ -8,6 +8,7 @@ FROM alpine:3.17
 WORKDIR /
 COPY --from=builder /go-turn /go-turn
 ENV PUBLIC_IP=""  
+ENV PUBLIC_IPv6=""
 ENV PORT="3478"
 ENV USERS="admin=credential"
 ENV REALM="nef.turn"
@@ -18,10 +19,4 @@ EXPOSE 3478/tcp
 EXPOSE 3478/udp
 EXPOSE 40000-40199/udp
 
-RUN echo "Public IP: $PUBLIC_IP"
-RUN echo "Port: $PORT"
-RUN echo "Users: $USERS"
-RUN echo "Realm: $REALM"
-RUN echo "UDP Port From: $UDP_PORT_FROM"
-RUN echo "UDP Port To: $UDP_PORT_TO"
-CMD /go-turn -public-ip=$PUBLIC_IP -port=$PORT -users=$USERS -realm=$REALM -udp-port-from=$UDP_PORT_FROM -udp-port-to=$UDP_PORT_TO
+CMD /go-turn -public-ip=$PUBLIC_IP -public-ipv6=$PUBLIC_IPv6 -port=$PORT -users=$USERS -realm=$REALM -udp-port-from=$UDP_PORT_FROM -udp-port-to=$UDP_PORT_TO
