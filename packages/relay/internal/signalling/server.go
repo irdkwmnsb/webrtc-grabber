@@ -336,9 +336,12 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 			s.grabberSetupChannels[grabberSocketID] = setupChan
 			s.mu.Unlock()
 
-			go s.setupGrabberPeerConnection(grabberSocketID, setupChan, m.Offer.StreamType)
+			trackChan := make(chan struct{})
+
+			go s.setupGrabberPeerConnection(grabberSocketID, setupChan, trackChan, m.Offer.StreamType)
 
 			<-setupChan
+			<-trackChan
 
 			s.mu.Lock()
 			if _, ok := s.grabberPeerConns[grabberSocketID]; !ok {
@@ -547,7 +550,7 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 	return nil
 }
 
-func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, setupChan chan struct{}, streamType string) {
+func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, setupChan, trackChan chan struct{}, streamType string) {
 	grabberConn := s.grabberSockets.GetSocket(grabberSocketID)
 	if grabberConn == nil {
 		log.Printf("Grabber %s not found", grabberSocketID)
@@ -589,6 +592,9 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 		return
 	}
 
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+
 	pc.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		log.Printf("GOT TRACK: %s (Kind: %s)", remoteTrack.ID(), remoteTrack.Kind())
 		localTrack, err := webrtc.NewTrackLocalStaticRTP(remoteTrack.Codec().RTPCodecCapability, remoteTrack.ID(), remoteTrack.StreamID())
@@ -618,6 +624,10 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 				}
 			}
 		}()
+		select {
+		case trackChan <- struct{}{}:
+		default:
+		}
 	})
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
@@ -682,5 +692,15 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 		pc.Close()
 		close(setupChan)
 		return
+	}
+
+	select {
+	case <-trackChan:
+		log.Printf("Track received for grabber %s", grabberSocketID)
+		time.Sleep(2 * time.Second)
+		close(trackChan)
+	case <-timer.C:
+		log.Printf("Timeout waiting for tracks from grabber %s", grabberSocketID)
+		close(trackChan)
 	}
 }
