@@ -13,7 +13,6 @@ import (
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/utils"
-	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -335,18 +334,19 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 
 		pcPlayer.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 			log.Printf("ICE connection state for player %s: %s", playerSocketId, state.String())
-			if state == webrtc.ICEConnectionStateDisconnected || state == webrtc.ICEConnectionStateFailed {
-				log.Printf("Player %s disconnected or failed, cleaning up", playerSocketId)
+			if state == webrtc.ICEConnectionStateDisconnected {
+				log.Printf("Player %s disconnected, waiting for recovery", playerSocketId)
+				time.AfterFunc(30*time.Second, func() {
+					if pcPlayer.ICEConnectionState() == webrtc.ICEConnectionStateDisconnected {
+						log.Printf("Player %s still disconnected, closing", playerSocketId)
+						pcPlayer.Close()
+						delete(s.playerPeerConns, playerSocketId)
+					}
+				})
+			} else if state == webrtc.ICEConnectionStateFailed {
+				log.Printf("Player %s failed, cleaning up", playerSocketId)
 				pcPlayer.Close()
 				delete(s.playerPeerConns, playerSocketId)
-				for grabberID, subs := range s.subscribers {
-					for i, sub := range subs {
-						if sub == pcPlayer {
-							s.subscribers[grabberID] = append(subs[:i], subs[i+1:]...)
-							break
-						}
-					}
-				}
 			}
 		})
 
@@ -368,9 +368,10 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 		gsi := string(grabberSocketID)
 
 		pcPlayer.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+			log.Printf("GOT PLAYER ICE CANDIDATE: %v", err)
 			if candidate != nil {
 				if err := c.WriteJSON(api.PlayerMessage{
-					Event: api.PlayerMessageEventGrabberIce, // Reusing existing event
+					Event: api.PlayerMessageEventGrabberIce,
 					Ice: &api.IceMessage{
 						PeerId:    &gsi,
 						Candidate: candidate.ToJSON(),
@@ -485,28 +486,30 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 		s.grabberTracks[socketID] = append(s.grabberTracks[socketID], localTrack)
 
 		go func() {
-			buffer := make(chan *rtp.Packet, 100)
-			go func() {
-				for pkt := range buffer {
-					for retries := 0; retries < 3; retries++ {
-						if err := localTrack.WriteRTP(pkt); err != nil {
-							log.Printf("error writing RTP to TrackLocal for grabber %s: %v (retry %d)", socketID, err, retries)
-							time.Sleep(100 * time.Millisecond)
-							continue
-						}
-						break
-					}
-				}
-			}()
+			// buffer := make(chan *rtp.Packet, 100)
+			// go func() {
+			// 	for pkt := range buffer {
+			// 		for retries := 0; retries < 3; retries++ {
+			// 			if err := localTrack.WriteRTP(pkt); err != nil {
+			// 				log.Printf("error writing RTP to TrackLocal for grabber %s: %v (retry %d)", socketID, err, retries)
+			// 				time.Sleep(100 * time.Millisecond)
+			// 				continue
+			// 			}
+			// 			break
+			// 		}
+			// 	}
+			// }()
 
 			for {
 				pkt, _, err := remoteTrack.ReadRTP()
 				if err != nil {
 					log.Printf("error reading RTP from grabber %s: %v", socketID, err)
-					return
+					time.Sleep(1 * time.Second)
+					continue
 				}
 				if err := localTrack.WriteRTP(pkt); err != nil {
 					log.Printf("error writing RTP to TrackLocal for grabber %s: %v (retry %d)", socketID, err, 1)
+					continue
 				}
 				// select {
 				// case buffer <- pkt:
