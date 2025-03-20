@@ -253,18 +253,29 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 
 	defer func() {
 		s.playersSockets.CloseSocket(socketID)
+		s.mu.Lock()
 		if pc, ok := s.playerPeerConns[string(socketID)]; ok {
 			pc.Close()
 			delete(s.playerPeerConns, string(socketID))
+
 			for grabberID, subs := range s.subscribers {
 				for i, sub := range subs {
 					if sub == pc {
 						s.subscribers[grabberID] = append(subs[:i], subs[i+1:]...)
+						if len(s.subscribers[grabberID]) == 0 {
+							if grabberPC, ok := s.grabberPeerConns[grabberID]; ok {
+								grabberPC.Close()
+								delete(s.grabberPeerConns, grabberID)
+								delete(s.grabberTracks, grabberID)
+								delete(s.subscribers, grabberID)
+							}
+						}
 						break
 					}
 				}
 			}
 		}
+		s.mu.Unlock()
 	}()
 
 	var message api.PlayerMessage
@@ -340,6 +351,7 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 			}
 		}
 		s.mu.Unlock()
+		log.Printf("OKOKOK")
 
 		pcPlayer, err := webrtc.NewPeerConnection(s.config.PeerConnectionConfig.WebrtcConfiguration())
 		if err != nil {
@@ -368,6 +380,12 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 		s.mu.Lock()
 		s.playerPeerConns[playerSocketId] = pcPlayer
 		s.subscribers[grabberSocketID] = append(s.subscribers[grabberSocketID], pcPlayer)
+		log.Printf("TRACKS COUNT: %v", len(s.grabberTracks[grabberSocketID]))
+		for _, track := range s.grabberTracks[grabberSocketID] {
+			if _, err := pcPlayer.AddTrack(track); err != nil {
+				log.Printf("failed to add track to player %s: %v", playerSocketId, err)
+			}
+		}
 		s.mu.Unlock()
 
 		if err := pcPlayer.SetRemoteDescription(m.Offer.Offer); err != nil {
@@ -375,14 +393,6 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 			pcPlayer.Close()
 			return nil
 		}
-
-		s.mu.Lock()
-		for _, track := range s.grabberTracks[grabberSocketID] {
-			if _, err := pcPlayer.AddTrack(track); err != nil {
-				log.Printf("failed to add track to player %s: %v", playerSocketId, err)
-			}
-		}
-		s.mu.Unlock()
 
 		gsi := string(grabberSocketID)
 
@@ -452,7 +462,6 @@ func (s *Server) setupGrabberSockets() {
 func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.grabberSockets.AddSocket(c)
-	// si := string(socketID)
 
 	if err := c.WriteJSON(api.GrabberMessage{
 		Event: api.GrabberMessageEventInitPeer,
@@ -465,157 +474,6 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 		return
 	}
 
-	// config := s.config.PeerConnectionConfig.WebrtcConfiguration()
-	// pc, err := webrtc.NewPeerConnection(config)
-	// if err != nil {
-	// 	log.Printf("failed to create grabber peer connection %s: %v", socketID, err)
-	// 	return
-	// }
-
-	// s.grabberPeerConns[socketID] = pc
-	// s.grabberTracks[socketID] = []webrtc.TrackLocal{}
-	// s.subscribers[socketID] = []*webrtc.PeerConnection{}
-
-	// _, err = pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
-	// 	Direction: webrtc.RTPTransceiverDirectionRecvonly,
-	// })
-	// if err != nil {
-	// 	log.Printf("failed to add video transceiver for grabber %s: %v", socketID, err)
-	// 	pc.Close()
-	// 	return
-	// }
-
-	// _, err = pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
-	// 	Direction: webrtc.RTPTransceiverDirectionRecvonly,
-	// })
-	// if err != nil {
-	// 	log.Printf("failed to add audio transceiver for grabber %s: %v", socketID, err)
-	// 	pc.Close()
-	// 	return
-	// }
-
-	// pc.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-	// 	log.Printf("GOT TRACK: %s (Kind: %s)", remoteTrack.ID(), remoteTrack.Kind())
-	// 	localTrack, err := webrtc.NewTrackLocalStaticRTP(remoteTrack.Codec().RTPCodecCapability, remoteTrack.ID(), remoteTrack.StreamID())
-	// 	if err != nil {
-	// 		log.Printf("failed to create TrackLocal for grabber %s: %v", socketID, err)
-	// 		return
-	// 	}
-	// 	s.grabberTracks[socketID] = append(s.grabberTracks[socketID], localTrack)
-
-	// 	go func() {
-	// 		// buffer := make(chan *rtp.Packet, 100)
-	// 		// go func() {
-	// 		// 	for pkt := range buffer {
-	// 		// 		for retries := 0; retries < 3; retries++ {
-	// 		// 			if err := localTrack.WriteRTP(pkt); err != nil {
-	// 		// 				log.Printf("error writing RTP to TrackLocal for grabber %s: %v (retry %d)", socketID, err, retries)
-	// 		// 				time.Sleep(100 * time.Millisecond)
-	// 		// 				continue
-	// 		// 			}
-	// 		// 			break
-	// 		// 		}
-	// 		// 	}
-	// 		// }()
-
-	// 		for {
-	// 			pkt, _, err := remoteTrack.ReadRTP()
-	// 			if err != nil {
-	// 				log.Printf("error reading RTP from grabber %s: %v", socketID, err)
-	// 				time.Sleep(1 * time.Second)
-	// 				continue
-	// 			}
-	// 			if err := localTrack.WriteRTP(pkt); err != nil {
-	// 				log.Printf("error writing RTP to TrackLocal for grabber %s: %v (retry %d)", socketID, err, 1)
-	// 				continue
-	// 			}
-	// 			// select {
-	// 			// case buffer <- pkt:
-	// 			// default:
-	// 			// 	log.Printf("Buffer full, dropping packet for grabber %s", socketID)
-	// 			// }
-	// 		}
-	// 	}()
-
-	// 	for _, pcPlayer := range s.subscribers[socketID] {
-	// 		if _, err := pcPlayer.AddTrack(localTrack); err != nil {
-	// 			log.Printf("failed to add track to player from grabber %s: %v", socketID, err)
-	// 		}
-	// 	}
-	// })
-
-	// pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-	// 	log.Printf("ICE Candidate: %v", candidate)
-	// 	if candidate != nil {
-	// 		if err := c.WriteJSON(api.GrabberMessage{
-	// 			Event: api.GrabberMessageEventPlayerIce,
-	// 			Ice: &api.IceMessage{
-	// 				PeerId:    &si,
-	// 				Candidate: candidate.ToJSON(),
-	// 			},
-	// 		}); err != nil {
-	// 			log.Printf("failed to send ICE candidate to grabber %s: %v", socketID, err)
-	// 		}
-	// 	}
-	// })
-
-	// gatherComplete := make(chan struct{})
-	// pc.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
-	// 	if state == webrtc.ICEGathererStateComplete {
-	// 		close(gatherComplete)
-	// 	}
-	// })
-
-	// pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-	// 	log.Printf("ICE connection state for grabber %s: %s", socketID, state.String())
-	// 	if state == webrtc.ICEConnectionStateDisconnected || state == webrtc.ICEConnectionStateFailed {
-	// 		log.Printf("Grabber %s disconnected or failed, cleaning up", socketID)
-	// 		pc.Close()
-	// 		delete(s.grabberPeerConns, socketID)
-	// 		delete(s.grabberTracks, socketID)
-	// 		for _, pcPlayer := range s.subscribers[socketID] {
-	// 			pcPlayer.Close()
-	// 		}
-	// 		delete(s.subscribers, socketID)
-	// 	}
-	// })
-
-	// offer, err := pc.CreateOffer(nil)
-	// if err != nil {
-	// 	log.Printf("failed to create offer for grabber %s: %v", socketID, err)
-	// 	pc.Close()
-	// 	return
-	// }
-	// if err := pc.SetLocalDescription(offer); err != nil {
-	// 	log.Printf("failed to set local description for grabber %s: %v", socketID, err)
-	// 	pc.Close()
-	// 	return
-	// }
-
-	// select {
-	// case <-gatherComplete:
-	// 	log.Printf("ICE gathering completed for grabber %s", socketID)
-	// case <-time.After(10 * time.Second):
-	// 	log.Printf("ICE gathering timed out for grabber %s", socketID)
-	// 	pc.Close()
-	// 	return
-	// }
-
-	// log.Printf("Offer SDP for grabber %s: %s", socketID, offer.SDP)
-
-	// if err := c.WriteJSON(api.GrabberMessage{
-	// 	Event: api.GrabberMessageEventOffer,
-	// 	Offer: &api.OfferMessage{
-	// 		Offer:      offer,
-	// 		PeerId:     &si,
-	// 		StreamType: "webcam",
-	// 	},
-	// }); err != nil {
-	// 	log.Printf("failed to send offer to grabber %s: %v", socketID, err)
-	// 	pc.Close()
-	// 	return
-	// }
-
 	var message api.GrabberMessage
 	for {
 		if err := c.ReadJSON(&message); err != nil {
@@ -627,7 +485,6 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 				pcPlayer.Close()
 			}
 			delete(s.subscribers, socketID)
-			// pc.Close()
 			break
 		}
 
@@ -742,6 +599,11 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 
 		s.mu.Lock()
 		s.grabberTracks[grabberSocketID] = append(s.grabberTracks[grabberSocketID], localTrack)
+		for _, pcPlayer := range s.subscribers[grabberSocketID] {
+			if _, err := pcPlayer.AddTrack(localTrack); err != nil {
+				log.Printf("failed to add track to player: %v", err)
+			}
+		}
 		s.mu.Unlock()
 
 		go func() {
@@ -749,23 +611,13 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 				pkt, _, err := remoteTrack.ReadRTP()
 				if err != nil {
 					log.Printf("error reading RTP from grabber %s: %v", grabberSocketID, err)
-					time.Sleep(1 * time.Second)
-					continue
+					return
 				}
 				if err := localTrack.WriteRTP(pkt); err != nil {
 					log.Printf("error writing RTP to TrackLocal for grabber %s: %v", grabberSocketID, err)
-					continue
 				}
 			}
 		}()
-
-		s.mu.Lock()
-		for _, pcPlayer := range s.subscribers[grabberSocketID] {
-			if _, err := pcPlayer.AddTrack(localTrack); err != nil {
-				log.Printf("failed to add track to player from grabber %s: %v", grabberSocketID, err)
-			}
-		}
-		s.mu.Unlock()
 	})
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
