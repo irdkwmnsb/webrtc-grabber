@@ -18,14 +18,6 @@ import (
 
 const PlayerSendPeerStatusInterval = time.Second * 5
 
-type EmulatedClient struct {
-	PlayerSocketID  sockets.SocketID
-	GrabberSocketID sockets.SocketID
-	PeerConn        *webrtc.PeerConnection
-	Offer           webrtc.SessionDescription
-	Answer          webrtc.SessionDescription
-}
-
 type Server struct {
 	app             *fiber.App
 	config          ServerConfig
@@ -34,11 +26,11 @@ type Server struct {
 	playersSockets  *sockets.SocketPool
 	grabberSockets  *sockets.SocketPool
 
-	grabberPeerConns     map[sockets.SocketID]*webrtc.PeerConnection
+	grabberPeerConns     map[sockets.SocketID]map[string]*webrtc.PeerConnection
 	playerPeerConns      map[string]*webrtc.PeerConnection
-	grabberTracks        map[sockets.SocketID][]webrtc.TrackLocal
-	subscribers          map[sockets.SocketID][]*webrtc.PeerConnection
-	grabberSetupChannels map[sockets.SocketID]chan struct{}
+	grabberTracks        map[sockets.SocketID]map[string][]webrtc.TrackLocal
+	subscribers          map[sockets.SocketID]map[string][]*webrtc.PeerConnection
+	grabberSetupChannels map[sockets.SocketID]map[string]chan struct{}
 
 	mu sync.Mutex
 }
@@ -50,11 +42,11 @@ func NewServer(config ServerConfig, app *fiber.App) (*Server, error) {
 		playersSockets:       sockets.NewSocketPool(),
 		grabberSockets:       sockets.NewSocketPool(),
 		storage:              NewStorage(),
-		grabberPeerConns:     make(map[sockets.SocketID]*webrtc.PeerConnection),
+		grabberPeerConns:     make(map[sockets.SocketID]map[string]*webrtc.PeerConnection),
 		playerPeerConns:      make(map[string]*webrtc.PeerConnection),
-		grabberTracks:        make(map[sockets.SocketID][]webrtc.TrackLocal),
-		subscribers:          make(map[sockets.SocketID][]*webrtc.PeerConnection),
-		grabberSetupChannels: make(map[sockets.SocketID]chan struct{}),
+		grabberTracks:        make(map[sockets.SocketID]map[string][]webrtc.TrackLocal),
+		subscribers:          make(map[sockets.SocketID]map[string][]*webrtc.PeerConnection),
+		grabberSetupChannels: make(map[sockets.SocketID]map[string]chan struct{}),
 	}
 	server.storage.setParticipants(config.Participants)
 	server.oldPeersCleaner = utils.SetIntervalTimer(time.Minute, server.storage.deleteOldPeers)
@@ -67,10 +59,13 @@ func (s *Server) Close() {
 	s.playersSockets.Close()
 	s.grabberSockets.Close()
 
-	for _, pc := range s.grabberPeerConns {
-		if pc != nil {
-			pc.Close()
+	for grabberID, pcs := range s.grabberPeerConns {
+		for _, pc := range pcs {
+			if pc != nil {
+				pc.Close()
+			}
 		}
+		delete(s.grabberPeerConns, grabberID)
 	}
 
 	for _, pc := range s.playerPeerConns {
@@ -259,18 +254,20 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 			delete(s.playerPeerConns, string(socketID))
 
 			for grabberID, subs := range s.subscribers {
-				for i, sub := range subs {
-					if sub == pc {
-						s.subscribers[grabberID] = append(subs[:i], subs[i+1:]...)
-						if len(s.subscribers[grabberID]) == 0 {
-							if grabberPC, ok := s.grabberPeerConns[grabberID]; ok {
-								grabberPC.Close()
-								delete(s.grabberPeerConns, grabberID)
-								delete(s.grabberTracks, grabberID)
-								delete(s.subscribers, grabberID)
+				for streamType, pcs := range subs {
+					for i, sub := range pcs {
+						if sub == pc {
+							s.subscribers[grabberID][streamType] = append(pcs[:i], pcs[i+1:]...)
+							if len(s.subscribers[grabberID]) == 0 {
+								if grabberPC, ok := s.grabberPeerConns[grabberID][streamType]; ok {
+									grabberPC.Close()
+									delete(s.grabberPeerConns, grabberID)
+									delete(s.grabberTracks, grabberID)
+									delete(s.subscribers, grabberID)
+								}
 							}
+							break
 						}
-						break
 					}
 				}
 			}
@@ -299,7 +296,7 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 
 func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m api.PlayerMessage) *api.PlayerMessage {
 	playerSocketId := string(id)
-	log.Printf("EVENT: %v", m.Event)
+	log.Printf("EVENT: %v, STREAM TYPE: %v", m.Event, m.Offer.StreamType)
 	switch m.Event {
 	case api.PlayerMessageEventOffer:
 		if m.Offer == nil {
@@ -330,13 +327,27 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 			return nil
 		}
 
+		streamType := m.Offer.StreamType
+
 		s.mu.Lock()
 		if _, ok := s.grabberPeerConns[grabberSocketID]; !ok {
+			s.grabberPeerConns[grabberSocketID] = make(map[string]*webrtc.PeerConnection)
+			s.grabberTracks[grabberSocketID] = make(map[string][]webrtc.TrackLocal)
+			s.subscribers[grabberSocketID] = make(map[string][]*webrtc.PeerConnection)
+			s.grabberSetupChannels[grabberSocketID] = make(map[string]chan struct{})
+		}
+		if _, ok := s.grabberPeerConns[grabberSocketID][streamType]; !ok {
+			log.Printf("NEW CONNECTION %v %v", grabberSocketID, streamType)
 			setupChan := make(chan struct{})
-			s.grabberSetupChannels[grabberSocketID] = setupChan
+			log.Printf("MEGA TEST")
+			s.grabberSetupChannels[grabberSocketID][streamType] = setupChan
+			log.Printf("MEGA TEST")
 			s.mu.Unlock()
+			log.Printf("MEGA TEST")
 
 			trackChan := make(chan struct{})
+
+			log.Printf("MEGA TEST")
 
 			go s.setupGrabberPeerConnection(grabberSocketID, setupChan, trackChan, m.Offer.StreamType)
 
@@ -344,7 +355,7 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 			<-trackChan
 
 			s.mu.Lock()
-			if _, ok := s.grabberPeerConns[grabberSocketID]; !ok {
+			if _, ok := s.grabberPeerConns[grabberSocketID][streamType]; !ok {
 				s.mu.Unlock()
 				_ = c.WriteJSON(api.PlayerMessage{
 					Event: api.PlayerMessageEventOfferFailed,
@@ -382,9 +393,9 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 
 		s.mu.Lock()
 		s.playerPeerConns[playerSocketId] = pcPlayer
-		s.subscribers[grabberSocketID] = append(s.subscribers[grabberSocketID], pcPlayer)
+		s.subscribers[grabberSocketID][streamType] = append(s.subscribers[grabberSocketID][streamType], pcPlayer)
 		log.Printf("TRACKS COUNT: %v", len(s.grabberTracks[grabberSocketID]))
-		for _, track := range s.grabberTracks[grabberSocketID] {
+		for _, track := range s.grabberTracks[grabberSocketID][streamType] {
 			if _, err := pcPlayer.AddTrack(track); err != nil {
 				log.Printf("failed to add track to player %s: %v", playerSocketId, err)
 			}
@@ -404,8 +415,9 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 				if err := c.WriteJSON(api.PlayerMessage{
 					Event: api.PlayerMessageEventGrabberIce,
 					Ice: &api.IceMessage{
-						PeerId:    &gsi,
-						Candidate: candidate.ToJSON(),
+						PeerId:     &gsi,
+						Candidate:  candidate.ToJSON(),
+						StreamType: streamType,
 					},
 				}); err != nil {
 					log.Printf("failed to send ICE candidate to player %s: %v", playerSocketId, err)
@@ -427,8 +439,9 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 		if err := c.WriteJSON(api.PlayerMessage{
 			Event: api.PlayerMessageEventOfferAnswer,
 			OfferAnswer: &api.OfferAnswerMessage{
-				PeerId: string(grabberSocketID),
-				Answer: answer,
+				PeerId:     string(grabberSocketID),
+				Answer:     answer,
+				StreamType: streamType,
 			},
 		}); err != nil {
 			log.Printf("failed to send answer to player %s: %v", playerSocketId, err)
@@ -484,9 +497,9 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 			s.grabberSockets.CloseSocket(socketID)
 			delete(s.grabberPeerConns, socketID)
 			delete(s.grabberTracks, socketID)
-			for _, pcPlayer := range s.subscribers[socketID] {
-				pcPlayer.Close()
-			}
+			// for _, pcPlayer := range s.subscribers[socketID] {
+			// 	pcPlayer.Close()
+			// }
 			delete(s.subscribers, socketID)
 			break
 		}
@@ -504,7 +517,7 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 
 func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage) *api.GrabberMessage {
 	// grabberId := string(id)
-	log.Printf("GOT GRABBER MESSAGE: %v", m.Event)
+	// log.Printf("GOT GRABBER MESSAGE: %v, Stream Type: %v", m.Event, m.Offer.StreamType)
 	switch m.Event {
 	case api.GrabberMessageEventPing:
 		if m.Ping == nil {
@@ -515,9 +528,10 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 		if m.OfferAnswer == nil {
 			return nil
 		}
-		log.Printf("offer_answer for %s, SDP: %s", m.OfferAnswer.PeerId, m.OfferAnswer.Answer.SDP)
+		// log.Printf("offer_answer for %s, SDP: %s", m.OfferAnswer.PeerId, m.OfferAnswer.Answer.SDP)
 		s.mu.Lock()
-		pc, ok := s.grabberPeerConns[id]
+		streamType := m.OfferAnswer.StreamType
+		pc, ok := s.grabberPeerConns[id][streamType]
 		if !ok {
 			s.mu.Unlock()
 			log.Printf("no peer connection for grabber %s", id)
@@ -529,16 +543,16 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 			return nil
 		}
 
-		if setupChan, ok := s.grabberSetupChannels[id]; ok {
+		if setupChan, ok := s.grabberSetupChannels[id][streamType]; ok {
 			close(setupChan)
-			delete(s.grabberSetupChannels, id)
+			delete(s.grabberSetupChannels[id], streamType)
 		}
 		s.mu.Unlock()
 	case api.GrabberMessageEventGrabberIce:
 		if m.Ice == nil || m.Ice.PeerId == nil {
 			return nil
 		}
-		pc, ok := s.grabberPeerConns[id]
+		pc, ok := s.grabberPeerConns[id][m.Ice.StreamType]
 		if !ok {
 			log.Printf("no peer connection for grabber %s", id)
 			return nil
@@ -551,12 +565,14 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 }
 
 func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, setupChan, trackChan chan struct{}, streamType string) {
+	log.Printf("TEST 1")
 	grabberConn := s.grabberSockets.GetSocket(grabberSocketID)
 	if grabberConn == nil {
 		log.Printf("Grabber %s not found", grabberSocketID)
 		close(setupChan)
 		return
 	}
+	log.Printf("TEST 2")
 
 	config := s.config.PeerConnectionConfig.WebrtcConfiguration()
 	pc, err := webrtc.NewPeerConnection(config)
@@ -565,12 +581,15 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 		close(setupChan)
 		return
 	}
+	log.Printf("TEST 3")
 
 	s.mu.Lock()
-	s.grabberPeerConns[grabberSocketID] = pc
-	s.grabberTracks[grabberSocketID] = []webrtc.TrackLocal{}
-	s.subscribers[grabberSocketID] = []*webrtc.PeerConnection{}
+	s.grabberPeerConns[grabberSocketID][streamType] = pc
+	s.grabberTracks[grabberSocketID][streamType] = []webrtc.TrackLocal{}
+	s.subscribers[grabberSocketID][streamType] = []*webrtc.PeerConnection{}
 	s.mu.Unlock()
+
+	log.Printf("TEST 4")
 
 	_, err = pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
 		Direction: webrtc.RTPTransceiverDirectionRecvonly,
@@ -591,6 +610,7 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 		close(setupChan)
 		return
 	}
+	log.Printf("TEST 5")
 
 	timer := time.NewTimer(10 * time.Second)
 	defer timer.Stop()
@@ -604,12 +624,7 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 		}
 
 		s.mu.Lock()
-		s.grabberTracks[grabberSocketID] = append(s.grabberTracks[grabberSocketID], localTrack)
-		for _, pcPlayer := range s.subscribers[grabberSocketID] {
-			if _, err := pcPlayer.AddTrack(localTrack); err != nil {
-				log.Printf("failed to add track to player: %v", err)
-			}
-		}
+		s.grabberTracks[grabberSocketID][streamType] = append(s.grabberTracks[grabberSocketID][streamType], localTrack)
 		s.mu.Unlock()
 
 		go func() {
@@ -636,8 +651,9 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 			if err := grabberConn.WriteJSON(api.GrabberMessage{
 				Event: api.GrabberMessageEventPlayerIce,
 				Ice: &api.IceMessage{
-					PeerId:    &gsi,
-					Candidate: candidate.ToJSON(),
+					PeerId:     &gsi,
+					Candidate:  candidate.ToJSON(),
+					StreamType: streamType,
 				},
 			}); err != nil {
 				log.Printf("failed to send ICE candidate to grabber %s: %v", grabberSocketID, err)
@@ -651,15 +667,21 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 			log.Printf("Grabber %s disconnected or failed, cleaning up", grabberSocketID)
 			s.mu.Lock()
 			pc.Close()
-			delete(s.grabberPeerConns, grabberSocketID)
-			delete(s.grabberTracks, grabberSocketID)
-			for _, pcPlayer := range s.subscribers[grabberSocketID] {
+			delete(s.grabberPeerConns[grabberSocketID], streamType)
+			delete(s.grabberTracks[grabberSocketID], streamType)
+			for _, pcPlayer := range s.subscribers[grabberSocketID][streamType] {
 				pcPlayer.Close()
 			}
-			delete(s.subscribers, grabberSocketID)
-			if setupChan, ok := s.grabberSetupChannels[grabberSocketID]; ok {
-				close(setupChan)
+			delete(s.subscribers[grabberSocketID], streamType)
+			if len(s.grabberPeerConns[grabberSocketID]) == 0 {
+				delete(s.grabberPeerConns, grabberSocketID)
+				delete(s.grabberTracks, grabberSocketID)
+				delete(s.subscribers, grabberSocketID)
 				delete(s.grabberSetupChannels, grabberSocketID)
+			}
+			if setupChan, ok := s.grabberSetupChannels[grabberSocketID][streamType]; ok {
+				close(setupChan)
+				delete(s.grabberSetupChannels[grabberSocketID], streamType)
 			}
 			s.mu.Unlock()
 		}

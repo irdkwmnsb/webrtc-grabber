@@ -20,8 +20,8 @@ class GrabberCaptureClient {
         const offer_handle = async function ({offer: {peerId, offer, streamType}}) {
             this.target.dispatchEvent(new CustomEvent('offer', {detail: {playerId: peerId, offer, streamType}}));
         }
-        const player_ice_handle = async function ({ice: {peerId, candidate}}) {
-            this.target.dispatchEvent(new CustomEvent('player_ice', {detail: {peerId, candidate}}));
+        const player_ice_handle = async function ({ice: {peerId, candidate, streamType}}) {
+            this.target.dispatchEvent(new CustomEvent('player_ice', {detail: {peerId, candidate, streamType}}));
         }
 
         this.socket.on("init_peer", init_peer_handle.bind(this));
@@ -33,12 +33,12 @@ class GrabberCaptureClient {
         this.socket.emit("ping", {ping: {connectionsCount: connectionsCount, streamTypes: streamTypes}});
     }
 
-    send_offer_answer(playerId, answer) {
-        this.socket.emit("offer_answer", {offerAnswer: {peerId: playerId, answer}});
+    send_offer_answer(playerId, answer, streamType) {
+        this.socket.emit("offer_answer", {offerAnswer: {peerId: playerId, streamType: streamType, answer}});
     }
 
-    send_grabber_ice(peerId, candidate) {
-        this.socket.emit("grabber_ice", {ice: {peerId, candidate}});
+    send_grabber_ice(peerId, candidate, streamType) {
+        this.socket.emit("grabber_ice", {ice: {peerId, streamType: streamType, candidate}});
     }
 }
 

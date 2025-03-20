@@ -73,12 +73,14 @@ type OfferMessage struct {
 }
 
 type OfferAnswerMessage struct {
-	PeerId string                    `json:"peerId"`
-	Answer webrtc.SessionDescription `json:"answer"`
+	PeerId     string                    `json:"peerId"`
+	Answer     webrtc.SessionDescription `json:"answer"`
+	StreamType string                    `json:"streamType"`
 }
 
 type IceMessage struct {
-	PeerId    *string                 `json:"peerId"`
-	PeerName  *string                 `json:"peerName"`
-	Candidate webrtc.ICECandidateInit `json:"candidate"`
+	PeerId     *string                 `json:"peerId"`
+	PeerName   *string                 `json:"peerName"`
+	Candidate  webrtc.ICECandidateInit `json:"candidate"`
+	StreamType string                  `json:"streamType"`
 }
