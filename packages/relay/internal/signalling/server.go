@@ -258,7 +258,7 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 					for i, sub := range pcs {
 						if sub == pc {
 							s.subscribers[grabberID][streamType] = append(pcs[:i], pcs[i+1:]...)
-							if len(s.subscribers[grabberID]) == 0 {
+							if len(s.subscribers[grabberID][streamType]) == 0 {
 								if grabberPC, ok := s.grabberPeerConns[grabberID][streamType]; ok {
 									grabberPC.Close()
 									delete(s.grabberPeerConns, grabberID)
@@ -617,6 +617,7 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 
 	pc.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		log.Printf("GOT TRACK: %s (Kind: %s)", remoteTrack.ID(), remoteTrack.Kind())
+		log.Printf("DEBUG TRACK: %v", remoteTrack)
 		localTrack, err := webrtc.NewTrackLocalStaticRTP(remoteTrack.Codec().RTPCodecCapability, remoteTrack.ID(), remoteTrack.StreamID())
 		if err != nil {
 			log.Printf("failed to create TrackLocal for grabber %s: %v", grabberSocketID, err)
