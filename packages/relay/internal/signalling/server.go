@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/netip"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,8 +15,6 @@ import (
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/utils"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/intervalpli"
-	"github.com/pion/rtp"
-	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -50,29 +47,29 @@ type PeerConnectionConfig struct {
 
 func NewServer(config ServerConfig, app *fiber.App) (*Server, error) {
 
-	// h264Codec := webrtc.RTPCodecParameters{
-	// 	RTPCodecCapability: webrtc.RTPCodecCapability{
-	// 		MimeType:    webrtc.MimeTypeH264,
-	// 		ClockRate:   90000,
-	// 		SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
-	// 	},
-	// 	PayloadType: 96,
-	// }
+	h264Codec := webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeH264,
+			ClockRate:   90000,
+			SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
+		},
+		PayloadType: 96,
+	}
 
-	// vp8Codec := webrtc.RTPCodecParameters{
-	// 	RTPCodecCapability: webrtc.RTPCodecCapability{
-	// 		MimeType:  webrtc.MimeTypeVP8,
-	// 		ClockRate: 90000,
-	// 	},
-	// 	PayloadType: 98,
-	// }
+	vp8Codec := webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:  webrtc.MimeTypeVP8,
+			ClockRate: 90000,
+		},
+		PayloadType: 97,
+	}
 
 	vp9Codec := webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:  webrtc.MimeTypeVP9,
-			ClockRate: 90000, // Standard clock rate for VP9
+			ClockRate: 90000,
 		},
-		PayloadType: 98, // Common payload type for VP9
+		PayloadType: 98,
 	}
 
 	opusCodec := webrtc.RTPCodecParameters{
@@ -85,15 +82,15 @@ func NewServer(config ServerConfig, app *fiber.App) (*Server, error) {
 	}
 
 	mediaEngine := &webrtc.MediaEngine{}
-	// if err := mediaEngine.RegisterCodec(h264Codec, webrtc.RTPCodecTypeVideo); err != nil {
-	// 	log.Printf("Failed to register H.264 codec: %v", err)
-	// }
+	if err := mediaEngine.RegisterCodec(h264Codec, webrtc.RTPCodecTypeVideo); err != nil {
+		log.Printf("Failed to register H.264 codec: %v", err)
+	}
 	if err := mediaEngine.RegisterCodec(vp9Codec, webrtc.RTPCodecTypeVideo); err != nil {
 		log.Printf("Failed to register H.264 codec: %v", err)
 	}
-	// if err := mediaEngine.RegisterCodec(vp8Codec, webrtc.RTPCodecTypeVideo); err != nil {
-	// 	log.Printf("Failed to register VP8 codec: %v", err)
-	// }
+	if err := mediaEngine.RegisterCodec(vp8Codec, webrtc.RTPCodecTypeVideo); err != nil {
+		log.Printf("Failed to register VP8 codec: %v", err)
+	}
 	if err := mediaEngine.RegisterCodec(opusCodec, webrtc.RTPCodecTypeAudio); err != nil {
 		log.Printf("Failed to register Opus codec: %v", err)
 	}
@@ -380,46 +377,46 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	}
 }
 
-func filterSDPToVP9(offerSDP string) string {
-	var sd sdp.SessionDescription
-	if err := sd.Unmarshal([]byte(offerSDP)); err != nil {
-		log.Printf("Failed to unmarshal SDP: %v", err)
-		return offerSDP // Return original SDP on error
-	}
+// func filterSDPToVP9(offerSDP string) string {
+// 	var sd sdp.SessionDescription
+// 	if err := sd.Unmarshal([]byte(offerSDP)); err != nil {
+// 		log.Printf("Failed to unmarshal SDP: %v", err)
+// 		return offerSDP // Return original SDP on error
+// 	}
 
-	for i, media := range sd.MediaDescriptions {
-		if media.MediaName.Media == "video" {
-			var newAttributes []sdp.Attribute
-			var vp9PayloadType string
+// 	for i, media := range sd.MediaDescriptions {
+// 		if media.MediaName.Media == "video" {
+// 			var newAttributes []sdp.Attribute
+// 			var vp9PayloadType string
 
-			for _, attr := range media.Attributes {
-				if attr.Key == "rtpmap" && strings.Contains(attr.Value, "VP9") {
-					newAttributes = append(newAttributes, attr)
-					parts := strings.Split(attr.Value, " ")
-					if len(parts) > 0 {
-						vp9PayloadType = parts[0]
-					}
-				} else if attr.Key == "fmtp" && vp9PayloadType != "" && strings.HasPrefix(attr.Value, vp9PayloadType+" ") {
-					newAttributes = append(newAttributes, attr)
-				} else if attr.Key != "rtpmap" && attr.Key != "fmtp" {
-					newAttributes = append(newAttributes, attr)
-				}
-			}
+// 			for _, attr := range media.Attributes {
+// 				if attr.Key == "rtpmap" && strings.Contains(attr.Value, "VP9") {
+// 					newAttributes = append(newAttributes, attr)
+// 					parts := strings.Split(attr.Value, " ")
+// 					if len(parts) > 0 {
+// 						vp9PayloadType = parts[0]
+// 					}
+// 				} else if attr.Key == "fmtp" && vp9PayloadType != "" && strings.HasPrefix(attr.Value, vp9PayloadType+" ") {
+// 					newAttributes = append(newAttributes, attr)
+// 				} else if attr.Key != "rtpmap" && attr.Key != "fmtp" {
+// 					newAttributes = append(newAttributes, attr)
+// 				}
+// 			}
 
-			sd.MediaDescriptions[i].Attributes = newAttributes
-			if vp9PayloadType != "" {
-				sd.MediaDescriptions[i].MediaName.Formats = []string{vp9PayloadType}
-			}
-		}
-	}
+// 			sd.MediaDescriptions[i].Attributes = newAttributes
+// 			if vp9PayloadType != "" {
+// 				sd.MediaDescriptions[i].MediaName.Formats = []string{vp9PayloadType}
+// 			}
+// 		}
+// 	}
 
-	modifiedSDP, err := sd.Marshal()
-	if err != nil {
-		log.Printf("Failed to marshal SDP: %v", err)
-		return offerSDP
-	}
-	return string(modifiedSDP)
-}
+// 	modifiedSDP, err := sd.Marshal()
+// 	if err != nil {
+// 		log.Printf("Failed to marshal SDP: %v", err)
+// 		return offerSDP
+// 	}
+// 	return string(modifiedSDP)
+// }
 
 func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m api.PlayerMessage) *api.PlayerMessage {
 	playerSocketId := string(id)
@@ -546,14 +543,9 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 		}
 		s.mu.Unlock()
 
-		modifiedOfferSDP := filterSDPToVP9(m.Offer.Offer.SDP)
-		log.Printf("Player remote SDP offer: %s", modifiedOfferSDP)
-
-		modifiedOffer := webrtc.SessionDescription{
-			Type: webrtc.SDPTypeOffer,
-			SDP:  modifiedOfferSDP,
-		}
-		if err := pcPlayer.SetRemoteDescription(modifiedOffer); err != nil {
+		// modifiedOfferSDP := filterSDPToVP9(m.Offer.Offer.SDP)
+		log.Printf("Player remote SDP offer: %s", m.Offer.Offer.SDP)
+		if err := pcPlayer.SetRemoteDescription(m.Offer.Offer); err != nil {
 			log.Printf("failed to set remote description for player %s: %v", playerSocketId, err)
 			pcPlayer.Close()
 			return nil
@@ -793,25 +785,17 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 		s.mu.Unlock()
 
 		go func() {
-			buffer := make(chan *rtp.Packet, 100)
-			go func() {
-				for chunk := range buffer {
-					if err := localTrack.WriteRTP(chunk); err != nil {
-						log.Printf("error writing RTP to TrackLocal for grabber %s: %v", grabberSocketID, err)
-					}
-				}
-			}()
+			buffer := make([]byte, 1500)
 
 			for {
-				pkt, _, err := remoteTrack.ReadRTP()
+				n, _, err := remoteTrack.Read(buffer)
 				if err != nil {
 					log.Printf("error reading RTP from grabber %s: %v", grabberSocketID, err)
 					return
 				}
-				// Log RTP packet details for debugging
-				// log.Printf("RTP packet from grabber %s: SSRC=%d, PayloadType=%d, SeqNo=%d",
-				// grabberSocketID, pkt.SSRC, pkt.PayloadType, pkt.SequenceNumber)
-				buffer <- pkt
+				if _, err := localTrack.Write(buffer[:n]); err != nil {
+					log.Printf("error writing RTP to TrackLocal for grabber %s: %v", grabberSocketID, err)
+				}
 			}
 		}()
 	})
