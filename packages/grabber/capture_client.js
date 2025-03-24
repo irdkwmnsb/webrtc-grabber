@@ -33,12 +33,12 @@ class GrabberCaptureClient {
         this.socket.emit("ping", {ping: {connectionsCount: connectionsCount, streamTypes: streamTypes}});
     }
 
-    send_offer_answer(playerId, answer, streamType) {
-        this.socket.emit("offer_answer", {offerAnswer: {peerId: playerId, streamType: streamType, answer}});
+    send_offer_answer(playerId, answer) {
+        this.socket.emit("offer_answer", {offerAnswer: {peerId: playerId, answer}});
     }
 
-    send_grabber_ice(peerId, candidate, streamType) {
-        this.socket.emit("grabber_ice", {ice: {peerId, streamType: streamType, candidate}});
+    send_grabber_ice(peerId, candidate) {
+        this.socket.emit("grabber_ice", {ice: {peerId, candidate}});
     }
 }
 

@@ -92,26 +92,22 @@ function runGrabbing(window) {
         console.log(`init peer (pingInterval = ${pingInterval})`);
     });
 
-    const streamTypes = new Map();
 
     client.target.addEventListener("offer", async ({detail: {playerId, offer, streamType}}) => {
         console.log(`create new peer connection for ${playerId} ${offer} ${streamType}`);
-        streamTypes.set(playerId, streamType);
         window.webContents.send("offer", playerId, offer, streamType, peerConnectionConfig);
     });
 
-    ipcMain.handle('offer_answer', async (_, playerId, offer, streamType) => {
-        console.log(`OfferAnswer: ${streamTypes.get(playerId)}`);
-        client.send_offer_answer(playerId, JSON.parse(offer), streamTypes.get(playerId));
+    ipcMain.handle('offer_answer', async (_, playerId, offer) => {
+        client.send_offer_answer(playerId, JSON.parse(offer));
     });
 
     client.target.addEventListener('player_ice', async ({detail: {peerId, candidate}}) => {
         window.webContents.send("player_ice", peerId, candidate);
     });
 
-    ipcMain.handle("grabber_ice", (_, playerId, candidate, streamType) => {
-        console.log(`ICE: ${streamType}`);
-        client.send_grabber_ice(playerId, JSON.parse(candidate), streamTypes.get(playerId));
+    ipcMain.handle("grabber_ice", (_, playerId, candidate) => {
+        client.send_grabber_ice(playerId, JSON.parse(candidate));
     });
 }
 

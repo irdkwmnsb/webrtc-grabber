@@ -37,6 +37,8 @@ type Server struct {
 	subscribers          map[sockets.SocketID]map[string][]*webrtc.PeerConnection
 	grabberSetupChannels map[sockets.SocketID]map[string]chan struct{}
 
+	socketToStreamType map[sockets.SocketID]string
+
 	mu sync.Mutex
 
 	api *webrtc.API
@@ -123,6 +125,7 @@ func NewServer(config ServerConfig, app *fiber.App) (*Server, error) {
 		subscribers:          make(map[sockets.SocketID]map[string][]*webrtc.PeerConnection),
 		grabberSetupChannels: make(map[sockets.SocketID]map[string]chan struct{}),
 		api:                  api,
+		socketToStreamType:   make(map[sockets.SocketID]string),
 	}
 	server.storage.setParticipants(config.Participants)
 	server.oldPeersCleaner = utils.SetIntervalTimer(time.Minute, server.storage.deleteOldPeers)
@@ -452,6 +455,7 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 			s.subscribers[grabberSocketID] = make(map[string][]*webrtc.PeerConnection)
 			s.grabberSetupChannels[grabberSocketID] = make(map[string]chan struct{})
 		}
+		s.socketToStreamType[id] = streamType
 		if _, ok := s.grabberPeerConns[grabberSocketID][streamType]; !ok {
 			log.Printf("NEW CONNECTION %v %v", grabberSocketID, streamType)
 			setupChan := make(chan struct{})
@@ -521,6 +525,7 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 		if _, ok := s.playerPeerConns[playerSocketId]; !ok {
 			s.playerPeerConns[playerSocketId] = make(map[string]*webrtc.PeerConnection)
 		}
+		log.Printf("HELLO123")
 		s.playerPeerConns[playerSocketId][streamType] = pcPlayer
 		s.subscribers[grabberSocketID][streamType] = append(s.subscribers[grabberSocketID][streamType], pcPlayer)
 		log.Printf("Adding %d tracks to player %s", len(tracks), playerSocketId)
@@ -559,9 +564,8 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 				if err := c.WriteJSON(api.PlayerMessage{
 					Event: api.PlayerMessageEventGrabberIce,
 					Ice: &api.IceMessage{
-						PeerId:     &gsi,
-						Candidate:  candidate.ToJSON(),
-						StreamType: streamType,
+						PeerId:    &gsi,
+						Candidate: candidate.ToJSON(),
 					},
 				}); err != nil {
 					log.Printf("failed to send ICE candidate to player %s: %v", playerSocketId, err)
@@ -584,9 +588,8 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 		if err := c.WriteJSON(api.PlayerMessage{
 			Event: api.PlayerMessageEventOfferAnswer,
 			OfferAnswer: &api.OfferAnswerMessage{
-				PeerId:     string(grabberSocketID),
-				Answer:     answer,
-				StreamType: streamType,
+				PeerId: string(grabberSocketID),
+				Answer: answer,
 			},
 		}); err != nil {
 			log.Printf("failed to send answer to player %s: %v", playerSocketId, err)
@@ -595,7 +598,9 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 		if m.Ice == nil {
 			return nil
 		}
-		pcPlayer, ok := s.playerPeerConns[playerSocketId][m.Ice.StreamType]
+		log.Printf("PLAYER MESSAGE ICE STREAM TYPE: %v", s.socketToStreamType[id])
+		log.Printf("PLAYER LEN: %v", len(s.playerPeerConns[playerSocketId]))
+		pcPlayer, ok := s.playerPeerConns[playerSocketId][s.socketToStreamType[id]]
 		if !ok {
 			log.Printf("no player peer connection for %s", playerSocketId)
 			return nil
@@ -674,7 +679,8 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 		}
 		// log.Printf("offer_answer for %s, SDP: %s", m.OfferAnswer.PeerId, m.OfferAnswer.Answer.SDP)
 		s.mu.Lock()
-		streamType := m.OfferAnswer.StreamType
+		streamType := s.socketToStreamType[id]
+		log.Printf("GrabberMessageEventOfferAnswer STREAM TYPE: %v", s.socketToStreamType[id])
 		pc, ok := s.grabberPeerConns[id][streamType]
 		if !ok {
 			s.mu.Unlock()
@@ -696,7 +702,8 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 		if m.Ice == nil || m.Ice.PeerId == nil {
 			return nil
 		}
-		pc, ok := s.grabberPeerConns[id][m.Ice.StreamType]
+		log.Printf("GRABBER ICE STREAM TYPE: %v", s.socketToStreamType[id])
+		pc, ok := s.grabberPeerConns[id][s.socketToStreamType[id]]
 		if !ok {
 			log.Printf("no peer connection for grabber %s", id)
 			return nil
@@ -726,6 +733,7 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 	}
 
 	s.mu.Lock()
+	s.socketToStreamType[grabberSocketID] = streamType
 	s.grabberPeerConns[grabberSocketID][streamType] = pc
 	s.grabberTracks[grabberSocketID][streamType] = []webrtc.TrackLocal{}
 	s.subscribers[grabberSocketID][streamType] = []*webrtc.PeerConnection{}
@@ -810,9 +818,8 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 			if err := grabberConn.WriteJSON(api.GrabberMessage{
 				Event: api.GrabberMessageEventPlayerIce,
 				Ice: &api.IceMessage{
-					PeerId:     &gsi,
-					Candidate:  candidate.ToJSON(),
-					StreamType: streamType,
+					PeerId:    &gsi,
+					Candidate: candidate.ToJSON(),
 				},
 			}); err != nil {
 				log.Printf("failed to send ICE candidate to grabber %s: %v", grabberSocketID, err)
