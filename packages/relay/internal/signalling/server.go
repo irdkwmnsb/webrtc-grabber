@@ -286,6 +286,17 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.playersSockets.AddSocket(c)
 	log.Printf("authorized %s", socketID)
+	messages := make(chan interface{})
+	defer close(messages)
+
+	go func() {
+		for msg := range messages {
+			if err := c.WriteJSON(msg); err != nil {
+				log.Printf("failed to send message to %s: %v", socketID, msg)
+				return
+			}
+		}
+	}()
 
 	var message api.PlayerMessage
 	sendPeerStatus := func() {
@@ -294,9 +305,7 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 			PeersStatus:        s.storage.getAll(),
 			ParticipantsStatus: s.storage.getParticipantsStatus(),
 		}
-		if err := c.WriteJSON(answer); err != nil {
-			log.Printf("failed to send message %v to %s", answer, socketID)
-		}
+		messages <- answer
 	}
 	sendPeerStatus()
 	timer := utils.SetIntervalTimer(PlayerSendPeerStatusInterval, sendPeerStatus)
@@ -309,13 +318,11 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 			break
 		}
 
-		answer := s.processPlayerMessage(c, socketID, message)
+		answer := s.processPlayerMessage(messages, socketID, message)
 		if answer == nil {
 			continue
 		}
-		if err := c.WriteJSON(answer); err != nil {
-			log.Printf("failed to send answer %v to %s", answer, socketID)
-		}
+		messages <- answer
 	}
 }
 
@@ -323,6 +330,18 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.playersSockets.AddSocket(c)
 	log.Printf("authorized %s", socketID)
+
+	messages := make(chan interface{})
+	defer close(messages)
+
+	go func() {
+		for msg := range messages {
+			if err := c.WriteJSON(msg); err != nil {
+				log.Printf("failed to send message to %s: %v", socketID, msg)
+				return
+			}
+		}
+	}()
 
 	defer func() {
 		s.playersSockets.CloseSocket(socketID)
@@ -367,13 +386,11 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 			break
 		}
 
-		answer := s.processPlayerMessage(c, socketID, message)
+		answer := s.processPlayerMessage(messages, socketID, message)
 		if answer == nil {
 			continue
 		}
-		if err := c.WriteJSON(answer); err != nil {
-			log.Printf("failed to send answer %v to %s", answer, socketID)
-		}
+		messages <- answer
 	}
 }
 
@@ -418,7 +435,7 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 // 	return string(modifiedSDP)
 // }
 
-func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m api.PlayerMessage) *api.PlayerMessage {
+func (s *Server) processPlayerMessage(messages chan interface{}, id sockets.SocketID, m api.PlayerMessage) *api.PlayerMessage {
 	playerSocketId := string(id)
 	log.Printf("EVENT: %v, STREAM TYPE: %v", m.Event, m.Offer.StreamType)
 	switch m.Event {
@@ -432,14 +449,14 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 		} else if m.Offer.PeerName != nil {
 			if peer, ok := s.storage.getPeerByName(*m.Offer.PeerName); ok {
 				if !slices.Contains(peer.StreamTypes, api.StreamType(m.Offer.StreamType)) {
-					_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
+					messages <- api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
 					log.Printf("no such stream type %v in grabber with id %v", m.Offer.StreamType, m.Offer.PeerId)
 					return nil
 				}
 				grabberSocketID = peer.SocketId
 			}
 		} else {
-			_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
+			messages <- api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
 			log.Printf("offer missing PeerId or PeerName")
 			return nil
 		}
@@ -469,7 +486,7 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 			s.mu.Lock()
 			if _, ok := s.grabberPeerConns[grabberSocketID][streamType]; !ok {
 				s.mu.Unlock()
-				_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
+				messages <- api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
 				log.Printf("failed to set up grabber peer connection for %s", grabberSocketID)
 				return nil
 			}
@@ -479,7 +496,7 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 		log.Printf("Tracks available for %s/%s: %d", grabberSocketID, streamType, len(tracks))
 		if len(tracks) == 0 {
 			s.mu.Unlock()
-			_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
+			messages <- api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
 			log.Printf("no tracks available for %s/%s", grabberSocketID, streamType)
 			return nil
 		}
@@ -554,14 +571,12 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 		gsi := string(grabberSocketID)
 		pcPlayer.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 			if candidate != nil {
-				if err := c.WriteJSON(api.PlayerMessage{
+				messages <- api.PlayerMessage{
 					Event: api.PlayerMessageEventGrabberIce,
 					Ice: &api.IceMessage{
 						PeerId:    &gsi,
 						Candidate: candidate.ToJSON(),
 					},
-				}); err != nil {
-					log.Printf("failed to send ICE candidate to player %s: %v", playerSocketId, err)
 				}
 			}
 		})
@@ -578,14 +593,12 @@ func (s *Server) processPlayerMessage(c *websocket.Conn, id sockets.SocketID, m 
 			pcPlayer.Close()
 			return nil
 		}
-		if err := c.WriteJSON(api.PlayerMessage{
+		messages <- api.PlayerMessage{
 			Event: api.PlayerMessageEventOfferAnswer,
 			OfferAnswer: &api.OfferAnswerMessage{
 				PeerId: string(grabberSocketID),
 				Answer: answer,
 			},
-		}); err != nil {
-			log.Printf("failed to send answer to player %s: %v", playerSocketId, err)
 		}
 	case api.PlayerMessageEventPlayerIce:
 		if m.Ice == nil {
