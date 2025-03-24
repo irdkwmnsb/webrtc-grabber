@@ -1,10 +1,12 @@
 package main
 
 import (
-	"github.com/gofiber/fiber/v2"
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/signalling"
 	"log"
 	"strconv"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/pprof"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/signalling"
 )
 
 func main() {
@@ -22,6 +24,7 @@ func main() {
 	defer server.Close()
 
 	server.SetupWebSockets()
+	app.Use(pprof.New())
 	app.Static("/", "./asset")
 	app.Static("/player", "./asset/player.html")
 	app.Static("/capture", "./asset/capture.html")
