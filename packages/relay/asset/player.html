@@ -35,7 +35,7 @@
                 console.log("got video track");
                 const remoteVideo = document.getElementById("video");
                 remoteVideo.srcObject = track;
-                // remoteVideo.play();
+                remoteVideo.play();
                 console.log(`pc2 received remote stream (${connectionArgs.peerName}) `, track);
             });
         });

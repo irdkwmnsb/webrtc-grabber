@@ -92,9 +92,8 @@ function runGrabbing(window) {
         console.log(`init peer (pingInterval = ${pingInterval})`);
     });
 
-
     client.target.addEventListener("offer", async ({detail: {playerId, offer, streamType}}) => {
-        console.log(`create new peer connection for ${playerId} ${offer} ${streamType}`);
+        console.log(`create new peer connection for ${playerId}`);
         window.webContents.send("offer", playerId, offer, streamType, peerConnectionConfig);
     });
 

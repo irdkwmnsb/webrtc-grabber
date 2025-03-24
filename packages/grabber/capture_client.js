@@ -20,8 +20,8 @@ class GrabberCaptureClient {
         const offer_handle = async function ({offer: {peerId, offer, streamType}}) {
             this.target.dispatchEvent(new CustomEvent('offer', {detail: {playerId: peerId, offer, streamType}}));
         }
-        const player_ice_handle = async function ({ice: {peerId, candidate, streamType}}) {
-            this.target.dispatchEvent(new CustomEvent('player_ice', {detail: {peerId, candidate, streamType}}));
+        const player_ice_handle = async function ({ice: {peerId, candidate}}) {
+            this.target.dispatchEvent(new CustomEvent('player_ice', {detail: {peerId, candidate}}));
         }
 
         this.socket.on("init_peer", init_peer_handle.bind(this));

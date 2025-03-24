@@ -59,39 +59,8 @@ ipcRenderer.on('source:show_debug', async () => {
 
 ipcRenderer.on('offer', async (_, playerId, offer, streamType, configuration) => {
     console.log(`create new peer connection for ${playerId}`);
-    console.log("TEST 1");
     pcs.set(playerId, new RTCPeerConnection(configuration));
     const pc = pcs.get(playerId);
-    document.lastPc = pc;
-    console.log(pc);
-    setInterval(() => {
-        pc.getStats(null).then((stats) => {
-          let statsOutput = "";
-      
-          stats.forEach((report) => {
-            statsOutput +=
-              `<h2>Report: ${report.type}</h2>\n<strong>ID:</strong> ${report.id}<br>\n` +
-              `<strong>Timestamp:</strong> ${report.timestamp}<br>\n`;
-      
-            // Now the statistics for this report; we intentionally drop the ones we
-            // sorted to the top above
-      
-            Object.keys(report).forEach((statName) => {
-              if (
-                statName !== "id" &&
-                statName !== "timestamp" &&
-                statName !== "type"
-              ) {
-                statsOutput += `<strong>${statName}:</strong> ${report[statName]}<br>\n`;
-              }
-            });
-          });
-      
-          document.querySelector(".stats-box").innerHTML = statsOutput;
-        });
-      }, 1000);
-
-    console.log("TEST 2");
 
     streamType = streamType ?? "desktop";
     const stream = streams[streamType];
@@ -118,13 +87,9 @@ ipcRenderer.on('offer', async (_, playerId, offer, streamType, configuration) =>
         }
     });
 
-    console.log("TEST");
-
     await pc.setRemoteDescription(offer);
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-
-    console.log("ANSWER: " + answer);
 
     await ipcRenderer.invoke('offer_answer', playerId, JSON.stringify(answer));
     console.log(`send offer_answer for ${playerId}`);
