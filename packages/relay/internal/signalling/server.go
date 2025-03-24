@@ -329,6 +329,7 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 
 	defer func() {
 		s.playersSockets.CloseSocket(socketID)
+		delete(s.socketToStreamType, socketID)
 		s.mu.Lock()
 		if pcs, ok := s.playerPeerConns[string(socketID)]; ok {
 			for streamType, pc := range pcs {
@@ -627,6 +628,9 @@ func (s *Server) setupGrabberSockets() {
 func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.grabberSockets.AddSocket(c)
+	defer func() {
+		delete(s.socketToStreamType, socketID)
+	}()
 
 	if err := c.WriteJSON(api.GrabberMessage{
 		Event: api.GrabberMessageEventInitPeer,
