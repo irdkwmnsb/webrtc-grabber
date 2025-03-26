@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/netip"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -487,7 +488,7 @@ func (s *Server) processPlayerMessage(messages chan interface{}, id sockets.Sock
 				return nil
 			}
 			s.mu.Unlock()
-		} else if _, ok := s.grabberPeerConns[grabberSocketID][streamType];ok {
+		} else if _, ok := s.grabberPeerConns[grabberSocketID][streamType]; ok {
 			log.Printf("FOUND")
 			s.mu.Unlock()
 		} else {
@@ -584,7 +585,7 @@ func (s *Server) processPlayerMessage(messages chan interface{}, id sockets.Sock
 		s.mu.Unlock()
 
 		// modifiedOfferSDP := filterSDPToVP9(m.Offer.Offer.SDP)
-		log.Printf("Player remote SDP offer: %s", m.Offer.Offer.SDP)
+		// log.Printf("Player remote SDP offer: %s", m.Offer.Offer.SDP)
 		if err := pcPlayer.SetRemoteDescription(m.Offer.Offer); err != nil {
 			log.Printf("failed to set remote description for player %s: %v", playerSocketId, err)
 			pcPlayer.Close()
@@ -698,9 +699,19 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 	}
 }
 
+func (s *Server) getPendingPeerConnection(id sockets.SocketID) (*webrtc.PeerConnection, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if pcs, ok := s.grabberPeerConns[id]; ok {
+		for streamType, pc := range pcs {
+			if pc.SignalingState() == webrtc.SignalingStateHaveLocalOffer {
+				return pc, streamType
+			}
+		}
+	}
+	return nil, ""
+}
 func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage) *api.GrabberMessage {
-	// grabberId := string(id)
-	// log.Printf("GOT GRABBER MESSAGE: %v, Stream Type: %v", m.Event, m.Offer.StreamType)
 	switch m.Event {
 	case api.GrabberMessageEventPing:
 		if m.Ping == nil {
@@ -711,34 +722,52 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 		if m.OfferAnswer == nil {
 			return nil
 		}
-		// log.Printf("offer_answer for %s, SDP: %s", m.OfferAnswer.PeerId, m.OfferAnswer.Answer.SDP)
+		peerId := m.OfferAnswer.PeerId
+		parts := strings.Split(peerId, "_")
+		if len(parts) != 2 {
+			log.Printf("invalid peerId format: %s", peerId)
+			return nil
+		}
+		grabberSocketID := sockets.SocketID(parts[0])
+		streamType := parts[1]
+
 		s.mu.Lock()
-		streamType := s.socketToStreamType[id]
-		log.Printf("GrabberMessageEventOfferAnswer STREAM TYPE: %v", s.socketToStreamType[id])
-		pc, ok := s.grabberPeerConns[id][streamType]
+		pc, ok := s.grabberPeerConns[grabberSocketID][streamType]
 		if !ok {
 			s.mu.Unlock()
-			log.Printf("no peer connection for grabber %s", id)
+			log.Printf("no peer connection for grabber %s stream %s", grabberSocketID, streamType)
 			return nil
 		}
 		if err := pc.SetRemoteDescription(m.OfferAnswer.Answer); err != nil {
 			s.mu.Unlock()
-			log.Printf("failed to set remote description for grabber %s: %v", id, err)
+			log.Printf("failed to set remote description for grabber %s stream %s: %v", grabberSocketID, streamType, err)
 			return nil
 		}
 		s.mu.Unlock()
 	case api.GrabberMessageEventGrabberIce:
 		if m.Ice == nil || m.Ice.PeerId == nil {
+			log.Printf("invalid IceMessage: missing data")
 			return nil
 		}
-		log.Printf("GRABBER ICE STREAM TYPE: %v", s.socketToStreamType[id])
-		pc, ok := s.grabberPeerConns[id][s.socketToStreamType[id]]
+		peerId := *m.Ice.PeerId
+		parts := strings.Split(peerId, "_")
+		if len(parts) != 2 {
+			log.Printf("invalid peerId format: %s", peerId)
+			return nil
+		}
+		grabberSocketID := sockets.SocketID(parts[0])
+		streamType := parts[1]
+
+		s.mu.Lock()
+		pc, ok := s.grabberPeerConns[grabberSocketID][streamType]
+		s.mu.Unlock()
 		if !ok {
-			log.Printf("no peer connection for grabber %s", id)
+			log.Printf("no peer connection for grabber %s stream %s", grabberSocketID, streamType)
 			return nil
 		}
 		if err := pc.AddICECandidate(m.Ice.Candidate); err != nil {
-			log.Printf("failed to add ICE candidate from grabber %s: %v", id, err)
+			log.Printf("failed to add ICE candidate from grabber %s: %v", grabberSocketID, err)
+			return nil
 		}
 	}
 	return nil
@@ -792,7 +821,7 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 
 	expectedTracks := 1
 	if streamType == "webcam" {
-		expectedTracks = 2
+		expectedTracks = 1
 	}
 	tracksReceived := 0
 
@@ -812,101 +841,101 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 		s.grabberTracks[grabberSocketID][streamType] = append(s.grabberTracks[grabberSocketID][streamType], localTrack)
 		tracksReceived++
 		log.Printf("Tracks received for %s: %d/%d", grabberSocketID, tracksReceived, expectedTracks)
-	if tracksReceived >= expectedTracks{
-		close(setupChan)
-	}
-	s.mu.Unlock()
-
-	go func() {
-		buffer := make([]byte, 1500)
-
-		for {
-			n, _, err := remoteTrack.Read(buffer)
-			if err != nil {
-				log.Printf("error reading RTP from grabber %s: %v", grabberSocketID, err)
-				return
-			}
-			if _, err := localTrack.Write(buffer[:n]); err != nil {
-				log.Printf("error writing RTP to TrackLocal for grabber %s: %v", grabberSocketID, err)
-			}
-		}
-	}()
-})
-
-pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-	if candidate != nil {
-		gsi := string(grabberSocketID)
-		if err := grabberConn.WriteJSON(api.GrabberMessage{
-			Event: api.GrabberMessageEventPlayerIce,
-			Ice: &api.IceMessage{
-				PeerId:    &gsi,
-				Candidate: candidate.ToJSON(),
-			},
-		}); err != nil {
-			log.Printf("failed to send ICE candidate to grabber %s: %v", grabberSocketID, err)
-		}
-	}
-})
-
-pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-	log.Printf("ICE connection state for grabber %s: %s", grabberSocketID, state.String())
-	if state == webrtc.ICEConnectionStateDisconnected || state == webrtc.ICEConnectionStateFailed {
-		log.Printf("Grabber %s disconnected or failed, cleaning up", grabberSocketID)
-		s.mu.Lock()
-		pc.Close()
-		delete(s.grabberPeerConns[grabberSocketID], streamType)
-		delete(s.grabberTracks[grabberSocketID], streamType)
-		for _, pcPlayer := range s.subscribers[grabberSocketID][streamType] {
-			pcPlayer.Close()
-		}
-		delete(s.subscribers[grabberSocketID], streamType)
-		if len(s.grabberPeerConns[grabberSocketID]) == 0 {
-			delete(s.grabberPeerConns, grabberSocketID)
-			delete(s.grabberTracks, grabberSocketID)
-			delete(s.subscribers, grabberSocketID)
-			delete(s.grabberSetupChannels, grabberSocketID)
-		}
-		if setupChan, ok := s.grabberSetupChannels[grabberSocketID][streamType]; ok {
+		if tracksReceived >= expectedTracks {
 			close(setupChan)
-			delete(s.grabberSetupChannels[grabberSocketID], streamType)
 		}
 		s.mu.Unlock()
+
+		go func() {
+			buffer := make([]byte, 1500)
+
+			for {
+				n, _, err := remoteTrack.Read(buffer)
+				if err != nil {
+					log.Printf("error reading RTP from grabber %s: %v", grabberSocketID, err)
+					return
+				}
+				if _, err := localTrack.Write(buffer[:n]); err != nil {
+					log.Printf("error writing RTP to TrackLocal for grabber %s: %v", grabberSocketID, err)
+				}
+			}
+		}()
+	})
+
+	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate != nil {
+			gsi := fmt.Sprintf("%s_%s", grabberSocketID, streamType)
+			if err := grabberConn.WriteJSON(api.GrabberMessage{
+				Event: api.GrabberMessageEventPlayerIce,
+				Ice: &api.IceMessage{
+					PeerId:    &gsi,
+					Candidate: candidate.ToJSON(),
+				},
+			}); err != nil {
+				log.Printf("failed to send ICE candidate to grabber %s: %v", grabberSocketID, err)
+			}
+		}
+	})
+
+	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		log.Printf("ICE connection state for grabber %s: %s", grabberSocketID, state.String())
+		if state == webrtc.ICEConnectionStateDisconnected || state == webrtc.ICEConnectionStateFailed {
+			log.Printf("Grabber %s disconnected or failed, cleaning up", grabberSocketID)
+			s.mu.Lock()
+			pc.Close()
+			delete(s.grabberPeerConns[grabberSocketID], streamType)
+			delete(s.grabberTracks[grabberSocketID], streamType)
+			for _, pcPlayer := range s.subscribers[grabberSocketID][streamType] {
+				pcPlayer.Close()
+			}
+			delete(s.subscribers[grabberSocketID], streamType)
+			if len(s.grabberPeerConns[grabberSocketID]) == 0 {
+				delete(s.grabberPeerConns, grabberSocketID)
+				delete(s.grabberTracks, grabberSocketID)
+				delete(s.subscribers, grabberSocketID)
+				delete(s.grabberSetupChannels, grabberSocketID)
+			}
+			if setupChan, ok := s.grabberSetupChannels[grabberSocketID][streamType]; ok {
+				close(setupChan)
+				delete(s.grabberSetupChannels[grabberSocketID], streamType)
+			}
+			s.mu.Unlock()
+			close(setupChan)
+		}
+	})
+
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		log.Printf("failed to create offer for grabber %s: %v", grabberSocketID, err)
+		pc.Close()
 		close(setupChan)
+		return
 	}
-})
+	// log.Printf("Grabber offer SDP: %s", offer.SDP)
+	if err := pc.SetLocalDescription(offer); err != nil {
+		log.Printf("failed to set local description for grabber %s: %v", grabberSocketID, err)
+		pc.Close()
+		close(setupChan)
+		return
+	}
 
-offer, err := pc.CreateOffer(nil)
-if err != nil {
-	log.Printf("failed to create offer for grabber %s: %v", grabberSocketID, err)
-	pc.Close()
-	close(setupChan)
-	return
-}
-// log.Printf("Grabber offer SDP: %s", offer.SDP)
-if err := pc.SetLocalDescription(offer); err != nil {
-	log.Printf("failed to set local description for grabber %s: %v", grabberSocketID, err)
-	pc.Close()
-	close(setupChan)
-	return
-}
+	gsi := fmt.Sprintf("%s_%s", grabberSocketID, streamType)
+	if err := grabberConn.WriteJSON(api.GrabberMessage{
+		Event: api.GrabberMessageEventOffer,
+		Offer: &api.OfferMessage{
+			Offer:      offer,
+			PeerId:     &gsi,
+			StreamType: streamType,
+		},
+	}); err != nil {
+		log.Printf("failed to send offer to grabber %s: %v", grabberSocketID, err)
+		pc.Close()
+		close(setupChan)
+		return
+	}
 
-gsi := string(grabberSocketID)
-if err := grabberConn.WriteJSON(api.GrabberMessage{
-	Event: api.GrabberMessageEventOffer,
-	Offer: &api.OfferMessage{
-		Offer:      offer,
-		PeerId:     &gsi,
-		StreamType: streamType,
-	},
-}); err != nil {
-	log.Printf("failed to send offer to grabber %s: %v", grabberSocketID, err)
-	pc.Close()
-	close(setupChan)
-	return
-}
-
-select {
-case <-setupChan:
+	select {
+	case <-setupChan:
 		log.Printf("All expected tracks received for grabber %s", grabberSocketID)
 	case <-timer.C:
 		log.Printf("Timeout waiting for tracks from grabber %s", grabberSocketID)
