@@ -775,11 +775,11 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 
 	expectedTracks := 1
 	if streamType == "webcam" {
-		expectedTracks = 2
+		expectedTracks = 1
 	}
 	tracksReceived := 0
 
-	timer := time.NewTimer(10 * time.Second)
+	timer := time.NewTimer(20 * time.Second)
 	defer timer.Stop()
 
 	pc.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
