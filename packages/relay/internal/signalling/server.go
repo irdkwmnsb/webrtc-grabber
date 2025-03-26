@@ -36,7 +36,8 @@ type Server struct {
 
 	socketToStreamType map[sockets.SocketID]string
 
-	mu sync.Mutex
+	mu        sync.Mutex
+	waitMutex sync.Mutex
 
 	api *webrtc.API
 }
@@ -465,6 +466,7 @@ func (s *Server) processPlayerMessage(messages chan interface{}, id sockets.Sock
 		streamType := m.Offer.StreamType
 
 		s.mu.Lock()
+		s.waitMutex.Lock()
 		if _, ok := s.grabberPeerConns[grabberSocketID]; !ok {
 			s.grabberPeerConns[grabberSocketID] = make(map[string]*webrtc.PeerConnection)
 			s.grabberTracks[grabberSocketID] = make(map[string][]webrtc.TrackLocal)
@@ -490,11 +492,13 @@ func (s *Server) processPlayerMessage(messages chan interface{}, id sockets.Sock
 			s.mu.Lock()
 			if _, ok := s.grabberPeerConns[grabberSocketID][streamType]; !ok {
 				s.mu.Unlock()
+				s.waitMutex.Unlock()
 				messages <- api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
 				log.Printf("failed to set up grabber peer connection for %s", grabberSocketID)
 				return nil
 			}
 		}
+		s.waitMutex.Unlock()
 		// Check tracks before proceeding
 		tracks := s.grabberTracks[grabberSocketID][streamType]
 		log.Printf("Tracks available for %s/%s: %d", grabberSocketID, streamType, len(tracks))
