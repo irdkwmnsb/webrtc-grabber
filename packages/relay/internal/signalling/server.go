@@ -807,7 +807,7 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 		s.grabberTracks[grabberSocketID][streamType] = append(s.grabberTracks[grabberSocketID][streamType], localTrack)
 		tracksReceived++
 		log.Printf("Tracks received for %s: %d/%d", grabberSocketID, tracksReceived, expectedTracks)
-		if tracksReceived >= expectedTracks {
+		if tracksReceived >= expectedTracks && tracksReceived == 1 {
 			close(setupChan)
 		}
 		s.mu.Unlock()
@@ -866,6 +866,7 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 				delete(s.grabberSetupChannels[grabberSocketID], streamType)
 			}
 			s.mu.Unlock()
+			close(setupChan)
 		}
 	})
 
