@@ -508,6 +508,7 @@ func (s *Server) processPlayerMessage(messages chan interface{}, id sockets.Sock
 			}
 		}
 
+		s.mu.Lock()
 		// Check tracks before proceeding
 		tracks := s.grabberTracks[grabberSocketID][streamType]
 		log.Printf("Tracks available for %s/%s: %d", grabberSocketID, streamType, len(tracks))
