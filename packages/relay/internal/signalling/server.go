@@ -33,11 +33,11 @@ type Server struct {
 	grabberTracks        map[sockets.SocketID]map[string][]webrtc.TrackLocal
 	subscribers          map[sockets.SocketID]map[string][]*webrtc.PeerConnection
 	grabberSetupChannels map[sockets.SocketID]map[string]chan struct{}
+	setupInProgress      map[string]chan struct{}
 
 	socketToStreamType map[sockets.SocketID]string
 
-	mu        sync.Mutex
-	waitMutex sync.Mutex
+	mu sync.Mutex
 
 	api *webrtc.API
 }
@@ -123,6 +123,7 @@ func NewServer(config ServerConfig, app *fiber.App) (*Server, error) {
 		subscribers:          make(map[sockets.SocketID]map[string][]*webrtc.PeerConnection),
 		grabberSetupChannels: make(map[sockets.SocketID]map[string]chan struct{}),
 		api:                  api,
+		setupInProgress:      make(map[string]chan struct{}),
 		socketToStreamType:   make(map[sockets.SocketID]string),
 	}
 	server.storage.setParticipants(config.Participants)
@@ -464,8 +465,8 @@ func (s *Server) processPlayerMessage(messages chan interface{}, id sockets.Sock
 		}
 
 		streamType := m.Offer.StreamType
+		key := string(grabberSocketID) + streamType
 
-		s.waitMutex.Lock()
 		s.mu.Lock()
 		if _, ok := s.grabberPeerConns[grabberSocketID]; !ok {
 			s.grabberPeerConns[grabberSocketID] = make(map[string]*webrtc.PeerConnection)
@@ -474,20 +475,31 @@ func (s *Server) processPlayerMessage(messages chan interface{}, id sockets.Sock
 			s.grabberSetupChannels[grabberSocketID] = make(map[string]chan struct{})
 		}
 		s.socketToStreamType[id] = streamType
-		if _, ok := s.grabberPeerConns[grabberSocketID][streamType]; !ok {
+		if _, ok := s.grabberPeerConns[grabberSocketID][streamType]; ok {
+			s.mu.Unlock()
+		} else if setupChan, ok := s.setupInProgress[key]; ok {
+			s.mu.Unlock()
+			<-setupChan
+			s.mu.Lock()
+			if _, ok := s.grabberPeerConns[grabberSocketID][streamType]; !ok {
+				s.mu.Unlock()
+				messages <- api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+				log.Printf("failed to set up grabber peer connection for %s", grabberSocketID)
+				return nil
+			}
+			s.mu.Unlock()
+		} else {
 			log.Printf("NEW CONNECTION %v %v", grabberSocketID, streamType)
 			setupChan := make(chan struct{})
 			s.grabberSetupChannels[grabberSocketID][streamType] = setupChan
 			s.mu.Unlock()
 
-			trackChan := make(chan struct{})
-			go s.setupGrabberPeerConnection(grabberSocketID, setupChan, trackChan, streamType)
+			go s.setupGrabberPeerConnection(grabberSocketID, setupChan, streamType)
 
 			<-setupChan
-			<-trackChan
-			s.waitMutex.Unlock()
 
 			s.mu.Lock()
+			delete(s.setupInProgress, key)
 			if _, ok := s.grabberPeerConns[grabberSocketID][streamType]; !ok {
 				s.mu.Unlock()
 				messages <- api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
@@ -708,11 +720,6 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 			log.Printf("failed to set remote description for grabber %s: %v", id, err)
 			return nil
 		}
-
-		if setupChan, ok := s.grabberSetupChannels[id][streamType]; ok {
-			close(setupChan)
-			delete(s.grabberSetupChannels[id], streamType)
-		}
 		s.mu.Unlock()
 	case api.GrabberMessageEventGrabberIce:
 		if m.Ice == nil || m.Ice.PeerId == nil {
@@ -731,7 +738,7 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 	return nil
 }
 
-func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, setupChan, trackChan chan struct{}, streamType string) {
+func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, setupChan chan struct{}, streamType string) {
 	log.Printf("Setting up grabber peer connection for %s, streamType=%s", grabberSocketID, streamType)
 	grabberConn := s.grabberSockets.GetSocket(grabberSocketID)
 	if grabberConn == nil {
@@ -800,7 +807,7 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 		tracksReceived++
 		log.Printf("Tracks received for %s: %d/%d", grabberSocketID, tracksReceived, expectedTracks)
 		if tracksReceived >= expectedTracks {
-			close(trackChan)
+			close(setupChan)
 		}
 		s.mu.Unlock()
 
@@ -892,7 +899,7 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 	}
 
 	select {
-	case <-trackChan:
+	case <-setupChan:
 		log.Printf("All expected tracks received for grabber %s", grabberSocketID)
 	case <-timer.C:
 		log.Printf("Timeout waiting for tracks from grabber %s", grabberSocketID)
@@ -902,6 +909,6 @@ func (s *Server) setupGrabberPeerConnection(grabberSocketID sockets.SocketID, se
 		delete(s.grabberTracks[grabberSocketID], streamType)
 		delete(s.subscribers[grabberSocketID], streamType)
 		s.mu.Unlock()
-		close(trackChan)
+		close(setupChan)
 	}
 }
