@@ -363,6 +363,7 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 											delete(s.grabberPeerConns, grabberID)
 											delete(s.grabberTracks, grabberID)
 											delete(s.subscribers, grabberID)
+											delete(s.socketToStreamType, grabberID)
 										}
 									}
 								}
@@ -655,9 +656,11 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 			s.grabberSockets.CloseSocket(socketID)
 			delete(s.grabberPeerConns, socketID)
 			delete(s.grabberTracks, socketID)
-			// for _, pcPlayer := range s.subscribers[socketID] {
-			// 	pcPlayer.Close()
-			// }
+			for _, pcs := range s.subscribers[socketID] {
+				for _, pcPlayer := range pcs {
+					pcPlayer.Close()
+				}
+			}
 			delete(s.subscribers, socketID)
 			break
 		}
