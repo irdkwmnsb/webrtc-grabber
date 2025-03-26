@@ -83,9 +83,9 @@ func NewServer(config ServerConfig, app *fiber.App) (*Server, error) {
 	}
 
 	mediaEngine := &webrtc.MediaEngine{}
-	if err := mediaEngine.RegisterCodec(h264Codec, webrtc.RTPCodecTypeVideo); err != nil {
-		log.Printf("Failed to register H.264 codec: %v", err)
-	}
+	// if err := mediaEngine.RegisterCodec(h264Codec, webrtc.RTPCodecTypeVideo); err != nil {
+	// 	log.Printf("Failed to register H.264 codec: %v", err)
+	// }
 	if err := mediaEngine.RegisterCodec(vp9Codec, webrtc.RTPCodecTypeVideo); err != nil {
 		log.Printf("Failed to register H.264 codec: %v", err)
 	}
