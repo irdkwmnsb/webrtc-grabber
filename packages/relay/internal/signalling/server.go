@@ -48,14 +48,14 @@ type PeerConnectionConfig struct {
 
 func NewServer(config ServerConfig, app *fiber.App) (*Server, error) {
 
-	h264Codec := webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeH264,
-			ClockRate:   90000,
-			SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
-		},
-		PayloadType: 96,
-	}
+	// h264Codec := webrtc.RTPCodecParameters{
+	// 	RTPCodecCapability: webrtc.RTPCodecCapability{
+	// 		MimeType:    webrtc.MimeTypeH264,
+	// 		ClockRate:   90000,
+	// 		SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
+	// 	},
+	// 	PayloadType: 96,
+	// }
 
 	vp8Codec := webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
