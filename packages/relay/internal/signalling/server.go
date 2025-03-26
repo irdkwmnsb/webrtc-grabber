@@ -474,9 +474,6 @@ func (s *Server) processPlayerMessage(messages chan interface{}, id sockets.Sock
 			s.grabberSetupChannels[grabberSocketID] = make(map[string]chan struct{})
 		}
 		s.socketToStreamType[id] = streamType
-		if _, ok := s.grabberSetupChannels[grabberSocketID][streamType]; ok {
-			<-s.grabberSetupChannels[grabberSocketID][streamType]
-		}
 		if _, ok := s.grabberPeerConns[grabberSocketID][streamType]; !ok {
 			log.Printf("NEW CONNECTION %v %v", grabberSocketID, streamType)
 			setupChan := make(chan struct{})
