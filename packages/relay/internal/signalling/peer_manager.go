@@ -37,26 +37,27 @@ func NewPeerManager(config ServerConfig) (*PeerManager, error) {
 	mediaEngine := &webrtc.MediaEngine{}
 	for _, codec := range config.Codecs {
 		if err := mediaEngine.RegisterCodec(codec.Params, codec.Type); err != nil {
-			log.Printf("Failed to register codec: %v", err)
-			return nil, err
+			return nil, fmt.Errorf("failed to register codec: %w", err)
 		}
 	}
 
 	interceptorRegistry := &interceptor.Registry{}
 
 	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, interceptorRegistry); err != nil {
-		log.Printf("failed register interceptors %v", err)
+		return nil, fmt.Errorf("failed to register default interceptors: %w", err)
 	}
 
 	internalPliFactory, err := intervalpli.NewReceiverInterceptor()
 	if err != nil {
-		log.Printf("can't create pli factory: %v", err)
+		return nil, fmt.Errorf("failed to create PLI factory: %w", err)
 	}
 
 	interceptorRegistry.Add(internalPliFactory)
 
 	webrtcApi := webrtc.NewAPI(
-		webrtc.WithMediaEngine(mediaEngine), webrtc.WithInterceptorRegistry(interceptorRegistry))
+		webrtc.WithMediaEngine(mediaEngine),
+		webrtc.WithInterceptorRegistry(interceptorRegistry),
+	)
 
 	return &PeerManager{
 		peerConnections:          make(map[string]*webrtc.PeerConnection),
@@ -86,38 +87,43 @@ func (pm *PeerManager) DeleteSubscriber(id sockets.SocketID) {
 	defer pm.mu.Unlock()
 
 	pc, ok := pm.peerConnections[string(id)]
-	if !ok {
+	if !ok || pc == nil {
 		return
 	}
 
-	if pc == nil {
-		return
-	}
 	_ = pc.Close()
 	publisherKey, ok := pm.subscriberToPublisherKey[pc]
 	if !ok {
 		return
 	}
 
-	for i, sub := range pm.subscribers[publisherKey] {
-		if sub == pc {
-			pm.subscribers[publisherKey] = append(pm.subscribers[publisherKey][:i],
-				pm.subscribers[publisherKey][i+1:]...)
-			break
-		}
-	}
+	pm.removeSubscriberFromPublisher(publisherKey, pc)
 
 	if len(pm.subscribers[publisherKey]) == 0 {
-		publisherPC, ok := pm.peerConnections[publisherKey]
-		if ok && publisherPC != nil {
-			_ = publisherPC.Close()
-			delete(pm.peerConnections, publisherKey)
-			delete(pm.publisherTracks, publisherKey)
-			delete(pm.subscribers, publisherKey)
-		}
+		pm.cleanupPublisher(publisherKey)
 	}
 
 	delete(pm.subscriberToPublisherKey, pc)
+}
+
+func (pm *PeerManager) cleanupPublisher(publisherKey string) {
+	pc, ok := pm.peerConnections[publisherKey]
+	if ok && pc != nil {
+		_ = pc.Close()
+		delete(pm.peerConnections, publisherKey)
+		delete(pm.publisherTracks, publisherKey)
+		delete(pm.subscribers, publisherKey)
+	}
+}
+
+func (pm *PeerManager) removeSubscriberFromPublisher(publisherKey string, subscriber *webrtc.PeerConnection) {
+	subscribers := pm.subscribers[publisherKey]
+	for i, sub := range subscribers {
+		if sub == subscriber {
+			pm.subscribers[publisherKey] = append(subscribers[:i], subscribers[i+1:]...)
+			break
+		}
+	}
 }
 
 func (pm *PeerManager) AddSubscriber(id, publisherSocketID sockets.SocketID,
