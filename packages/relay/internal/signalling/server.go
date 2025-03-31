@@ -23,7 +23,8 @@ type Server struct {
 	oldPeersCleaner utils.IntervalTimer
 	playersSockets  *sockets.SocketPool
 	grabberSockets  *sockets.SocketPool
-	peerManager     *PeerManager
+
+	peerManager *PeerManager
 }
 
 func NewServer(config ServerConfig, app *fiber.App) (*Server, error) {
@@ -187,17 +188,7 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.playersSockets.AddSocket(c)
 	log.Printf("authorized %s", socketID)
-	messages := make(chan interface{})
-	defer close(messages)
-
-	go func() {
-		for msg := range messages {
-			if err := c.WriteJSON(msg); err != nil {
-				log.Printf("failed to send message to %s: %v", socketID, msg)
-				return
-			}
-		}
-	}()
+	newC := sockets.NewSocket(c)
 
 	var message api.PlayerMessage
 	sendPeerStatus := func() {
@@ -206,38 +197,42 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 			PeersStatus:        s.storage.getAll(),
 			ParticipantsStatus: s.storage.getParticipantsStatus(),
 		}
-		messages <- answer
+		newC.WriteJSON(answer)
 	}
 	sendPeerStatus()
 	timer := utils.SetIntervalTimer(PlayerSendPeerStatusInterval, sendPeerStatus)
 
 	for {
-		if err := c.ReadJSON(&message); err != nil {
+		if err := newC.ReadJSON(&message); err != nil {
 			log.Printf("disconnected %s caused by %s", socketID, err.Error())
 			s.playersSockets.CloseSocket(socketID)
 			timer.Stop()
 			break
 		}
 
-		answer := s.processPlayerMessage(messages, socketID, message)
+		answer := s.processPlayerMessage(newC, socketID, message)
 		if answer == nil {
 			continue
 		}
-		messages <- answer
+		if err := newC.WriteJSON(answer); err != nil {
+			log.Printf("failed to send message to %s: %v", socketID, answer)
+			return
+		}
 	}
 }
 
 func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.playersSockets.AddSocket(c)
+	newC := sockets.NewSocket(c)
 	log.Printf("authorized %s", socketID)
 
 	messages := make(chan interface{})
 	defer close(messages)
 
-	go func() {
+	go func() { // rewrite this
 		for msg := range messages {
-			if err := c.WriteJSON(msg); err != nil {
+			if err := newC.WriteJSON(msg); err != nil {
 				log.Printf("failed to send message to %s: %v", socketID, msg)
 				return
 			}
@@ -252,13 +247,13 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	var message api.PlayerMessage
 
 	for {
-		if err := c.ReadJSON(&message); err != nil {
+		if err := newC.ReadJSON(&message); err != nil {
 			log.Printf("disconnected %s caused by %s", socketID, err.Error())
 			s.playersSockets.CloseSocket(socketID)
 			break
 		}
 
-		answer := s.processPlayerMessage(messages, socketID, message)
+		answer := s.processPlayerMessage(newC, socketID, message)
 		if answer == nil {
 			continue
 		}
@@ -266,7 +261,7 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	}
 }
 
-func (s *Server) processPlayerMessage(messages chan interface{}, id sockets.SocketID,
+func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 	m api.PlayerMessage) *api.PlayerMessage {
 	log.Printf("EVENT: %v, STREAM TYPE: %v", m.Event, m.Offer.StreamType)
 	switch m.Event {
@@ -280,7 +275,7 @@ func (s *Server) processPlayerMessage(messages chan interface{}, id sockets.Sock
 		} else if m.Offer.PeerName != nil {
 			if peer, ok := s.storage.getPeerByName(*m.Offer.PeerName); ok {
 				if !slices.Contains(peer.StreamTypes, api.StreamType(m.Offer.StreamType)) {
-					messages <- api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+					_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
 					log.Printf("no such stream type %v in grabber with id %v",
 						m.Offer.StreamType, m.Offer.PeerId)
 					return nil
@@ -288,7 +283,7 @@ func (s *Server) processPlayerMessage(messages chan interface{}, id sockets.Sock
 				grabberSocketID = peer.SocketId
 			}
 		} else {
-			messages <- api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+			_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
 			log.Printf("offer missing PeerId or PeerName")
 			return nil
 		}
@@ -297,12 +292,12 @@ func (s *Server) processPlayerMessage(messages chan interface{}, id sockets.Sock
 
 		grabberConn := s.grabberSockets.GetSocket(grabberSocketID)
 		if grabberConn == nil {
-			messages <- api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+			_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
 			return nil
 		}
 
-		messages <- s.peerManager.AddSubscriber(id, grabberSocketID, streamType, messages,
-			&m.Offer.Offer, grabberConn)
+		answer := s.peerManager.AddSubscriber(id, grabberSocketID, streamType, c, &m.Offer.Offer, grabberConn)
+		_ = c.WriteJSON(answer)
 	case api.PlayerMessageEventPlayerIce:
 		if m.Ice == nil {
 			return nil
@@ -327,8 +322,9 @@ func (s *Server) setupGrabberSockets() {
 func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.grabberSockets.AddSocket(c)
+	newC := sockets.NewSocket(c)
 
-	if err := c.WriteJSON(api.GrabberMessage{
+	if err := newC.WriteJSON(api.GrabberMessage{
 		Event: api.GrabberMessageEventInitPeer,
 		InitPeer: &api.GrabberInitPeerMessage{
 			PcConfigMessage: api.PcConfigMessage{PcConfig: s.config.PeerConnectionConfig},
@@ -341,7 +337,7 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 
 	var message api.GrabberMessage
 	for {
-		if err := c.ReadJSON(&message); err != nil {
+		if err := newC.ReadJSON(&message); err != nil {
 			log.Printf("disconnected %s caused by %s", socketID, err.Error())
 			s.grabberSockets.CloseSocket(socketID)
 			s.peerManager.DeletePublisher(socketID)
@@ -353,7 +349,7 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 		if answer == nil {
 			continue
 		}
-		if err := c.WriteJSON(answer); err != nil {
+		if err := newC.WriteJSON(answer); err != nil {
 			log.Printf("failed to send answer %v to %s", answer, socketID)
 		}
 	}

@@ -130,7 +130,7 @@ func (pm *PeerManager) DeleteSubscriber(id sockets.SocketID) {
 }
 
 func (pm *PeerManager) AddSubscriber(id, publisherSocketID sockets.SocketID,
-	streamType string, messages chan interface{},
+	streamType string, c sockets.Socket,
 	offer *webrtc.SessionDescription, publisherConn sockets.Socket) *api.PlayerMessage {
 
 	publisherKey := getPublisherKey(publisherSocketID, streamType)
@@ -204,13 +204,13 @@ func (pm *PeerManager) AddSubscriber(id, publisherSocketID sockets.SocketID,
 
 	subscriberPC.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate != nil {
-			messages <- api.PlayerMessage{
+			_ = c.WriteJSON(api.PlayerMessage{
 				Event: api.PlayerMessageEventGrabberIce,
 				Ice: &api.IceMessage{
 					PeerId:    &publisherKey,
 					Candidate: candidate.ToJSON(),
 				},
-			}
+			})
 		}
 	})
 
@@ -278,9 +278,7 @@ func (pm *PeerManager) cleanupPlayerConnection(id sockets.SocketID, subscriberPC
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if _, ok := pm.subscriberPeerConnections[id]; ok {
-		delete(pm.subscriberPeerConnections, id)
-	}
+	delete(pm.subscriberPeerConnections, id)
 
 	publisherKey, ok := pm.subscriberToPublisherKey[subscriberPC]
 	if ok {
@@ -469,7 +467,6 @@ func (pm *PeerManager) setupGrabberPeerConnection(publisherSocketID sockets.Sock
 
 			for {
 				n, _, err := remoteTrack.Read(buffer)
-				log.Printf("%d", len(pm.subscriberPeerConnections))
 				if err != nil {
 					log.Printf("error reading RTP from publisher %s: %v", publisherSocketID, err)
 					return
