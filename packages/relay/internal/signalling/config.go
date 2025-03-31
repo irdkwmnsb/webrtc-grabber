@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
-	"github.com/pion/webrtc/v3"
 	"net/netip"
 	"os"
+
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
+	"github.com/pion/webrtc/v3"
 )
 
 type ServerConfig struct {
@@ -61,6 +62,10 @@ func LoadServerConfig() (ServerConfig, error) {
 	defer func() { _ = configFile.Close() }()
 
 	err = json.NewDecoder(bufio.NewReader(configFile)).Decode(&rawConfig)
+
+	if err != nil {
+		return ServerConfig{}, fmt.Errorf("can not decode config file to json - %w", err)
+	}
 
 	if rawConfig.ServerPort == 0 {
 		rawConfig.ServerPort = 8000
