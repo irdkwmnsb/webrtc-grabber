@@ -23,12 +23,6 @@ const (
 	MaxConcurrentReads  = 10
 )
 
-var bufferPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, 1500)
-	},
-}
-
 type PeerManager struct {
 	peerConnections          sync.Map
 	trackBroadcasters        sync.Map
