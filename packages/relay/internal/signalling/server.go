@@ -197,7 +197,7 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 			PeersStatus:        s.storage.getAll(),
 			ParticipantsStatus: s.storage.getParticipantsStatus(),
 		}
-		newC.WriteJSON(answer)
+		_ = newC.WriteJSON(answer)
 	}
 	sendPeerStatus()
 	timer := utils.SetIntervalTimer(PlayerSendPeerStatusInterval, sendPeerStatus)

@@ -4,17 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log"
+	"os"
+	"sync"
+	"time"
+
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/player_client"
 	"github.com/pion/webrtc/v3"
 	"github.com/pion/webrtc/v3/pkg/media"
 	"github.com/pion/webrtc/v3/pkg/media/ivfwriter"
 	"github.com/pion/webrtc/v3/pkg/media/oggwriter"
-	"io"
-	"log"
-	"os"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 type Recorder interface {
@@ -34,7 +34,6 @@ type recordingInfo struct {
 	peerName   string
 	streamType string
 	duration   time.Duration
-	isDone     atomic.Bool
 	cancelFunc context.CancelFunc
 }
 
