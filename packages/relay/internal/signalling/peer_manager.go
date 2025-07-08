@@ -24,12 +24,12 @@ const (
 )
 
 type PeerManager struct {
-	peerConnections          sync.Map
-	trackBroadcasters        sync.Map
-	subscribers              sync.Map
-	setupInProgress          sync.Map
-	subscriberToPublisherKey sync.Map
-	subscriberMutexes        sync.Map
+	peerConnections          *SyncMapWrapper[string, *webrtc.PeerConnection]
+	trackBroadcasters        *SyncMapWrapper[string, *TrackBroadcaster]
+	subscribers              *SyncMapWrapper[string, []*webrtc.PeerConnection]
+	setupInProgress          *SyncMapWrapper[string, chan struct{}]
+	subscriberToPublisherKey *SyncMapWrapper[*webrtc.PeerConnection, string]
+	subscriberMutexes        *SyncMapWrapper[string, *sync.Mutex]
 	config                   ServerConfig
 
 	api *webrtc.API
@@ -72,20 +72,28 @@ func NewPeerManager(config ServerConfig) (*PeerManager, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &PeerManager{
-		api:    webrtcApi,
-		config: config,
-		ctx:    ctx,
-		cancel: cancel,
-	}, nil
+	pm := &PeerManager{
+		api:                      webrtcApi,
+		config:                   config,
+		ctx:                      ctx,
+		cancel:                   cancel,
+		peerConnections:          NewSyncMapWrapper[string, *webrtc.PeerConnection](),
+		trackBroadcasters:        NewSyncMapWrapper[string, *TrackBroadcaster](),
+		subscribers:              NewSyncMapWrapper[string, []*webrtc.PeerConnection](),
+		setupInProgress:          NewSyncMapWrapper[string, chan struct{}](),
+		subscriberToPublisherKey: NewSyncMapWrapper[*webrtc.PeerConnection, string](),
+		subscriberMutexes:        NewSyncMapWrapper[string, *sync.Mutex](),
+	}
+
+	return pm, nil
 }
 
 func (pm *PeerManager) Close() {
 	pm.cancel()
 
-	pm.peerConnections.Range(func(key, value interface{}) bool {
-		if pc := value.(*webrtc.PeerConnection); pc != nil {
-			_ = pc.Close()
+	pm.peerConnections.Range(func(key string, value *webrtc.PeerConnection) bool {
+		if value != nil {
+			_ = value.Close()
 		}
 		pm.peerConnections.Delete(key)
 		return true
@@ -93,64 +101,52 @@ func (pm *PeerManager) Close() {
 }
 
 func (pm *PeerManager) DeleteSubscriber(id sockets.SocketID) {
-	pcInterface, ok := pm.peerConnections.LoadAndDelete(string(id))
-	if !ok {
-		return
-	}
-
-	pc := pcInterface.(*webrtc.PeerConnection)
-	if pc == nil {
+	pc, ok := pm.peerConnections.LoadAndDelete(string(id))
+	if !ok || pc == nil {
 		return
 	}
 
 	_ = pc.Close()
 
-	publisherKeyInterface, ok := pm.subscriberToPublisherKey.LoadAndDelete(pc)
+	publisherKey, ok := pm.subscriberToPublisherKey.LoadAndDelete(pc)
 	if !ok {
 		return
 	}
 
-	publisherKey := publisherKeyInterface.(string)
-	pm.trackBroadcasters.Range(func(key, value interface{}) bool {
-		keyStr := key.(string)
-		if strings.HasPrefix(keyStr, publisherKey+"_track_") {
-			broadcaster := value.(*TrackBroadcaster)
-			broadcaster.RemoveSubscriber(pc)
+	pm.trackBroadcasters.Range(func(key string, value *TrackBroadcaster) bool {
+		if strings.HasPrefix(key, publisherKey+"_track_") {
+			value.RemoveSubscriber(pc)
 		}
 		return true
 	})
+	log.Printf("REMOVE SUB FROM PUBLISHER")
 	pm.removeSubscriberFromPublisher(publisherKey, pc)
 
-	subscribersInterface, ok := pm.subscribers.Load(publisherKey)
-	if ok {
-		subscribers := subscribersInterface.([]*webrtc.PeerConnection)
-		if len(subscribers) == 0 {
-			pm.cleanupPublisher(publisherKey)
-		}
+	_, ok = pm.subscribers.Load(publisherKey)
+	if !ok {
+		pm.cleanupPublisher(publisherKey)
 	}
 }
 
 func (pm *PeerManager) cleanupPublisher(publisherKey string) {
-	pcInterface, ok := pm.peerConnections.LoadAndDelete(publisherKey)
+	pc, ok := pm.peerConnections.LoadAndDelete(publisherKey)
 	if ok {
-		if pc := pcInterface.(*webrtc.PeerConnection); pc != nil {
+		if pc != nil {
 			_ = pc.Close()
 		}
 	}
 
-	pm.trackBroadcasters.Range(func(key, value interface{}) bool {
-		keyStr := key.(string)
-		if strings.HasPrefix(keyStr, publisherKey+"_track_") {
-			broadcaster := value.(*TrackBroadcaster)
-			broadcaster.Stop()
+	pm.trackBroadcasters.Range(func(key string, value *TrackBroadcaster) bool {
+		if strings.HasPrefix(key, publisherKey+"_track_") {
+			value.Stop()
 			pm.trackBroadcasters.Delete(key)
 		}
 		return true
 	})
 
-	subscribersInterface, ok := pm.subscribers.LoadAndDelete(publisherKey)
+	subscribers, ok := pm.subscribers.LoadAndDelete(publisherKey)
 	if ok {
-		if subscribers := subscribersInterface.([]*webrtc.PeerConnection); subscribers != nil {
+		if subscribers != nil {
 			for _, sub := range subscribers {
 				_ = sub.Close()
 			}
@@ -159,18 +155,16 @@ func (pm *PeerManager) cleanupPublisher(publisherKey string) {
 }
 
 func (pm *PeerManager) removeSubscriberFromPublisher(publisherKey string, subscriber *webrtc.PeerConnection) {
-	mutexInterface, _ := pm.subscriberMutexes.LoadOrStore(publisherKey, &sync.Mutex{})
-	mutex := mutexInterface.(*sync.Mutex)
+	mutex, _ := pm.subscriberMutexes.LoadOrStore(publisherKey, &sync.Mutex{})
 
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	subscribersInterface, ok := pm.subscribers.Load(publisherKey)
+	currentSubscribers, ok := pm.subscribers.Load(publisherKey)
 	if !ok {
 		return
 	}
 
-	currentSubscribers := subscribersInterface.([]*webrtc.PeerConnection)
 	var newSubscribers []*webrtc.PeerConnection
 
 	for _, sub := range currentSubscribers {
@@ -178,6 +172,8 @@ func (pm *PeerManager) removeSubscriberFromPublisher(publisherKey string, subscr
 			newSubscribers = append(newSubscribers, sub)
 		}
 	}
+
+	log.Printf("SUBS COUNT: %v", len(newSubscribers))
 
 	if len(newSubscribers) == 0 {
 		pm.subscribers.Delete(publisherKey)
@@ -198,9 +194,8 @@ func (pm *PeerManager) AddSubscriber(id, publisherSocketID sockets.SocketID,
 	}
 
 	var trackCount int
-	pm.trackBroadcasters.Range(func(key, value interface{}) bool {
-		keyStr := key.(string)
-		if strings.HasPrefix(keyStr, publisherKey+"_track_") {
+	pm.trackBroadcasters.Range(func(key string, value *TrackBroadcaster) bool {
+		if strings.HasPrefix(key, publisherKey+"_track_") {
 			trackCount++
 		}
 		return true
@@ -234,17 +229,14 @@ func (pm *PeerManager) AddSubscriber(id, publisherSocketID sockets.SocketID,
 	log.Printf("Adding %d tracks to subscriber %s (%s)", trackCount, id, subscriberPeerID)
 
 	tracksAdded := 0
-	pm.trackBroadcasters.Range(func(key, value interface{}) bool {
-		keyStr := key.(string)
-		if strings.HasPrefix(keyStr, publisherKey+"_track_") {
-			broadcaster := value.(*TrackBroadcaster)
-
-			if _, err := subscriberPC.AddTrack(broadcaster.GetLocalTrack()); err != nil {
+	pm.trackBroadcasters.Range(func(key string, value *TrackBroadcaster) bool {
+		if strings.HasPrefix(key, publisherKey+"_track_") {
+			if _, err := subscriberPC.AddTrack(value.GetLocalTrack()); err != nil {
 				log.Printf("failed to add track to subscriber %s: %v", id, err)
 				return false
 			}
 
-			broadcaster.AddSubscriber(subscriberPC)
+			value.AddSubscriber(subscriberPC)
 			tracksAdded++
 		}
 		return true
@@ -296,16 +288,14 @@ func (pm *PeerManager) AddSubscriber(id, publisherSocketID sockets.SocketID,
 }
 
 func (pm *PeerManager) addSubscriberToPublisher(publisherKey string, subscriberPC *webrtc.PeerConnection) {
-	mutexInterface, _ := pm.subscriberMutexes.LoadOrStore(publisherKey, &sync.Mutex{})
-	mutex := mutexInterface.(*sync.Mutex)
+	mutex, _ := pm.subscriberMutexes.LoadOrStore(publisherKey, &sync.Mutex{})
 
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	subscribersInterface, ok := pm.subscribers.Load(publisherKey)
-	var currentSubscribers []*webrtc.PeerConnection
-	if ok {
-		currentSubscribers = subscribersInterface.([]*webrtc.PeerConnection)
+	currentSubscribers, ok := pm.subscribers.Load(publisherKey)
+	if !ok {
+		currentSubscribers = nil
 	}
 
 	newSubscribers := append(currentSubscribers, subscriberPC)
@@ -319,9 +309,8 @@ func (pm *PeerManager) ensureGrabberConnection(publisherKey string, publisherSoc
 		return true
 	}
 
-	setupChanInterface, setupInProgress := pm.setupInProgress.Load(publisherKey)
+	setupChan, setupInProgress := pm.setupInProgress.Load(publisherKey)
 	if setupInProgress {
-		setupChan := setupChanInterface.(chan struct{})
 		<-setupChan
 
 		_, ok := pm.peerConnections.Load(publisherKey)
@@ -330,12 +319,12 @@ func (pm *PeerManager) ensureGrabberConnection(publisherKey string, publisherSoc
 
 	pm.subscribers.Store(publisherKey, []*webrtc.PeerConnection{})
 
-	setupChan := make(chan struct{})
-	pm.setupInProgress.Store(publisherKey, setupChan)
+	setupChanNew := make(chan struct{})
+	pm.setupInProgress.Store(publisherKey, setupChanNew)
 
-	go pm.setupGrabberPeerConnection(publisherSocketID, setupChan, streamType, publisherConn)
+	go pm.setupGrabberPeerConnection(publisherSocketID, setupChanNew, streamType, publisherConn)
 
-	<-setupChan
+	<-setupChanNew
 
 	_, ok := pm.peerConnections.Load(publisherKey)
 
@@ -345,24 +334,19 @@ func (pm *PeerManager) ensureGrabberConnection(publisherKey string, publisherSoc
 func (pm *PeerManager) cleanupPlayerConnection(id sockets.SocketID, subscriberPC *webrtc.PeerConnection) {
 	pm.peerConnections.Delete(string(id))
 
-	publisherKeyInterface, ok := pm.subscriberToPublisherKey.LoadAndDelete(subscriberPC)
+	publisherKey, ok := pm.subscriberToPublisherKey.LoadAndDelete(subscriberPC)
 	if ok {
-		publisherKey := publisherKeyInterface.(string)
-
-		pm.trackBroadcasters.Range(func(key, value interface{}) bool {
-			keyStr := key.(string)
-			if strings.HasPrefix(keyStr, publisherKey+"_track_") {
-				broadcaster := value.(*TrackBroadcaster)
-				broadcaster.RemoveSubscriber(subscriberPC)
+		pm.trackBroadcasters.Range(func(key string, value *TrackBroadcaster) bool {
+			if strings.HasPrefix(key, publisherKey+"_track_") {
+				value.RemoveSubscriber(subscriberPC)
 			}
 			return true
 		})
 
 		pm.removeSubscriberFromPublisher(publisherKey, subscriberPC)
 
-		subscribersInterface, exists := pm.subscribers.Load(publisherKey)
+		subscribers, exists := pm.subscribers.Load(publisherKey)
 		if exists {
-			subscribers := subscribersInterface.([]*webrtc.PeerConnection)
 			if len(subscribers) == 0 {
 				pm.cleanupPublisher(publisherKey)
 			}
@@ -373,13 +357,12 @@ func (pm *PeerManager) cleanupPlayerConnection(id sockets.SocketID, subscriberPC
 }
 
 func (pm *PeerManager) SubscriberICE(id sockets.SocketID, candidate webrtc.ICECandidateInit) {
-	pcInterface, ok := pm.peerConnections.Load(string(id))
+	pc, ok := pm.peerConnections.Load(string(id))
 	if !ok {
 		log.Printf("no subscriber peer connections for %v", id)
 		return
 	}
 
-	pc := pcInterface.(*webrtc.PeerConnection)
 	if err := pc.AddICECandidate(candidate); err != nil {
 		log.Printf("failed to add ICE candidate to subscriber %v peer connection: %v", id, err)
 	}
@@ -387,10 +370,9 @@ func (pm *PeerManager) SubscriberICE(id sockets.SocketID, candidate webrtc.ICECa
 
 func (pm *PeerManager) DeletePublisher(id sockets.SocketID) {
 	var keysToDelete []string
-	pm.peerConnections.Range(func(key, value interface{}) bool {
-		publisherKey := key.(string)
-		if strings.HasPrefix(publisherKey, string(id)+"_") {
-			keysToDelete = append(keysToDelete, publisherKey)
+	pm.peerConnections.Range(func(key string, value *webrtc.PeerConnection) bool {
+		if strings.HasPrefix(key, string(id)+"_") {
+			keysToDelete = append(keysToDelete, key)
 		}
 		return true
 	})
@@ -401,26 +383,24 @@ func (pm *PeerManager) DeletePublisher(id sockets.SocketID) {
 }
 
 func (pm *PeerManager) OfferAnswerPublisher(publisherKey string, answer webrtc.SessionDescription) {
-	pcInterface, ok := pm.peerConnections.Load(publisherKey)
+	pc, ok := pm.peerConnections.Load(publisherKey)
 	if !ok {
 		log.Printf("no peer connection for publisher %s", publisherKey)
 		return
 	}
 
-	pc := pcInterface.(*webrtc.PeerConnection)
 	if err := pc.SetRemoteDescription(answer); err != nil {
 		log.Printf("failed to set remote description for publisher %s: %v", publisherKey, err)
 	}
 }
 
 func (pm *PeerManager) AddICECandidatePublisher(publisherKey string, candidate webrtc.ICECandidateInit) {
-	pcInterface, ok := pm.peerConnections.Load(publisherKey)
+	pc, ok := pm.peerConnections.Load(publisherKey)
 	if !ok {
 		log.Printf("no peer connection for publisher %s", publisherKey)
 		return
 	}
 
-	pc := pcInterface.(*webrtc.PeerConnection)
 	if err := pc.AddICECandidate(candidate); err != nil {
 		log.Printf("failed to add ICE candidate to publisher %s: %v", publisherKey, err)
 	}
