@@ -16,6 +16,8 @@ const (
 	PlayerMessageEventOfferAnswer = PlayerMessageEvent("offer_answer")
 	PlayerMessageEventGrabberIce  = PlayerMessageEvent("grabber_ice")
 	PlayerMessageEventPlayerIce   = PlayerMessageEvent("player_ice")
+	PlayerMessageEventPing        = PlayerMessageEvent("ping")
+	PlayerMessageEventPong        = PlayerMessageEvent("pong")
 )
 
 const (
@@ -27,6 +29,10 @@ const (
 	GrabberMessageEventPlayerIce   = GrabberMessageEvent("player_ice")
 )
 
+type PingMessage struct {
+	Timestamp int64 `json:"timestamp"`
+}
+
 type PlayerMessage struct {
 	Event              PlayerMessageEvent  `json:"event"`
 	PlayerAuth         *PlayerAuthMessage  `json:"playerAuth"`
@@ -37,6 +43,7 @@ type PlayerMessage struct {
 	Ice                *IceMessage         `json:"ice"`
 	InitPeer           *PcConfigMessage    `json:"initPeer"`
 	AccessMessage      *string             `json:"accessMessage"`
+	Ping               *PingMessage        `json:"ping"`
 }
 
 type PlayerAuthMessage struct {

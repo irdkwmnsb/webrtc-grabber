@@ -239,6 +239,22 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 		}
 	}()
 
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			pingMsg := api.PlayerMessage{
+				Event: api.PlayerMessageEventPing,
+				Ping: &api.PingMessage{
+					Timestamp: time.Now().Unix(),
+				},
+			}
+			if err := newC.WriteJSON(pingMsg); err != nil {
+				return
+			}
+		}
+	}()
+
 	defer func() {
 		s.playersSockets.CloseSocket(socketID)
 		s.peerManager.DeleteSubscriber(socketID)
@@ -265,6 +281,9 @@ func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 	m api.PlayerMessage) *api.PlayerMessage {
 	log.Printf("EVENT: %v, STREAM TYPE: %v", m.Event, m.Offer.StreamType)
 	switch m.Event {
+	case api.PlayerMessageEventPong:
+		log.Printf("Received pong from player %s", id)
+		return nil
 	case api.PlayerMessageEventOffer:
 		if m.Offer == nil {
 			return nil
@@ -276,8 +295,8 @@ func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 			if peer, ok := s.storage.getPeerByName(*m.Offer.PeerName); ok {
 				if !slices.Contains(peer.StreamTypes, api.StreamType(m.Offer.StreamType)) {
 					_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
-					log.Printf("no such stream type %v in grabber with id %v",
-						m.Offer.StreamType, m.Offer.PeerId)
+					log.Printf("no such stream type %v in grabber with peerName %v",
+						m.Offer.StreamType, m.Offer.PeerName)
 					return nil
 				}
 				grabberSocketID = peer.SocketId

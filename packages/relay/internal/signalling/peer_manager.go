@@ -146,10 +146,8 @@ func (pm *PeerManager) cleanupPublisher(publisherKey string) {
 
 	subscribers, ok := pm.subscribers.LoadAndDelete(publisherKey)
 	if ok {
-		if subscribers != nil {
-			for _, sub := range subscribers {
-				_ = sub.Close()
-			}
+		for _, sub := range subscribers {
+			_ = sub.Close()
 		}
 	}
 }
@@ -176,6 +174,7 @@ func (pm *PeerManager) removeSubscriberFromPublisher(publisherKey string, subscr
 	log.Printf("SUBS COUNT: %v", len(newSubscribers))
 
 	if len(newSubscribers) == 0 {
+		pm.cleanupPublisher(publisherKey)
 		pm.subscribers.Delete(publisherKey)
 		pm.subscriberMutexes.Delete(publisherKey)
 	} else {
