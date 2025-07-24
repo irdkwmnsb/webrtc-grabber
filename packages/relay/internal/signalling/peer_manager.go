@@ -444,7 +444,7 @@ func (pm *PeerManager) setupGrabberPeerConnection(publisherSocketID sockets.Sock
 
 	expectedTracks := 1
 	if streamType == "webcam" {
-		expectedTracks = 2
+		expectedTracks = pm.config.WebcamTrackCount
 
 		_, err = pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
 			Direction: webrtc.RTPTransceiverDirectionRecvonly,

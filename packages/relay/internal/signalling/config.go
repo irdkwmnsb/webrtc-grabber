@@ -21,6 +21,7 @@ type ServerConfig struct {
 	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile"`
 	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
 	Codecs               []Codec                  `json:"codecs"`
+	WebcamTrackCount     int                      `json:"webcamTrackCount"`
 }
 
 type RawCodec struct {
@@ -48,6 +49,7 @@ type RawServerConfig struct {
 	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile"`
 	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
 	Codecs               []RawCodec               `json:"codecs"`
+	WebcamTrackCount     int                      `json:"webcamTrackCount"`
 }
 
 func LoadServerConfig() (ServerConfig, error) {
@@ -71,6 +73,10 @@ func LoadServerConfig() (ServerConfig, error) {
 		rawConfig.ServerPort = 8000
 	}
 
+	if rawConfig.WebcamTrackCount == 0 {
+		rawConfig.WebcamTrackCount = 2
+	}
+
 	adminsNetworks, err := parseAdminsNetworks(rawConfig.AdminsRawNetworks)
 
 	if err != nil {
@@ -87,6 +93,7 @@ func LoadServerConfig() (ServerConfig, error) {
 		ServerTLSCrtFile:     rawConfig.ServerTLSCrtFile,
 		ServerTLSKeyFile:     rawConfig.ServerTLSKeyFile,
 		Codecs:               parseCodecs(rawConfig.Codecs),
+		WebcamTrackCount:     rawConfig.WebcamTrackCount,
 	}, nil
 }
 

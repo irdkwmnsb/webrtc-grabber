@@ -293,10 +293,11 @@ func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 			grabberSocketID = sockets.SocketID(*m.Offer.PeerId)
 		} else if m.Offer.PeerName != nil {
 			if peer, ok := s.storage.getPeerByName(*m.Offer.PeerName); ok {
+				log.Printf(m.Offer.StreamType)
 				if !slices.Contains(peer.StreamTypes, api.StreamType(m.Offer.StreamType)) {
 					_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
 					log.Printf("no such stream type %v in grabber with peerName %v",
-						m.Offer.StreamType, m.Offer.PeerName)
+						m.Offer.StreamType, *m.Offer.PeerName)
 					return nil
 				}
 				grabberSocketID = peer.SocketId
@@ -363,7 +364,6 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 			break
 		}
 
-		// Process incoming messages and send responses if necessary
 		answer := s.processGrabberMessage(socketID, message)
 		if answer == nil {
 			continue
