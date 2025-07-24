@@ -17,12 +17,16 @@ The main use case is streaming live screen video from contestants' screens on
    - [Configuration](#signaling-config)
    - [Build sources](#signaling-build)
    - [Run](#signaling-run)
-4. [TURN](#TURN)
+4. [SFU](#sfu)
+   - [Config](#sfu-config) 
+   - [Run](#sfu-run)
+   - [SFU Architecture](#sfu-architecture)
+5. [TURN](#TURN)
    - [Using Docker](#turn-docker)
    - [Build sources](#turn-build)
    - [Run](#turn-run)
-5. [FAQ](#FAQ)
-6. [License](#License)
+6. [FAQ](#FAQ)
+7. [License](#License)
 
 ## WebRTC Protocol
 
@@ -253,6 +257,112 @@ $ signalling.cmd
 ```shell
 $ sh signalling.sh
 ```
+
+## SFU
+
+---
+
+The SFU (Selective Forwarding Unit) functionality is integrated into the signaling server to efficiently handle media streaming between grabbers and multiple viewers. The SFU implementation uses a multiplexer architecture with track broadcasters that receive media streams from grabbers and selectively forward them to connected viewers without transcoding.
+
+The system consists of several key components:
+- **PeerManager** (`peer_manager.go:26`): Manages WebRTC peer connections between grabbers and viewers
+- **TrackBroadcaster** (`track_broadcaster.go:13`): Handles media track forwarding from publishers to subscribers  
+- **Server** (`server.go:19`): WebSocket server managing grabber and player connections
+- **Storage** (`storage.go:10`): Thread-safe storage for peer information and participant management
+
+### Configuration <a name="sfu-config"></a>
+
+The SFU configuration is part of the signaling server configuration in [`config.json`](packages/relay/conf/config.json):
+
+```json
+{
+  "participants": ["001", "002", "003", "004", "005", "006", "007", "008"],
+  "peerConnectionConfig": {
+    "iceServers": [
+      {
+        "urls": "turn:193.233.204.163:3478",
+        "username": "admin",
+        "credential": "credential"
+      }
+    ]
+  },
+  "grabberPingInterval": 3000,
+  "adminCredential": "live",
+  "serverPort": 8000,
+  "adminsNetworks": ["127.0.0.1/32", "10.0.0.0/8"],
+  "codecs": [
+    {
+      "type": "video",
+      "params": {
+        "mimeType": "video/VP8",
+        "clockRate": 90000,
+        "payloadType": 96,
+        "channels": 0
+      }
+    }
+  ],
+  "webcamTrackCount": 2
+}
+```
+
+where
+
+| Property               | Description                                    | Type             |
+| ---------------------- | ---------------------------------------------- | ---------------- |
+| `participants`         | List of expected participant names             | **string array** |
+| `peerConnectionConfig` | WebRTC peer connection configuration           | **object**       |
+| `iceServers`           | TURN/STUN servers for WebRTC connectivity     | **object array** |
+| `grabberPingInterval`  | Ping interval from grabbers (milliseconds)    | **number**       |
+| `adminCredential`      | Authentication credential for admin access     | **string**       |
+| `serverPort`           | Server port (default: 8000)                   | **number**       |
+| `adminsNetworks`       | Allowed IP networks for admin panel access    | **string array** |
+| `codecs`               | Supported video/audio codecs                   | **object array** |
+| `webcamTrackCount`     | Expected track count for webcam streams       | **number**       |
+
+### Run <a name="sfu-run"></a>
+
+The SFU functionality is built into the signaling server. Extract files from the `webrtc_grabber_signaling_<platform>_<arch>.zip` archive from the [Release page](https://github.com/irdkwmnsb/webrtc-grabber/releases/latest).
+
+Run the signaling server with integrated SFU:
+
+#### Windows
+
+```powershell
+$ signalling.cmd
+```
+
+#### Linux & MacOS
+
+```shell
+$ sh signalling.sh
+```
+
+### SFU Architecture <a name="sfu-architecture"></a>
+
+The SFU implementation provides several key features:
+
+1. **Media Multiplexing**: The `PeerManager` (`peer_manager.go:185`) handles multiple subscribers per publisher, creating WebRTC peer connections for each viewer requesting a stream.
+
+2. **Track Broadcasting**: Each media track from grabbers is managed by a `TrackBroadcaster` (`track_broadcaster.go:21`) that:
+   - Receives RTP packets from the remote track
+   - Broadcasts them to all subscribed viewers using concurrent goroutines
+   - Automatically removes disconnected subscribers
+
+3. **Stream Type Support**: The system supports multiple stream types per grabber:
+   - `webcam`: Video and audio from participant's webcam
+   - `desktop`: Screen sharing from participant's desktop
+
+4. **Connection Management**: 
+   - Automatic cleanup of disconnected peers (`peer_manager.go:103`)
+   - ICE candidate handling for NAT traversal
+   - Timeout handling for publisher setup (20 second timeout)
+
+5. **Scalability Features**:
+   - Concurrent packet writing with semaphore-based throttling
+   - Efficient memory management with GC tuning
+   - Thread-safe storage using custom `SyncMapWrapper` (`sync_map.go:5`)
+
+The SFU eliminates the need for separate media server deployment while providing efficient one-to-many streaming capabilities directly within the signaling infrastructure.
 
 ## TURN
 
