@@ -9,7 +9,7 @@
     "build_linux_x64": "npx electron-packager . --platform=linux --arch=x64 --ignore=\"^(/build|/scripts)\" --out build",
     "build_linux_arm64": "npx electron-packager . --platform=linux --arch=arm64 --ignore=\"^(/build|/scripts)\" --out build",
     "build_darwin_x64": "npx electron-packager . --platform=darwin --arch=x64 --ignore=\"^(/build|/scripts)\" --out build",
-    "build_darwin_arm64": "npx electron-packager . --platform=darwin --arch=arm64 --ignore=\"^(/build|/scripts)\" --out build",
+    "build_darwin_arm64": "npx electron-packager . --platform=darwin --arch=arm64 --ignore=\"^(/build|/scripts)\" --out build --overwrite",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "devDependencies": {

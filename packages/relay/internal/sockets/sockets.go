@@ -1,8 +1,9 @@
 package sockets
 
 import (
-	"github.com/gofiber/websocket/v2"
 	"sync"
+
+	"github.com/gofiber/websocket/v2"
 )
 
 type SocketID string
@@ -16,6 +17,12 @@ type Socket interface {
 type socketImpl struct {
 	ws *websocket.Conn
 	mx sync.Mutex
+}
+
+func NewSocket(ws *websocket.Conn) *socketImpl {
+	return &socketImpl{
+		ws: ws,
+	}
 }
 
 func (s *socketImpl) Close() error {
