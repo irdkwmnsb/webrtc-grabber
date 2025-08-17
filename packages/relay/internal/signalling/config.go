@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 type ServerConfig struct {

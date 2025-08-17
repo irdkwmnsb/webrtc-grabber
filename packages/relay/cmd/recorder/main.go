@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
-	"github.com/gofiber/fiber/v2"
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/recorder"
 	"log"
 	"os"
 	"time"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/recorder"
 )
 
 func main() {

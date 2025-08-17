@@ -7,8 +7,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/websocket/v2"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/utils"
@@ -18,7 +18,7 @@ const PlayerSendPeerStatusInterval = time.Second * 5
 
 type Server struct {
 	app             *fiber.App
-	config          ServerConfig
+	config          *ServerConfig
 	storage         *Storage
 	oldPeersCleaner utils.IntervalTimer
 	playersSockets  *sockets.SocketPool
@@ -27,7 +27,7 @@ type Server struct {
 	peerManager *PeerManager
 }
 
-func NewServer(config ServerConfig, app *fiber.App) (*Server, error) {
+func NewServer(config *ServerConfig, app *fiber.App) (*Server, error) {
 
 	peerManager, err := NewPeerManager(config)
 	if err != nil {

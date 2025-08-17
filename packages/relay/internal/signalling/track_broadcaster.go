@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 type TrackBroadcaster struct {

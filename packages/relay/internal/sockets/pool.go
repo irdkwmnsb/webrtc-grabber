@@ -1,8 +1,9 @@
 package sockets
 
 import (
-	"github.com/gofiber/websocket/v2"
 	"sync"
+
+	"github.com/gofiber/contrib/websocket"
 )
 
 type SocketPool struct {

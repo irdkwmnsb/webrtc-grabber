@@ -14,7 +14,7 @@ import (
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/intervalpli"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 const (
@@ -30,7 +30,7 @@ type PeerManager struct {
 	setupInProgress          *SyncMapWrapper[string, chan struct{}]
 	subscriberToPublisherKey *SyncMapWrapper[*webrtc.PeerConnection, string]
 	subscriberMutexes        *SyncMapWrapper[string, *sync.Mutex]
-	config                   ServerConfig
+	config                   *ServerConfig
 
 	api *webrtc.API
 
@@ -42,7 +42,7 @@ func getPublisherKey(publisherSocketID sockets.SocketID, streamType string) stri
 	return fmt.Sprintf("%s_%s", string(publisherSocketID), streamType)
 }
 
-func NewPeerManager(config ServerConfig) (*PeerManager, error) {
+func NewPeerManager(config *ServerConfig) (*PeerManager, error) {
 	debug.SetGCPercent(20) // SPECIFIC THING
 
 	mediaEngine := &webrtc.MediaEngine{}

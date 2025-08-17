@@ -3,7 +3,7 @@ package sockets
 import (
 	"sync"
 
-	"github.com/gofiber/websocket/v2"
+	"github.com/gofiber/contrib/websocket"
 )
 
 type SocketID string

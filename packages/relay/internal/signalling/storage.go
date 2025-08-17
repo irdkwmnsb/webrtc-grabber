@@ -1,10 +1,11 @@
 package signalling
 
 import (
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"sync"
 	"time"
+
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 )
 
 type Storage struct {

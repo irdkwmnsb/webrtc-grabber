@@ -1,9 +1,10 @@
 package api
 
 import (
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
-	"github.com/pion/webrtc/v3"
 	"time"
+
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
+	"github.com/pion/webrtc/v4"
 )
 
 type Peer struct {

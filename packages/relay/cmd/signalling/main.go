@@ -15,7 +15,7 @@ func main() {
 		log.Fatal(err)
 	}
 	app := fiber.New()
-	server, err := signalling.NewServer(config, app)
+	server, err := signalling.NewServer(&config, app)
 
 	if err != nil {
 		log.Fatalf("can not start signalling server, error - %v", err)

@@ -1,6 +1,6 @@
 package api
 
-import "github.com/pion/webrtc/v3"
+import "github.com/pion/webrtc/v4"
 
 type PlayerMessageEvent string
 type GrabberMessageEvent string

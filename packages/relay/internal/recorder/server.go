@@ -2,9 +2,10 @@ package recorder
 
 import (
 	"context"
-	"github.com/gofiber/fiber/v2"
 	"log"
 	"time"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 type Server struct {

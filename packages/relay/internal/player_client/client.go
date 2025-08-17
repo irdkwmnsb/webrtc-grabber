@@ -3,12 +3,13 @@ package player_client
 import (
 	"context"
 	"errors"
+	"log"
+	"strings"
+
 	"github.com/fasthttp/websocket"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
-	"github.com/pion/webrtc/v3"
-	"log"
-	"strings"
+	"github.com/pion/webrtc/v4"
 )
 
 type Config struct {
