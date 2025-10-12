@@ -3,7 +3,7 @@ Maintainer: Dmitrii Kuptsov <demulkup@ya.ru>
 Section: misc
 Priority: optional
 Standards-Version: 4.7.0
-Build-Depends: debhelper-compat (= 11), nodejs (>= 20), adduser, curl, libglib2.0-0, libnss3, libnspr4, libatk1.0-0, libatk-bridge2.0-0, libcups2, libdbus-1-3, libdrm2, libgtk-3-0, libpango-1.0-0, libcairo2, libx11-6, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxrandr2, libgbm1, libxcb1, libxkbcommon-x11-0, libasound2, libatspi2.0-0, libwayland-client0
+Build-Depends: debhelper-compat (= 11), nodejs (>= 22), adduser, curl, libglib2.0-0, libnss3, libnspr4, libatk1.0-0, libatk-bridge2.0-0, libcups2, libdbus-1-3, libdrm2, libgtk-3-0, libpango-1.0-0, libcairo2, libx11-6, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxrandr2, libgbm1, libxcb1, libxkbcommon-x11-0, libasound2, libatspi2.0-0, libwayland-client0
 
 Package: webrtc-grabber-agent
 Architecture: amd64
