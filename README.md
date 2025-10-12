@@ -374,6 +374,9 @@ Turn server is used to transmit video/audio data across different networks.
 We provide a lightweight Go-based TURN server implementation that can be run either
 as a standalone binary or using Docker.
 
+> [!WARNING]
+> TURN servers are typically unnecessary when using an SFU architecture
+
 ### Build sources <a name="turn-build"></a>
 
 Clone the repository and run the following commands from the
