@@ -18,7 +18,7 @@ The main use case is streaming live screen video from contestants' screens on
    - [Build sources](#signaling-build)
    - [Run](#signaling-run)
 4. [SFU](#sfu)
-   - [Config](#sfu-config) 
+   - [Config](#sfu-config)
    - [Run](#sfu-run)
    - [SFU Architecture](#sfu-architecture)
 5. [TURN](#TURN)
@@ -266,9 +266,11 @@ The SFU (Selective Forwarding Unit) functionality is integrated into the signali
 
 The system consists of several key components:
 - **PeerManager** (`peer_manager.go:26`): Manages WebRTC peer connections between grabbers and viewers
-- **TrackBroadcaster** (`track_broadcaster.go:13`): Handles media track forwarding from publishers to subscribers  
+- **TrackBroadcaster** (`track_broadcaster.go:13`): Handles media track forwarding from publishers to subscribers
 - **Server** (`server.go:19`): WebSocket server managing grabber and player connections
 - **Storage** (`storage.go:10`): Thread-safe storage for peer information and participant management
+
+<img src="img/sfu.png">
 
 ### Configuration <a name="sfu-config"></a>
 
@@ -352,7 +354,7 @@ The SFU implementation provides several key features:
    - `webcam`: Video and audio from participant's webcam
    - `desktop`: Screen sharing from participant's desktop
 
-4. **Connection Management**: 
+4. **Connection Management**:
    - Automatic cleanup of disconnected peers (`peer_manager.go:103`)
    - ICE candidate handling for NAT traversal
    - Timeout handling for publisher setup (20 second timeout)
