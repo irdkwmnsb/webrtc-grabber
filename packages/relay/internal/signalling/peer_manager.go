@@ -1,18 +1,85 @@
-// Package signalling manages WebRTC peer connections for a media relay server,
-// implementing a publisher-subscriber pattern for real-time video and audio streaming.
+// Package signalling implements a WebRTC Selective Forwarding Unit (SFU) relay server
+// with publisher-subscriber architecture for real-time video and audio streaming.
 //
-// The package coordinates between "grabbers" (publishers) that capture and send media,
-// and "players" (subscribers) that receive and play the media. It handles WebRTC
-// signaling, track distribution, and connection lifecycle management.
+// The package provides a complete signaling infrastructure for connecting "grabbers"
+// (publishers that capture and send media) with "players" (subscribers that receive
+// and play media). It handles WebRTC connection establishment, track distribution,
+// and lifecycle management for both peer types.
 //
-// Key components:
-//   - Publisher: Represents a media source broadcasting to multiple subscribers
-//   - Subscriber: Represents a media consumer receiving from a publisher
-//   - PeerManager: Central orchestrator managing all peer connections
-//   - TrackBroadcaster: Distributes RTP packets from a track to multiple peers
+// # Architecture Overview
 //
-// Thread Safety:
-// All public methods are thread-safe and can be called concurrently.
+// The system consists of several key components working together:
+//
+//   - Server: HTTP/WebSocket server managing client connections and routing
+//   - PeerManager: Orchestrates all WebRTC peer connections and signaling
+//   - Publisher: Represents a media source (grabber) broadcasting to subscribers
+//   - Subscriber: Represents a media consumer (player) receiving from a publisher
+//   - TrackBroadcaster: Efficiently distributes RTP packets from one track to many peers
+//   - Storage: Tracks active peers and their metadata with health monitoring
+//
+// # Key Features
+//
+//   - Concurrent publisher setup with atomic synchronization to prevent race conditions
+//   - Automatic cleanup when subscribers disconnect or publishers fail
+//   - PLI (Picture Loss Indication) support for video quality recovery
+//   - Flexible codec configuration via JSON
+//   - IP-based admin access control
+//   - Health monitoring with periodic ping/pong and stale peer cleanup
+//   - Support for multiple stream types per grabber (webcam, screen share)
+//   - Efficient concurrent RTP packet broadcasting with semaphore-controlled goroutines
+//
+// # Connection Flow
+//
+// Grabber (Publisher) Flow:
+//  1. Connects via WebSocket to /ws/peers/:name
+//  2. Receives peer connection configuration and ping interval
+//  3. Receives WebRTC offer from server when first subscriber connects
+//  4. Sends answer and ICE candidates back to server
+//  5. Begins streaming media tracks (video/audio)
+//  6. Sends periodic ping messages with connection status
+//
+// Player (Subscriber) Flow:
+//  1. Authenticates via credential check (admin only)
+//  2. Connects to /ws/player/play endpoint
+//  3. Sends WebRTC offer specifying desired publisher and stream type
+//  4. Receives answer from server with track setup
+//  5. Exchanges ICE candidates for connection establishment
+//  6. Begins receiving media streams
+//
+// # Thread Safety
+//
+// All public APIs are thread-safe and designed for concurrent access:
+//   - PeerManager uses SyncMapWrapper for publishers and subscribers
+//   - Publisher uses sync.RWMutex for subscriber and broadcaster lists
+//   - TrackBroadcaster uses sync.Map for subscriber management
+//   - Storage uses sync.Mutex for peer tracking
+//   - Atomic operations ensure safe publisher setup coordination
+//
+// # Configuration
+//
+// Server behavior is controlled via ServerConfig loaded from conf/config.json:
+//   - ICE server configuration for NAT traversal
+//   - Supported audio/video codecs
+//   - Admin IP whitelist for access control
+//   - Grabber ping interval and webcam track count
+//   - TLS certificate paths for secure WebSocket connections
+//
+// # Usage Example
+//
+//	config, err := signalling.LoadServerConfig()
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//
+//	app := fiber.New()
+//	server, err := signalling.NewServer(&config, app)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer server.Close()
+//
+//	server.SetupWebSockets()
+//	log.Fatal(app.Listen(fmt.Sprintf(":%d", config.ServerPort)))
 package signalling
 
 import (
@@ -46,6 +113,7 @@ const (
 //
 // Publisher setup is synchronized using atomic operations to prevent race conditions
 // when multiple subscribers try to connect to the same publisher simultaneously.
+// The setupChan is closed once setup completes, allowing waiting goroutines to proceed.
 type Publisher struct {
 	// subscribers holds all active subscriber peer connections
 	subscribers []*webrtc.PeerConnection
@@ -176,13 +244,18 @@ func NewSubscriber() *Subscriber {
 
 // PeerManager is the central orchestrator that manages the lifecycle of all publishers
 // and subscribers in the system. It handles WebRTC signaling, connection setup,
-// and resource cleanup.
+// track distribution, and resource cleanup.
 //
-// PeerManager maintains two primary maps:
+// PeerManager maintains two primary concurrent-safe maps:
 //   - publishers: Maps publisher keys (socketID_streamType) to Publisher instances
 //   - subscribers: Maps subscriber socket IDs to Subscriber instances
 //
-// All operations are thread-safe and can be called concurrently.
+// The manager ensures proper synchronization during publisher setup to prevent
+// duplicate connections when multiple subscribers connect simultaneously to the
+// same publisher.
+//
+// All public methods are thread-safe and can be called concurrently from
+// multiple goroutines handling different client connections.
 type PeerManager struct {
 	// publishers maps publisher keys to Publisher instances
 	publishers *SyncMapWrapper[string, *Publisher]
@@ -204,7 +277,13 @@ type PeerManager struct {
 }
 
 // getPublisherKey generates a unique key for a publisher based on socket ID and stream type.
+// This key is used throughout the system to identify specific media streams.
+//
 // Format: "{socketID}_{streamType}"
+//
+// Examples:
+//   - "192.168.1.5:12345_webcam"
+//   - "10.0.0.2:54321_screen"
 func getPublisherKey(publisherSocketID sockets.SocketID, streamType string) string {
 	return fmt.Sprintf("%s_%s", string(publisherSocketID), streamType)
 }
@@ -213,9 +292,16 @@ func getPublisherKey(publisherSocketID sockets.SocketID, streamType string) stri
 // It initializes the WebRTC API with configured codecs and interceptors,
 // including PLI (Picture Loss Indication) for video quality management.
 //
-// The function also tunes garbage collection for memory optimization.
+// The function also tunes garbage collection (GC at 20%) for optimal performance
+// in media streaming workloads where low latency is critical.
 //
-// Returns an error if codec registration or interceptor setup fails.
+// Returns an error if:
+//   - Codec registration fails (invalid codec configuration)
+//   - Default interceptor registration fails
+//   - PLI interceptor creation fails
+//
+// The returned PeerManager must be closed with Close() before application shutdown
+// to properly clean up all resources and connections.
 func NewPeerManager(config *ServerConfig) (*PeerManager, error) {
 	debug.SetGCPercent(20) // SPECIFIC THING
 
@@ -260,6 +346,14 @@ func NewPeerManager(config *ServerConfig) (*PeerManager, error) {
 
 // Close shuts down the PeerManager, closing all publisher and subscriber connections
 // and cleaning up all resources. This method should be called before application shutdown.
+//
+// The shutdown process:
+//  1. Cancels the context to signal all goroutines to stop
+//  2. Closes all publisher connections and stops their broadcasters
+//  3. Closes all subscriber peer connections
+//  4. Clears all internal maps
+//
+// This method is safe to call multiple times and will not panic.
 func (pm *PeerManager) Close() {
 	pm.cancel()
 
@@ -283,11 +377,19 @@ func (pm *PeerManager) Close() {
 // DeleteSubscriber removes a subscriber and cleans up its resources.
 // If this is the last subscriber for a publisher, the publisher is also cleaned up.
 //
-// This method:
+// This method is automatically called when:
+//   - A subscriber's ICE connection fails or disconnects
+//   - A subscriber's WebSocket connection closes
+//   - Explicit cleanup is needed
+//
+// The cleanup process:
 //  1. Closes the subscriber's peer connection
 //  2. Removes the subscriber from all track broadcasters
-//  3. Removes the subscriber from the publisher's list
-//  4. Cleans up the publisher if no subscribers remain
+//  3. Removes the subscriber from the publisher's subscriber list
+//  4. If no subscribers remain, triggers full publisher cleanup
+//
+// This method is thread-safe and idempotent - calling it multiple times
+// with the same ID is safe.
 func (pm *PeerManager) DeleteSubscriber(id sockets.SocketID) {
 	subscriber, ok := pm.subscribers.LoadAndDelete(string(id))
 	if !ok || subscriber == nil {
@@ -318,6 +420,14 @@ func (pm *PeerManager) DeleteSubscriber(id sockets.SocketID) {
 
 // cleanupPublisher removes a publisher and closes all its resources.
 // This includes stopping all track broadcasters and closing the publisher's peer connection.
+//
+// This method is called when:
+//   - The last subscriber disconnects from a publisher
+//   - A publisher's ICE connection fails
+//   - A grabber disconnects
+//   - Publisher setup times out or fails
+//
+// This method is thread-safe and idempotent.
 func (pm *PeerManager) cleanupPublisher(publisherKey string) {
 	publisher, ok := pm.publishers.LoadAndDelete(publisherKey)
 	if !ok || publisher == nil {
@@ -330,21 +440,29 @@ func (pm *PeerManager) cleanupPublisher(publisherKey string) {
 
 // AddSubscriber connects a new subscriber to a publisher for the specified stream type.
 // It creates a new WebRTC peer connection, adds all publisher tracks, and handles
-// the signaling exchange (offer/answer).
+// the complete signaling exchange (offer/answer/ICE).
 //
 // Parameters:
-//   - id: Subscriber's socket ID
-//   - publisherSocketID: Publisher's socket ID
-//   - streamType: Type of stream ("webcam" or "screen")
-//   - c: Subscriber's socket connection for sending messages
+//   - id: Subscriber's socket ID (typically remote IP:port)
+//   - publisherSocketID: Publisher's socket ID to connect to
+//   - streamType: Type of stream to receive ("webcam" or "screen")
+//   - c: Subscriber's socket connection for sending ICE candidates
 //   - offer: WebRTC offer from the subscriber
-//   - publisherConn: Publisher's socket connection for signaling
+//   - publisherConn: Publisher's socket connection for publisher signaling
 //
-// Returns a PlayerMessage containing either the answer or a failure event.
+// Returns a PlayerMessage containing either:
+//   - Success: OfferAnswer event with the WebRTC answer
+//   - Failure: OfferFailed event if any step fails
 //
-// The method ensures the publisher connection exists (setting it up if needed),
-// validates that tracks are available, creates the subscriber peer connection,
-// adds all tracks, and completes the WebRTC signaling handshake.
+// The method ensures:
+//  1. Publisher connection exists (sets it up if needed via ensureGrabberConnection)
+//  2. Tracks are available from the publisher
+//  3. All publisher tracks are added to the subscriber connection
+//  4. ICE candidates are exchanged between subscriber and publisher
+//  5. Automatic cleanup on ICE connection failure
+//
+// This method is thread-safe and can handle multiple concurrent subscribers
+// connecting to the same or different publishers.
 func (pm *PeerManager) AddSubscriber(id, publisherSocketID sockets.SocketID,
 	streamType string, c sockets.Socket,
 	offer *webrtc.SessionDescription, publisherConn sockets.Socket) *api.PlayerMessage {
@@ -444,14 +562,28 @@ func (pm *PeerManager) AddSubscriber(id, publisherSocketID sockets.SocketID,
 	}
 }
 
-// ensureGrabberConnection ensures a publisher connection exists and is ready.
-// If the publisher doesn't exist, it initiates setup. If setup is already in progress,
+// ensureGrabberConnection ensures a publisher connection exists and is ready to serve subscribers.
+// If the publisher doesn't exist, it initiates asynchronous setup. If setup is already in progress,
 // it waits for completion.
 //
-// This method uses atomic operations and channels to synchronize concurrent attempts
-// to set up the same publisher, preventing duplicate setup operations.
+// This method uses atomic compare-and-swap operations and channels to synchronize concurrent
+// attempts to set up the same publisher, preventing duplicate setup operations and ensuring
+// only one goroutine performs the actual setup work.
 //
-// Returns true if the publisher is ready, false if setup failed or timed out.
+// The synchronization strategy:
+//  1. If publisher exists and setup complete: returns immediately
+//  2. If publisher exists and setup in progress: waits on setupChan
+//  3. If publisher doesn't exist: creates it and claims setup responsibility
+//  4. Only the goroutine that successfully sets setupInProgress=1 performs setup
+//  5. Other goroutines wait on setupChan for the setup to complete
+//
+// Returns:
+//   - true if publisher is ready to accept subscribers
+//   - false if setup failed, timed out, or was cancelled
+//
+// Timeout: PublisherWaitingTime (20 seconds) for setup completion
+//
+// This method is thread-safe and handles race conditions gracefully.
 func (pm *PeerManager) ensureGrabberConnection(publisherKey string, publisherSocketID sockets.SocketID,
 	streamType string, publisherConn sockets.Socket) bool {
 
@@ -494,7 +626,15 @@ func (pm *PeerManager) ensureGrabberConnection(publisherKey string, publisherSoc
 }
 
 // SubscriberICE adds an ICE candidate to a subscriber's peer connection.
-// This is part of the WebRTC connection establishment process.
+// This is part of the WebRTC ICE (Interactive Connectivity Establishment)
+// process for establishing the optimal network path between peers.
+//
+// ICE candidates represent possible network addresses (IP/port combinations)
+// that the peer can use for communication. Multiple candidates are typically
+// exchanged during connection establishment.
+//
+// This method is called when a subscriber sends an ICE candidate via WebSocket.
+// It is thread-safe and can be called concurrently for different subscribers.
 func (pm *PeerManager) SubscriberICE(id sockets.SocketID, candidate webrtc.ICECandidateInit) {
 	subscriber, ok := pm.subscribers.Load(string(id))
 	if !ok {
@@ -508,8 +648,18 @@ func (pm *PeerManager) SubscriberICE(id sockets.SocketID, candidate webrtc.ICECa
 }
 
 // DeletePublisher removes all publishers associated with the given socket ID.
-// This handles cleanup when a grabber disconnects, removing all its stream types
-// (e.g., both "webcam" and "screen" streams).
+// This handles cleanup when a grabber disconnects, removing all its stream types.
+//
+// For example, if a grabber with socket ID "192.168.1.5:12345" is streaming both
+// webcam and screen, this will clean up both:
+//   - "192.168.1.5:12345_webcam"
+//   - "192.168.1.5:12345_screen"
+//
+// The method iterates through all publishers and matches by socket ID prefix,
+// ensuring complete cleanup of all streams from the disconnected grabber.
+//
+// This method is thread-safe and called automatically when a grabber's
+// WebSocket connection closes.
 func (pm *PeerManager) DeletePublisher(id sockets.SocketID) {
 	var keysToDelete []string
 	pm.publishers.Range(func(key string, value *Publisher) bool {
@@ -525,7 +675,18 @@ func (pm *PeerManager) DeletePublisher(id sockets.SocketID) {
 }
 
 // OfferAnswerPublisher sets the answer from a publisher (grabber) on its peer connection.
-// This completes the signaling exchange initiated when the publisher connection was set up.
+// This completes the offer/answer exchange that was initiated when the publisher
+// connection was set up in response to the first subscriber.
+//
+// The WebRTC signaling flow:
+//  1. Server creates offer and sends to grabber (via setupGrabberPeerConnection)
+//  2. Grabber processes offer and creates answer
+//  3. Grabber sends answer back to server
+//  4. This method sets the answer on the publisher's peer connection
+//  5. ICE candidate exchange continues to establish the connection
+//
+// This method is called when a grabber sends an OfferAnswer message via WebSocket.
+// It is thread-safe and validates that the publisher and its peer connection exist.
 func (pm *PeerManager) OfferAnswerPublisher(publisherKey string, answer webrtc.SessionDescription) {
 	publisher, ok := pm.publishers.Load(publisherKey)
 	if !ok {
@@ -544,7 +705,15 @@ func (pm *PeerManager) OfferAnswerPublisher(publisherKey string, answer webrtc.S
 }
 
 // AddICECandidatePublisher adds an ICE candidate to a publisher's peer connection.
-// This is part of the WebRTC connection establishment process with the grabber.
+// This is part of the WebRTC ICE process for establishing the network connection
+// between the server and the grabber.
+//
+// ICE candidates from the grabber are sent to the server via WebSocket and
+// added to the publisher's peer connection to help establish the optimal
+// network path for media transmission.
+//
+// This method is thread-safe and validates that the publisher and its peer
+// connection exist before attempting to add the candidate.
 func (pm *PeerManager) AddICECandidatePublisher(publisherKey string, candidate webrtc.ICECandidateInit) {
 	publisher, ok := pm.publishers.Load(publisherKey)
 	if !ok {
@@ -563,19 +732,34 @@ func (pm *PeerManager) AddICECandidatePublisher(publisherKey string, candidate w
 }
 
 // setupGrabberPeerConnection establishes a WebRTC peer connection with a grabber (publisher).
-// This method runs asynchronously and handles the complete setup process:
+// This method runs asynchronously in its own goroutine and handles the complete setup process.
 //
-//  1. Creates a peer connection with appropriate transceivers (video, and audio for webcam)
+// The setup process:
+//  1. Creates a peer connection with appropriate transceivers based on stream type
 //  2. Sets up track reception handlers to create broadcasters for each incoming track
-//  3. Performs WebRTC signaling (create offer, exchange ICE candidates)
-//  4. Waits for all expected tracks to be received
-//  5. Signals completion or failure via the publisher's setupChan
+//  3. Configures ICE candidate and connection state handlers
+//  4. Creates and sends WebRTC offer to the grabber
+//  5. Waits for all expected tracks to be received
+//  6. Signals completion or failure via the publisher's setupChan
 //
-// The method waits for the expected number of tracks based on stream type:
-//   - "webcam": Configured number of tracks (typically 2: video + audio)
-//   - "screen": Single video track
+// Stream type configuration:
+//   - "webcam": Video + Audio transceivers, expects WebcamTrackCount tracks (typically 2)
+//   - "screen": Video transceiver only, expects 1 track
 //
+// The method waits up to PublisherWaitingTime for all expected tracks to arrive.
 // If setup fails at any point, the publisher is cleaned up and removed.
+//
+// Track handling:
+// When a track arrives via OnTrack callback, a TrackBroadcaster is created to
+// distribute the track's RTP packets to all current and future subscribers.
+//
+// Connection monitoring:
+// The ICE connection state is monitored, and the publisher is cleaned up if
+// the connection fails or disconnects.
+//
+// This method must only be called by the goroutine that successfully claimed
+// setup responsibility via atomic.CompareAndSwapInt32. The setupChan is closed
+// upon completion (success or failure) to wake up any waiting goroutines.
 func (pm *PeerManager) setupGrabberPeerConnection(publisherSocketID sockets.SocketID, publisher *Publisher,
 	streamType string, publisherConn sockets.Socket) {
 	publisherKey := getPublisherKey(publisherSocketID, streamType)
