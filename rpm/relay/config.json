@@ -17,5 +17,17 @@
   "grabberPingInterval": 3000,
   "adminCredential": "live",
   "serverPort": 13478,
+  "codecs": [
+    {
+      "type": "video",
+      "params": {
+        "mimeType": "video/VP8",
+        "clockRate": 90000,
+        "payloadType": 96,
+        "channels": 0
+      }
+    }
+  ],
+  "webcamTrackCount": 2,
   "RecordStorageDirectory": "/opt/webrtc-grabber-relay/homedir/records"
 }

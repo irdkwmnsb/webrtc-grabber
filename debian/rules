@@ -20,9 +20,9 @@ override_dh_auto_install:
 
 override_dh_auto_build:
 	mkdir -p tmpdir
-	curl -LO https://go.dev/dl/go1.23.3.linux-amd64.tar.gz
-	echo 'a0afb9744c00648bafb1b90b4aba5bdb86f424f02f9275399ce0c20b93a2c3a8  go1.23.3.linux-amd64.tar.gz' | sha256sum --check
-	tar xf go1.23.3.linux-amd64.tar.gz
+	curl -LO https://go.dev/dl/go1.25.0.linux-amd64.tar.gz
+	echo '2852af0cb20a13139b3448992e69b868e50ed0f8a1e5940ee1de9e19a123b613  go1.25.0.linux-amd64.tar.gz' | sha256sum --check
+	tar xf go1.25.0.linux-amd64.tar.gz
 	\
 		tmpdir=$(shell pwd)/tmpdir ; \
 		export XDG_CACHE_HOME=$$tmpdir XDG_RUNTIME_DIR=$$tmpdir HOME=$$tmpdir ; \
