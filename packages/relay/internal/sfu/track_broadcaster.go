@@ -1,4 +1,4 @@
-package signalling
+package sfu
 
 import (
 	"context"

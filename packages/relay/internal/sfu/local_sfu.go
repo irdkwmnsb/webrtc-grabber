@@ -1,4 +1,4 @@
-// Package signalling implements a WebRTC Selective Forwarding Unit (SFU) relay server
+// Package sfu implements a WebRTC Selective Forwarding Unit (SFU) relay server
 // with publisher-subscriber architecture for real-time video and audio streaming.
 //
 // The package provides a complete signaling infrastructure for connecting "grabbers"
@@ -80,7 +80,7 @@
 //
 //	server.SetupWebSockets()
 //	log.Fatal(app.Listen(fmt.Sprintf(":%d", config.ServerPort)))
-package signalling
+package sfu
 
 import (
 	"context"
@@ -92,7 +92,9 @@ import (
 	"time"
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/utils"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/intervalpli"
 	"github.com/pion/webrtc/v4"
@@ -125,7 +127,7 @@ type Publisher struct {
 	pc *webrtc.PeerConnection
 
 	// setupChan signals when publisher setup is complete
-	setupChan chan struct{}
+	setupChan chan struct{} // TODO: think about this field and about setupInProgress field (atomic)
 
 	// setupInProgress is an atomic flag indicating if setup is in progress
 	setupInProgress int32
@@ -242,11 +244,11 @@ func NewSubscriber() *Subscriber {
 	return &Subscriber{}
 }
 
-// PeerManager is the central orchestrator that manages the lifecycle of all publishers
+// LocalSFU is the central orchestrator that manages the lifecycle of all publishers
 // and subscribers in the system. It handles WebRTC signaling, connection setup,
 // track distribution, and resource cleanup.
 //
-// PeerManager maintains two primary concurrent-safe maps:
+// LocalSFU maintains two primary concurrent-safe maps:
 //   - publishers: Maps publisher keys (socketID_streamType) to Publisher instances
 //   - subscribers: Maps subscriber socket IDs to Subscriber instances
 //
@@ -256,15 +258,15 @@ func NewSubscriber() *Subscriber {
 //
 // All public methods are thread-safe and can be called concurrently from
 // multiple goroutines handling different client connections.
-type PeerManager struct {
+type LocalSFU struct {
 	// publishers maps publisher keys to Publisher instances
-	publishers *SyncMapWrapper[string, *Publisher]
+	publishers *utils.SyncMapWrapper[string, *Publisher]
 
 	// subscribers maps subscriber socket IDs to Subscriber instances
-	subscribers *SyncMapWrapper[string, *Subscriber]
+	subscribers *utils.SyncMapWrapper[string, *Subscriber]
 
 	// config holds server configuration including codecs and connection params
-	config *ServerConfig
+	config *config.ServerConfig
 
 	// api is the WebRTC API instance with configured media engine
 	api *webrtc.API
@@ -288,7 +290,7 @@ func getPublisherKey(publisherSocketID sockets.SocketID, streamType string) stri
 	return fmt.Sprintf("%s_%s", string(publisherSocketID), streamType)
 }
 
-// NewPeerManager creates a new PeerManager with the given configuration.
+// NewLocalSFU creates a new PeerManager with the given configuration.
 // It initializes the WebRTC API with configured codecs and interceptors,
 // including PLI (Picture Loss Indication) for video quality management.
 //
@@ -302,7 +304,7 @@ func getPublisherKey(publisherSocketID sockets.SocketID, streamType string) stri
 //
 // The returned PeerManager must be closed with Close() before application shutdown
 // to properly clean up all resources and connections.
-func NewPeerManager(config *ServerConfig) (*PeerManager, error) {
+func NewLocalSFU(config *config.ServerConfig) (*LocalSFU, error) {
 	debug.SetGCPercent(20) // SPECIFIC THING
 
 	mediaEngine := &webrtc.MediaEngine{}
@@ -332,13 +334,13 @@ func NewPeerManager(config *ServerConfig) (*PeerManager, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	pm := &PeerManager{
+	pm := &LocalSFU{
 		api:         webrtcApi,
 		config:      config,
 		ctx:         ctx,
 		cancel:      cancel,
-		publishers:  NewSyncMapWrapper[string, *Publisher](),
-		subscribers: NewSyncMapWrapper[string, *Subscriber](),
+		publishers:  utils.NewSyncMapWrapper[string, *Publisher](),
+		subscribers: utils.NewSyncMapWrapper[string, *Subscriber](),
 	}
 
 	return pm, nil
@@ -354,7 +356,7 @@ func NewPeerManager(config *ServerConfig) (*PeerManager, error) {
 //  4. Clears all internal maps
 //
 // This method is safe to call multiple times and will not panic.
-func (pm *PeerManager) Close() {
+func (pm *LocalSFU) Close() {
 	pm.cancel()
 
 	pm.publishers.Range(func(key string, value *Publisher) bool {
@@ -390,7 +392,7 @@ func (pm *PeerManager) Close() {
 //
 // This method is thread-safe and idempotent - calling it multiple times
 // with the same ID is safe.
-func (pm *PeerManager) DeleteSubscriber(id sockets.SocketID) {
+func (pm *LocalSFU) DeleteSubscriber(id sockets.SocketID) {
 	subscriber, ok := pm.subscribers.LoadAndDelete(string(id))
 	if !ok || subscriber == nil {
 		return
@@ -428,7 +430,7 @@ func (pm *PeerManager) DeleteSubscriber(id sockets.SocketID) {
 //   - Publisher setup times out or fails
 //
 // This method is thread-safe and idempotent.
-func (pm *PeerManager) cleanupPublisher(publisherKey string) {
+func (pm *LocalSFU) cleanupPublisher(publisherKey string) {
 	publisher, ok := pm.publishers.LoadAndDelete(publisherKey)
 	if !ok || publisher == nil {
 		return
@@ -463,72 +465,149 @@ func (pm *PeerManager) cleanupPublisher(publisherKey string) {
 //
 // This method is thread-safe and can handle multiple concurrent subscribers
 // connecting to the same or different publishers.
-func (pm *PeerManager) AddSubscriber(id, publisherSocketID sockets.SocketID,
-	streamType string, c sockets.Socket,
-	offer *webrtc.SessionDescription, publisherConn sockets.Socket) *api.PlayerMessage {
+func (pm *LocalSFU) AddSubscriber(id sockets.SocketID, ctx *NewSubscriberContext) *api.PlayerMessage {
+	publisherKey := getPublisherKey(ctx.publisherSocketID, ctx.streamType)
 
-	publisherKey := getPublisherKey(publisherSocketID, streamType)
-	if !pm.ensureGrabberConnection(publisherKey, publisherSocketID, streamType, publisherConn) {
+	if err := pm.validatePublisher(publisherKey, ctx); err != nil {
+		log.Printf("Publisher validation failed: %v", err)
 		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+	}
+
+	subscriberPC, err := pm.createSubscriberPeerConnection(id, ctx.streamType)
+	if err != nil {
+		log.Printf("Failed to create subscriber peer connection: %v", err)
+		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+	}
+
+	subscriber := pm.createSubscriber(subscriberPC, publisherKey, id)
+	if err := pm.addTracksToSubscriber(subscriber, publisherKey, id); err != nil {
+		log.Printf("Failed to add tracks to subscriber: %v", err)
+		pm.DeleteSubscriber(id)
+		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+	}
+
+	answer, err := pm.completeSignaling(subscriberPC, ctx.offer, id, ctx.streamType, ctx.c, publisherKey)
+	if err != nil {
+		log.Printf("Failed to complete signaling: %v", err)
+		pm.DeleteSubscriber(id)
+		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+	}
+
+	return &api.PlayerMessage{
+		Event: api.PlayerMessageEventOfferAnswer,
+		OfferAnswer: &api.OfferAnswerMessage{
+			PeerId: publisherKey,
+			Answer: *answer,
+		},
+	}
+}
+
+// validatePublisher ensures the publisher connection exists and has available tracks
+func (pm *LocalSFU) validatePublisher(publisherKey string, ctx *NewSubscriberContext) error {
+
+	if !pm.ensureGrabberConnection(publisherKey, ctx.publisherSocketID, ctx.streamType, ctx.publisherConn) {
+		return fmt.Errorf("could not ensure grabber connection")
 	}
 
 	publisher, ok := pm.publishers.Load(publisherKey)
 	if !ok {
-		log.Printf("No publisher found for %s", publisherKey)
-		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+		return fmt.Errorf("no publisher found for %s", publisherKey)
 	}
 
 	trackCount := publisher.BroadcasterCount()
 	if trackCount == 0 {
-		log.Printf("no tracks available for %s/%s", publisherKey, streamType)
-		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+		return fmt.Errorf("no tracks available for %s/%s", publisherKey, ctx.streamType)
 	}
+	return nil
+}
 
+// createSubscriberPeerConnection creates a new WebRTC peer connection with ICE state monitoring
+func (pm *LocalSFU) createSubscriberPeerConnection(id sockets.SocketID, streamType string) (*webrtc.PeerConnection, error) {
 	subscriberPC, err := pm.api.NewPeerConnection(pm.config.PeerConnectionConfig.WebrtcConfiguration())
 	if err != nil {
-		log.Printf("failed to create subscriber peer connection %s: %v", id, err)
-		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+		return nil, fmt.Errorf("failed to create peer connection for %s: %w", id, err)
 	}
 
 	subscriberPeerID := fmt.Sprintf("%s_%s", id, streamType)
+	pm.setupICEStateMonitoring(subscriberPC, id, subscriberPeerID, streamType)
 
-	subscriberPC.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+	return subscriberPC, nil
+}
+
+// setupICEStateMonitoring configures ICE connection state change handler
+func (pm *LocalSFU) setupICEStateMonitoring(pc *webrtc.PeerConnection, id sockets.SocketID,
+	subscriberPeerID, streamType string) {
+
+	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		log.Printf("ICE connection state for subscriber %s stream %s: %s", id, streamType, state.String())
 		if state == webrtc.ICEConnectionStateDisconnected || state == webrtc.ICEConnectionStateFailed {
 			log.Printf("Player %s (%s) disconnected or failed, cleaning up", id, subscriberPeerID)
 			pm.DeleteSubscriber(id)
 		}
 	})
+}
 
+// createSubscriber creates a new subscriber instance and stores it
+func (pm *LocalSFU) createSubscriber(pc *webrtc.PeerConnection, publisherKey string, id sockets.SocketID) *Subscriber {
 	subscriber := NewSubscriber()
-	subscriber.pc = subscriberPC
+	subscriber.pc = pc
 	subscriber.publisherKey = publisherKey
 	pm.subscribers.Store(string(id), subscriber)
+	return subscriber
+}
 
-	log.Printf("Adding %d tracks to subscriber %s (%s)", trackCount, id, subscriberPeerID)
+// addTracksToSubscriber adds all publisher tracks to the subscriber connection
+func (pm *LocalSFU) addTracksToSubscriber(subscriber *Subscriber, publisherKey string, id sockets.SocketID) error {
+	publisher, ok := pm.publishers.Load(publisherKey)
+	if !ok {
+		return fmt.Errorf("publisher not found: %s", publisherKey)
+	}
+
+	trackCount := publisher.BroadcasterCount()
+	log.Printf("Adding %d tracks to subscriber %s", trackCount, id)
 
 	tracksAdded := 0
 	for _, broadcaster := range publisher.GetBroadcasters() {
-		if _, err := subscriberPC.AddTrack(broadcaster.GetLocalTrack()); err != nil {
-			log.Printf("Failed to add track to subscriber %s: %v", id, err)
-			break
+		if _, err := subscriber.pc.AddTrack(broadcaster.GetLocalTrack()); err != nil {
+			return fmt.Errorf("failed to add track: %w", err)
 		}
-		broadcaster.AddSubscriber(subscriberPC)
+		broadcaster.AddSubscriber(subscriber.pc)
 		tracksAdded++
 	}
 
 	if tracksAdded == 0 {
-		pm.DeleteSubscriber(id)
-		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+		return fmt.Errorf("no tracks were added")
+	}
+	return nil
+}
+
+// completeSignaling handles the WebRTC offer/answer exchange and ICE candidate setup
+func (pm *LocalSFU) completeSignaling(pc *webrtc.PeerConnection, offer *webrtc.SessionDescription,
+	id sockets.SocketID, streamType string, c sockets.Socket, publisherKey string) (*webrtc.SessionDescription, error) {
+
+	subscriberPeerID := fmt.Sprintf("%s_%s", id, streamType)
+
+	if err := pc.SetRemoteDescription(*offer); err != nil {
+		return nil, fmt.Errorf("failed to set remote description for %s: %w", subscriberPeerID, err)
 	}
 
-	if err := subscriberPC.SetRemoteDescription(*offer); err != nil {
-		log.Printf("failed to set remote description for subscriber %s (%s): %v", id, subscriberPeerID, err)
-		_ = subscriberPC.Close()
-		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+	pm.setupICECandidateHandler(pc, c, publisherKey)
+
+	answer, err := pc.CreateAnswer(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create answer for %s: %w", subscriberPeerID, err)
 	}
 
-	subscriberPC.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+	if err := pc.SetLocalDescription(answer); err != nil {
+		return nil, fmt.Errorf("failed to set local description for %s: %w", subscriberPeerID, err)
+	}
+
+	return &answer, nil
+}
+
+// setupICECandidateHandler configures ICE candidate forwarding to the subscriber
+func (pm *LocalSFU) setupICECandidateHandler(pc *webrtc.PeerConnection, c sockets.Socket, publisherKey string) {
+	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate != nil {
 			_ = c.WriteJSON(api.PlayerMessage{
 				Event: api.PlayerMessageEventGrabberIce,
@@ -539,27 +618,6 @@ func (pm *PeerManager) AddSubscriber(id, publisherSocketID sockets.SocketID,
 			})
 		}
 	})
-
-	answer, err := subscriberPC.CreateAnswer(nil)
-	if err != nil {
-		log.Printf("failed to create answer for subscriber %s (%s): %v", id, subscriberPeerID, err)
-		pm.DeleteSubscriber(id)
-		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
-	}
-
-	if err := subscriberPC.SetLocalDescription(answer); err != nil {
-		log.Printf("failed to set local description for subscriber %s (%s): %v", id, subscriberPeerID, err)
-		pm.DeleteSubscriber(id)
-		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
-	}
-
-	return &api.PlayerMessage{
-		Event: api.PlayerMessageEventOfferAnswer,
-		OfferAnswer: &api.OfferAnswerMessage{
-			PeerId: publisherKey,
-			Answer: answer,
-		},
-	}
 }
 
 // ensureGrabberConnection ensures a publisher connection exists and is ready to serve subscribers.
@@ -584,7 +642,7 @@ func (pm *PeerManager) AddSubscriber(id, publisherSocketID sockets.SocketID,
 // Timeout: PublisherWaitingTime (20 seconds) for setup completion
 //
 // This method is thread-safe and handles race conditions gracefully.
-func (pm *PeerManager) ensureGrabberConnection(publisherKey string, publisherSocketID sockets.SocketID,
+func (pm *LocalSFU) ensureGrabberConnection(publisherKey string, publisherSocketID sockets.SocketID,
 	streamType string, publisherConn sockets.Socket) bool {
 
 	publisher, loaded := pm.publishers.LoadOrStore(publisherKey, NewPublisher())
@@ -635,7 +693,7 @@ func (pm *PeerManager) ensureGrabberConnection(publisherKey string, publisherSoc
 //
 // This method is called when a subscriber sends an ICE candidate via WebSocket.
 // It is thread-safe and can be called concurrently for different subscribers.
-func (pm *PeerManager) SubscriberICE(id sockets.SocketID, candidate webrtc.ICECandidateInit) {
+func (pm *LocalSFU) SubscriberICE(id sockets.SocketID, candidate webrtc.ICECandidateInit) {
 	subscriber, ok := pm.subscribers.Load(string(id))
 	if !ok {
 		log.Printf("no subscriber peer connections for %v", id)
@@ -660,7 +718,7 @@ func (pm *PeerManager) SubscriberICE(id sockets.SocketID, candidate webrtc.ICECa
 //
 // This method is thread-safe and called automatically when a grabber's
 // WebSocket connection closes.
-func (pm *PeerManager) DeletePublisher(id sockets.SocketID) {
+func (pm *LocalSFU) DeletePublisher(id sockets.SocketID) {
 	var keysToDelete []string
 	pm.publishers.Range(func(key string, value *Publisher) bool {
 		if len(key) > len(id) && key[:len(id)] == string(id) && key[len(id)] == '_' {
@@ -687,7 +745,7 @@ func (pm *PeerManager) DeletePublisher(id sockets.SocketID) {
 //
 // This method is called when a grabber sends an OfferAnswer message via WebSocket.
 // It is thread-safe and validates that the publisher and its peer connection exist.
-func (pm *PeerManager) OfferAnswerPublisher(publisherKey string, answer webrtc.SessionDescription) {
+func (pm *LocalSFU) OfferAnswerPublisher(publisherKey string, answer webrtc.SessionDescription) {
 	publisher, ok := pm.publishers.Load(publisherKey)
 	if !ok {
 		log.Printf("no peer connection for publisher %s", publisherKey)
@@ -714,7 +772,7 @@ func (pm *PeerManager) OfferAnswerPublisher(publisherKey string, answer webrtc.S
 //
 // This method is thread-safe and validates that the publisher and its peer
 // connection exist before attempting to add the candidate.
-func (pm *PeerManager) AddICECandidatePublisher(publisherKey string, candidate webrtc.ICECandidateInit) {
+func (pm *LocalSFU) AddICECandidatePublisher(publisherKey string, candidate webrtc.ICECandidateInit) {
 	publisher, ok := pm.publishers.Load(publisherKey)
 	if !ok {
 		log.Printf("no peer connection for publisher %s", publisherKey)
@@ -760,7 +818,7 @@ func (pm *PeerManager) AddICECandidatePublisher(publisherKey string, candidate w
 // This method must only be called by the goroutine that successfully claimed
 // setup responsibility via atomic.CompareAndSwapInt32. The setupChan is closed
 // upon completion (success or failure) to wake up any waiting goroutines.
-func (pm *PeerManager) setupGrabberPeerConnection(publisherSocketID sockets.SocketID, publisher *Publisher,
+func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketID, publisher *Publisher,
 	streamType string, publisherConn sockets.Socket) {
 	publisherKey := getPublisherKey(publisherSocketID, streamType)
 	log.Printf("Setting up publisher peer connection for %s, streamType=%s", publisherSocketID, streamType)

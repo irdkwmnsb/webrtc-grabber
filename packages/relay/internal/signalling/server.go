@@ -10,6 +10,8 @@ import (
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sfu"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/utils"
 )
@@ -51,7 +53,7 @@ type Server struct {
 	app *fiber.App
 
 	// config holds server configuration including auth, codecs, and network settings
-	config *ServerConfig
+	config *config.ServerConfig
 
 	// storage tracks active peers and their health status
 	storage *Storage
@@ -65,8 +67,8 @@ type Server struct {
 	// grabberSockets manages WebSocket connections for grabbers (publishers)
 	grabberSockets *sockets.SocketPool
 
-	// peerManager handles all WebRTC peer connections and signaling
-	peerManager *PeerManager
+	// sfu handles all WebRTC peer connections and signaling
+	sfu sfu.SFU
 }
 
 // NewServer creates a new Server instance with the given configuration and Fiber app.
@@ -99,9 +101,9 @@ type Server struct {
 //	defer server.Close()
 //	server.SetupWebSockets()
 //	app.Listen(":8080")
-func NewServer(config *ServerConfig, app *fiber.App) (*Server, error) {
+func NewServer(config *config.ServerConfig, app *fiber.App) (*Server, error) {
 
-	peerManager, err := NewPeerManager(config)
+	sfu, err := sfu.NewLocalSFU(config)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +114,7 @@ func NewServer(config *ServerConfig, app *fiber.App) (*Server, error) {
 		playersSockets: sockets.NewSocketPool(),
 		grabberSockets: sockets.NewSocketPool(),
 		storage:        NewStorage(),
-		peerManager:    peerManager,
+		sfu:            sfu,
 	}
 	server.storage.setParticipants(config.Participants)
 	server.oldPeersCleaner = utils.SetIntervalTimer(time.Minute, server.storage.deleteOldPeers)
@@ -134,7 +136,7 @@ func (s *Server) Close() {
 	s.oldPeersCleaner.Stop()
 	s.playersSockets.Close()
 	s.grabberSockets.Close()
-	s.peerManager.Close()
+	s.sfu.Close()
 }
 
 // CheckPlayerCredential validates player authentication credentials.
@@ -461,7 +463,7 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 
 	defer func() {
 		s.playersSockets.CloseSocket(socketID)
-		s.peerManager.DeleteSubscriber(socketID)
+		s.sfu.DeleteSubscriber(socketID)
 	}()
 
 	var message api.PlayerMessage
@@ -523,7 +525,7 @@ func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 			grabberSocketID = sockets.SocketID(*m.Offer.PeerId)
 		} else if m.Offer.PeerName != nil {
 			if peer, ok := s.storage.getPeerByName(*m.Offer.PeerName); ok {
-				log.Printf(m.Offer.StreamType)
+				log.Println(m.Offer.StreamType)
 				if !slices.Contains(peer.StreamTypes, api.StreamType(m.Offer.StreamType)) {
 					_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
 					log.Printf("no such stream type %v in grabber with peerName %v",
@@ -546,13 +548,14 @@ func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 			return nil
 		}
 
-		answer := s.peerManager.AddSubscriber(id, grabberSocketID, streamType, c, &m.Offer.Offer, grabberConn)
+		ctx := sfu.CreateNewSubscriberContext(grabberSocketID, streamType, c, &m.Offer.Offer, grabberConn)
+		answer := s.sfu.AddSubscriber(id, ctx)
 		_ = c.WriteJSON(answer)
 	case api.PlayerMessageEventPlayerIce:
 		if m.Ice == nil {
 			return nil
 		}
-		s.peerManager.SubscriberICE(id, m.Ice.Candidate)
+		s.sfu.SubscriberICE(id, m.Ice.Candidate)
 	}
 	return nil
 }
@@ -629,7 +632,7 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 		if err := newC.ReadJSON(&message); err != nil {
 			log.Printf("disconnected %s caused by %s", socketID, err.Error())
 			s.grabberSockets.CloseSocket(socketID)
-			s.peerManager.DeletePublisher(socketID)
+			s.sfu.DeletePublisher(socketID)
 			break
 		}
 
@@ -686,7 +689,7 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 			return nil
 		}
 		grabberKey := m.OfferAnswer.PeerId
-		s.peerManager.OfferAnswerPublisher(grabberKey, m.OfferAnswer.Answer)
+		s.sfu.OfferAnswerPublisher(grabberKey, m.OfferAnswer.Answer)
 
 	case api.GrabberMessageEventGrabberIce:
 		if m.Ice == nil || m.Ice.PeerId == nil {
@@ -694,7 +697,7 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 			return nil
 		}
 		grabberKey := *m.Ice.PeerId
-		s.peerManager.AddICECandidatePublisher(grabberKey, m.Ice.Candidate)
+		s.sfu.AddICECandidatePublisher(grabberKey, m.Ice.Candidate)
 	}
 	return nil
 }
