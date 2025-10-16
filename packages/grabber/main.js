@@ -6,6 +6,7 @@ const commandLineArgs = require('command-line-args')
 
 
 app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
+console.log(app.getAppPath())
 
 const configS = loadConfigS();
 const config = parseArguments();
@@ -74,7 +75,7 @@ function runGrabbing(window) {
 
     runStreamsCapturing(window);
 
-    let connectionsStatus = {connectionsCount: 0, streamTypes: []};
+    let connectionsStatus = {connectionsCount: 0, streamTypes: [], currentRecordId: null};
     ipcMain.handle('status:connections', (_, cs) => {
         connectionsStatus = cs;
     });
@@ -89,7 +90,7 @@ function runGrabbing(window) {
             clearInterval(pingTimerId);
         }
         pingTimerId = setInterval(() => {
-            client.send_ping(connectionsStatus.connectionsCount, connectionsStatus.streamTypes);
+            client.send_ping(connectionsStatus.connectionsCount, connectionsStatus.streamTypes, connectionsStatus.currentRecordId);
         }, pingInterval);
         console.log(`init peer (pingInterval = ${pingInterval})`);
     });
@@ -110,6 +111,40 @@ function runGrabbing(window) {
     ipcMain.handle("grabber_ice", (_, playerId, candidate) => {
         client.send_grabber_ice(playerId, JSON.parse(candidate));
     });
+
+    client.target.addEventListener("record_start", async ({detail: {recordId, timeout, streams}}) => {
+        window.webContents.send("record_start", recordId, timeout);
+    });
+
+    client.target.addEventListener("record_stop", async ({detail: {recordId}}) => {
+        window.webContents.send("record_stop", recordId);
+    });
+
+    client.target.addEventListener("record_upload", async ({detail: {recordId}}) => {
+        for (const recordType of ["desktop", "webcam"]) {
+            const fileName = `${recordId}_${recordType}.webm`;
+            fs.readFile(path.join(configS.recordingsDirectory ?? ".", fileName), function (err, data) {
+                if (!err) {
+                    console.log(`Uploading reaction ${fileName} to server (main)`)
+                    window.webContents.send("upload_record", data, fileName, client.signallingUrl, client.peerName);
+                } else {
+                    console.error(`Reaction upload ${fileName} error: ${err}`);
+                }
+            });
+        }
+    });
+
+    client.target.addEventListener("players_disconnect", async () => {
+        window.webContents.send("player_disconnect");
+    });
+
+    ipcMain.handle("record_save", async (_, recordId, streamKey, buffer) => {
+        try {
+            fs.writeFileSync(path.join(configS.recordingsDirectory ?? ".", recordId + "_" + streamKey + ".webm"), buffer);
+        } catch(e) {
+            console.error(`Failed to save record file ${recordId} [${streamKey}]: ${e}`);
+        }
+    });
 }
 
 app.whenReady().then(() => {
@@ -125,7 +160,7 @@ app.whenReady().then(() => {
 
     app.on('before-quit', () => {
         window.removeAllListeners('close');
-        window.close();
+        // window.close();
     });
 })
 
@@ -160,3 +195,6 @@ function parseArguments() {
 
     return config;
 }
+
+console.log("Grabber version: 2024-12-14")
+console.log(`Versions: ${JSON.stringify(process.versions)}`)

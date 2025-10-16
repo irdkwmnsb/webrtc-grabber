@@ -22,6 +22,8 @@ type ServerConfig struct {
 	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
 	Codecs               []Codec                  `json:"codecs"`
 	WebcamTrackCount     int                      `json:"webcamTrackCount"`
+	RecordTimeout        uint                     `json:"recordTimeout"`
+	RecordStorageDir     string                   `json:"recordStorageDirectory"`
 }
 
 type RawCodec struct {
@@ -50,6 +52,8 @@ type RawServerConfig struct {
 	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
 	Codecs               []RawCodec               `json:"codecs"`
 	WebcamTrackCount     int                      `json:"webcamTrackCount"`
+	RecordTimeout        uint                     `json:"recordTimeout"`
+	RecordStorageDir     string                   `json:"RecordStorageDirectory"`
 }
 
 func LoadServerConfig() (ServerConfig, error) {
@@ -80,7 +84,17 @@ func LoadServerConfig() (ServerConfig, error) {
 	adminsNetworks, err := parseAdminsNetworks(rawConfig.AdminsRawNetworks)
 
 	if err != nil {
-		return ServerConfig{}, fmt.Errorf("can not parse admins networks, error - %w", err)
+		return ServerConfig{}, fmt.Errorf("can not parse admins networks, error - %v", err)
+	}
+
+	if rawConfig.RecordTimeout <= 0 {
+		rawConfig.RecordTimeout = 180000
+	}
+	if rawConfig.RecordStorageDir != "" {
+		err := os.MkdirAll(rawConfig.RecordStorageDir, os.ModePerm)
+		if err != nil {
+			return ServerConfig{}, fmt.Errorf("can create record directory, error - %v", err)
+		}
 	}
 
 	return ServerConfig{
@@ -94,6 +108,8 @@ func LoadServerConfig() (ServerConfig, error) {
 		ServerTLSKeyFile:     rawConfig.ServerTLSKeyFile,
 		Codecs:               parseCodecs(rawConfig.Codecs),
 		WebcamTrackCount:     rawConfig.WebcamTrackCount,
+		RecordTimeout:        rawConfig.RecordTimeout,
+		RecordStorageDir:     rawConfig.RecordStorageDir,
 	}, nil
 }
 

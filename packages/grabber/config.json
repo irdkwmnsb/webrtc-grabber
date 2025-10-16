@@ -3,8 +3,6 @@
     "aspectRatio": 1.7777777778
   },
   "webcamAudioConstraint": true,
-  "desktopConstraint": {
-    "width": 1280,
-    "height": 720
-  }
+  "desktopConstraint": true,
+  "recordingsDirectory": "."
 }

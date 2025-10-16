@@ -1,1 +1,1 @@
-%~dp0grabber.exe . --peerName=001 "--signalingUrl=http://grabber.kbats.ru"
+%~dp0grabber.exe . --peerName=001 "--signalingUrl=https://grabber.kbats.ru"

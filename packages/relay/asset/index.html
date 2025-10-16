@@ -90,6 +90,7 @@
     </style>
     <script src="/sockets.js"></script>
     <script src="/grabber_player.js"></script>
+    <script src="/grabber_admin_client.js"></script>
 </head>
 <body>
 <div id="main">
@@ -129,8 +130,10 @@
         peer.lastPing ? ((new Date() - new Date(peer.lastPing)) < 15000 ? "active" : "disconnected") : "offline";
 
     const client = new GrabberPlayerClient();
+    const adminClient = new GrabberAdminClient("");
     client.target.addEventListener("auth:request", () => {
         client.authorize(requireAuth());
+        adminClient.setCredential(requireAuth());
     });
     client.target.addEventListener("auth:failed", ({detail: [accessMessage]}) => {
         localStorage.removeItem("adminCredentials");
@@ -140,10 +143,12 @@
     const renderParticipants = (peers, participantsStatus) => {
         const allPeersAnchor = document.getElementById("peers");
         allPeersAnchor.innerHTML = "";
-        peers && peers.forEach((peer) => {
-            allPeersAnchor.innerHTML += "";
-            allPeersAnchor.appendChild(renderPeerInfo(peer));
-        });
+        if (peers) {
+            peers.sort((a, b) => a.name.localeCompare(b.name));
+            peers.forEach((peer) => {
+                allPeersAnchor.appendChild(renderPeerInfo(peer));
+            });
+        }
 
         const participantsStatusAnchor = document.getElementById("participants");
         participantsStatusAnchor.innerHTML = "";
@@ -157,6 +162,9 @@
             }
             if (peer.streamTypes) {
                 pStatus.innerText += " " + peer.streamTypes.map(t => t.slice(0, 1).toUpperCase()).join("");
+            }
+            if (peer.currentRecordId) {
+                pStatus.innerText += " ⦿";
             }
             if (peer.name === selectedParticipantName) {
                 renderSelectedPeer(peer);
@@ -225,6 +233,33 @@
         if (peer.streamTypes && peer.streamTypes.length > 0) {
             for (const streamType of peer.streamTypes) {
                 connectStreamButton(streamType);
+            }
+
+            if (isSelected) {
+                const recordButton = document.createElement('button');
+                recordButton.innerText = "Record";
+                recordButton.onclick = () => {
+                    let recordId = prompt("Please enter record id", peer.name + "_test");
+                    adminClient.recordStart(peer.name, recordId, 30 * 1000);
+                }
+                pStatus.appendChild(recordButton);
+
+                if (peer.currentRecordId) {
+                    const recordStopButton = document.createElement('button');
+                    recordStopButton.innerText = "Stop Record";
+                    recordStopButton.onclick = () => {
+                        adminClient.recordStop(peer.name, peer.currentRecordId);
+                    }
+                    pStatus.appendChild(recordStopButton);
+                }
+
+                const recordUploadButton = document.createElement('button');
+                recordUploadButton.innerText = "Record upload";
+                recordUploadButton.onclick = () => {
+                    let recordId = prompt("Please enter record id", peer.name + "_test");
+                    adminClient.recordUpload(peer.name, recordId);
+                }
+                pStatus.appendChild(recordUploadButton);
             }
         } else {
             connectStreamButton("desktop", true);
