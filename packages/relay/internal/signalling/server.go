@@ -168,7 +168,7 @@ func (s *Server) CheckPlayerCredential(credentials string) bool {
 //
 //	server.SetupWebSockets()
 //	app.Listen(":8080")
-func (s *Server) SetupWebSockets() {
+func (s *Server) SetupWebSocketsAndApi() {
 	s.app.Use("/ws", func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
 			c.Locals("allowed", true)
