@@ -35,6 +35,8 @@ type ServerConfig struct {
 	// ICE servers (STUN/TURN) for NAT traversal.
 	PeerConnectionConfig api.PeerConnectionConfig `json:"peerConnectionConfig"`
 
+	PublicIP string `json:"publicIp"`
+
 	// GrabberPingInterval specifies how often (in seconds) grabbers should send
 	// ping messages to indicate they are still alive.
 	GrabberPingInterval int `json:"grabberPingInterval"`
@@ -101,6 +103,7 @@ type RawServerConfig struct {
 	Participants         []string                 `json:"participants"`
 	AdminsRawNetworks    []string                 `json:"adminsNetworks"`
 	PeerConnectionConfig api.PeerConnectionConfig `json:"peerConnectionConfig"`
+	PublicIP             string                   `json:"publicIp"`
 	GrabberPingInterval  int                      `json:"grabberPingInterval"`
 	ServerPort           int                      `json:"serverPort"`
 	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile"`
@@ -198,6 +201,7 @@ func LoadServerConfig() (ServerConfig, error) {
 		Participants:         rawConfig.Participants,
 		AdminsRawNetworks:    adminsNetworks,
 		PeerConnectionConfig: rawConfig.PeerConnectionConfig,
+		PublicIP:             rawConfig.PublicIP,
 		GrabberPingInterval:  rawConfig.GrabberPingInterval,
 		ServerPort:           rawConfig.ServerPort,
 		ServerTLSCrtFile:     rawConfig.ServerTLSCrtFile,
