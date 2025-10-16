@@ -6,11 +6,12 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/pprof"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/signalling"
 )
 
 func main() {
-	config, err := signalling.LoadServerConfig()
+	config, err := config.LoadServerConfig()
 	if err != nil {
 		log.Fatal(err)
 	}
