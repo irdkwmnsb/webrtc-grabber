@@ -1,7 +1,9 @@
 name: Release grabber
 
 on:
-  pull_request:
+   push:
+      branches: ["main", "fix-release"]
+   pull_request:
     types:
       - opened
       - synchronize
@@ -31,7 +33,7 @@ jobs:
           retention-days: 7
 
   build_windows:
-    runs-on: windows-2019
+    runs-on: windows-2022
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
