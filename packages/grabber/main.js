@@ -197,21 +197,16 @@ function parseArguments() {
 }
 
 function getVersionInfo() {
-  // Для production
-  if (process.env.COMMIT_SHA && process.env.BUILD_DATE) {
+  try {
+    return require('./version.json');
+  } catch (error) {
+    console.log(error);
     return {
-      buildDate: process.env.BUILD_DATE,
-      commitSha: process.env.COMMIT_SHA.substring(0, 7) // короткий SHA
+      buildDate: new Date().toISOString(),
+      commitSha: 'dev'
     };
   }
-  
-  // Для development
-  return {
-    buildDate: new Date().toISOString().split('T')[0],
-    commitSha: 'dev'
-  };
 }
-
 const versionInfo = getVersionInfo();
 console.log(`Grabber version: ${versionInfo.buildDate} (commit: ${versionInfo.commitSha})`);
 console.log(`Versions: ${JSON.stringify(process.versions)}`)
