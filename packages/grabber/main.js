@@ -196,5 +196,22 @@ function parseArguments() {
     return config;
 }
 
-console.log("Grabber version: 2024-12-14")
+function getVersionInfo() {
+  // Для production
+  if (process.env.COMMIT_SHA && process.env.BUILD_DATE) {
+    return {
+      buildDate: process.env.BUILD_DATE,
+      commitSha: process.env.COMMIT_SHA.substring(0, 7) // короткий SHA
+    };
+  }
+  
+  // Для development
+  return {
+    buildDate: new Date().toISOString().split('T')[0],
+    commitSha: 'dev'
+  };
+}
+
+const versionInfo = getVersionInfo();
+console.log(`Grabber version: ${versionInfo.buildDate} (commit: ${versionInfo.commitSha})`);
 console.log(`Versions: ${JSON.stringify(process.versions)}`)
