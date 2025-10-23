@@ -52,8 +52,7 @@ jobs:
         env:
           COMMIT_SHA: "${{ github.sha }}"
           BUILD_DATE: "${{ github.event.repository.updated_at }}"
-        run: |
-          echo %COMMIT_SHA% and %BUILD_DATE%
+        run: grabber_build_win64.bat
 
       - uses: actions/upload-artifact@v4
         with:
