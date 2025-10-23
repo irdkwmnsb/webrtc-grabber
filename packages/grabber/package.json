@@ -14,12 +14,11 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "devDependencies": {
-    "electron": "^21.0.1",
-    "electron-packager": "^16.0.0"
+    "electron": "^38.4.0",
+    "@electron/packager": "^19.0.0"
   },
   "dependencies": {
     "command-line-args": "^5.2.1",
-    "socket.io-client": "^4.5.2",
     "webrtc": "^1.14.1",
     "ws": "^8.12.1"
   }
