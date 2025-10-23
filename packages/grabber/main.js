@@ -196,5 +196,16 @@ function parseArguments() {
     return config;
 }
 
-console.log("Grabber version: 2024-12-14")
+function getVersionInfo() {
+  try {
+    return require('./version.json');
+  } catch (error) {
+    return {
+      buildDate: new Date().toISOString(),
+      commitSha: 'dev'
+    };
+  }
+}
+const versionInfo = getVersionInfo();
+console.log(`Grabber version: ${versionInfo.buildDate} (commit: ${versionInfo.commitSha})`);
 console.log(`Versions: ${JSON.stringify(process.versions)}`)

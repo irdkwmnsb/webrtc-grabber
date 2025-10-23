@@ -4,6 +4,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "dump_version": "node scripts/inject-version.js",
     "build_win32_x64": "npx electron-packager . --platform=win32 --arch=x64 --ignore=\"^(/build|/scripts)\" --out build",
     "build_win32_arm64": "npx electron-packager . --platform=win32 --arch=arm64 --ignore=\"^(/build|/scripts)\" --out build",
     "build_linux_x64": "npx electron-packager . --platform=linux --arch=x64 --ignore=\"^(/build|/scripts)\" --out build",

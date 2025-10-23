@@ -42,6 +42,7 @@ if [ "$2" != "x64" ] && [ "$2" != "arm64" ]; then
 fi
 
 # Build variables
+NPM_VERSION_SCRIPT="dump_version"
 NPM_SCRIPT="build_$1_$2"
 OLD_BUILD_DIR="build/grabber-$1-$2"
 NEW_BUILD_DIR="build/webrtc_grabber_$1_$2"
@@ -56,7 +57,9 @@ fi;
 
 # Run npm build script
 NPM_RUN_CMD="npm run $NPM_SCRIPT"
+NPM_VERSION_SCRIPT_CMD="npm run $NPM_VERSION_SCRIPT"
 NPM_INSTALL_CMD="npm ci"
+eval $NPM_VERSION_SCRIPT_CMD
 if ! eval $NPM_RUN_CMD; then
   echo -e "${RED}FAILED:${NC} $NPM_RUN_CMD"
   echo -e "${YEL}Trying to install packages...${NC}"
@@ -72,6 +75,8 @@ if ! eval $NPM_RUN_CMD; then
     exit 1;
   fi
 fi
+
+mv version.json "$OLD_BUILD_DIR/version.json"
 
 # Finish build
 eval "mv $OLD_BUILD_DIR $NEW_BUILD_DIR"
