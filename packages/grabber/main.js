@@ -200,7 +200,6 @@ function getVersionInfo() {
   try {
     return require('./version.json');
   } catch (error) {
-    console.log(error);
     return {
       buildDate: new Date().toISOString(),
       commitSha: 'dev'
