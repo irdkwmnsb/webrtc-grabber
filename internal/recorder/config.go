@@ -14,7 +14,7 @@ type Config struct {
 }
 
 func LoadRecorderConfig() (config Config, err error) {
-	configFile, err := os.Open("conf/recorder.json")
+	configFile, err := os.Open("configs/recorder.json")
 	if err != nil {
 		return
 	}
