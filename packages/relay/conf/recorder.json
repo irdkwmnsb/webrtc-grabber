@@ -1,6 +1,0 @@
-{
-  "signallingUrl": "http://localhost:8000",
-  "signallingCredential": "live",
-  "maxRecordDurationSec": 60,
-  "recordingsDirectory": "recordings"
-}

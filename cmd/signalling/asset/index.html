@@ -1,0 +1,274 @@
+<html lang="en">
+<head>
+    <title>WebRTC grabber</title>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        #main {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            padding: 4px 8px;
+        }
+
+        #participants {
+            margin-bottom: 4px;
+            grid-column-start: 1;
+            grid-column-end: 3;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 5px;
+        }
+
+        .peerInfo {
+            padding: 2px 8px;
+        }
+
+        .peerInfo button, .participantStatus button {
+            margin-left: 4px;
+            padding: 2px 8px;
+        }
+
+        .peerInfo a, .participantStatus a {
+            margin-left: 4px;
+        }
+
+        .participantStatus {
+            border: black 1px solid;
+        }
+
+        #participants .participantStatus {
+            text-align: center;
+        }
+
+        .participantStatus.offline {
+            background: #ff7272;
+        }
+
+        .participantStatus.disconnected {
+            background: #ffff75;
+        }
+
+        .participantStatus.active {
+            background: #91ff54;
+        }
+
+        .participantStatus.viewed {
+            background: #e798ff;
+        }
+
+        .participantStatus.selected {
+            background: #81b6ff;
+        }
+
+        #selectedParticipant {
+            margin-bottom: 4px;
+            grid-column-start: 1;
+            grid-column-end: 3;
+        }
+
+        #video {
+            width: 100%;
+        }
+
+        #footer {
+            grid-column-start: 1;
+            grid-column-end: 3;
+        }
+
+        .legend {
+            padding-inline-start: 0;
+            margin-block-start: 0;
+            margin-block-end: 0;
+        }
+
+        .legend li {
+            list-style: none;
+            margin: 8px 0;
+        }
+    </style>
+    <script src="/sockets.js"></script>
+    <script src="/grabber_player.js"></script>
+    <script src="/grabber_admin_client.js"></script>
+</head>
+<body>
+<div id="main">
+    <div id="participants"></div>
+    <div id="selectedParticipant"></div>
+    <div id="peers"></div>
+    <div id="videoContainer">
+        <video id="video"></video>
+        <audio id="audio"></audio>
+    </div>
+    <div id="footer">
+        Legend:
+        <ul class="legend">
+            <li><span class="participantStatus offline">offline</span> no pings yet</li>
+            <li><span class="participantStatus disconnected">disconnected</span> last ping was 15 seconds ago</li>
+            <li><span class="participantStatus active">active</span> last ping was earlier than 15 seconds ago</li>
+            <li><span class="participantStatus viewed">viewed [connection count]</span> peer has at least one connection
+            </li>
+            <li><span class="participantStatus selected">selected</span> peer is selected</li>
+        </ul>
+    </div>
+</div>
+<script>
+    const requireAuth = () => {
+        if (localStorage.getItem("adminCredentials")) {
+            return localStorage.getItem("adminCredentials");
+        }
+        const credentialInput = prompt("Admin credentials");
+        localStorage.setItem("adminCredentials", credentialInput);
+        return credentialInput;
+    }
+
+    let curGrabberId = null;
+    let selectedParticipantName = null;
+
+    const peerState = (peer) =>
+        peer.lastPing ? ((new Date() - new Date(peer.lastPing)) < 15000 ? "active" : "disconnected") : "offline";
+
+    const client = new GrabberPlayerClient();
+    const adminClient = new GrabberAdminClient("");
+    client.target.addEventListener("auth:request", () => {
+        client.authorize(requireAuth());
+        adminClient.setCredential(requireAuth());
+    });
+    client.target.addEventListener("auth:failed", ({detail: [accessMessage]}) => {
+        localStorage.removeItem("adminCredentials");
+        alert(accessMessage);
+    });
+
+    const renderParticipants = (peers, participantsStatus) => {
+        const allPeersAnchor = document.getElementById("peers");
+        allPeersAnchor.innerHTML = "";
+        if (peers) {
+            peers.sort((a, b) => a.name.localeCompare(b.name));
+            peers.forEach((peer) => {
+                allPeersAnchor.appendChild(renderPeerInfo(peer));
+            });
+        }
+
+        const participantsStatusAnchor = document.getElementById("participants");
+        participantsStatusAnchor.innerHTML = "";
+        participantsStatus && participantsStatus.forEach((peer) => {
+            const pStatus = document.createElement('div');
+            pStatus.className = "participantStatus " + peerState(peer);
+            pStatus.innerText = peer.name;
+            if (peer.connectionsCount > 0) {
+                pStatus.className += " viewed";
+                pStatus.innerText += ` [${peer.connectionsCount}]`
+            }
+            if (peer.streamTypes) {
+                pStatus.innerText += " " + peer.streamTypes.map(t => t.slice(0, 1).toUpperCase()).join("");
+            }
+            if (peer.currentRecordId) {
+                pStatus.innerText += " ⦿";
+            }
+            if (peer.name === selectedParticipantName) {
+                renderSelectedPeer(peer);
+                pStatus.classList.add("selected");
+            }
+            pStatus.onclick = () => {
+                if (selectedParticipantName === peer.name) {
+                    selectedParticipantName = null;
+                    pStatus.classList.remove("selected");
+                    renderSelectedPeer(null);
+                } else {
+                    selectedParticipantName = peer.name;
+                    pStatus.classList.add("selected");
+                    renderSelectedPeer(peer);
+                }
+                renderParticipants(client.peersStatus, client.participantsStatus);
+            };
+            pStatus.style.cursor = "pointer";
+            participantsStatusAnchor.appendChild(pStatus);
+        });
+    }
+    const renderSelectedPeer = (peer) => {
+        const anchor = document.getElementById("selectedParticipant");
+        anchor.innerText = "";
+        if (!peer) {
+            return;
+        }
+        anchor.appendChild(renderPeerInfo(peer, true));
+    }
+    client.target.addEventListener("peers", ({detail: [peersStatus, participantsStatus]}) => {
+        renderParticipants(peersStatus, participantsStatus);
+    });
+
+    const onPeerTrack = (track, peerId, streamType) => {
+        console.log("got video track");
+        const remoteVideo = document.getElementById("video");
+        if (remoteVideo.srcObject !== track) {
+            remoteVideo.srcObject = null;
+            remoteVideo.srcObject = track;
+            remoteVideo.play();
+            console.log(`pc2 received remote stream (peerId ${peerId}) `, track);
+        }
+    };
+
+    function renderPeerInfo(peer, isSelected) {
+        const lastPingStr = peer.lastPing ? (new Date(peer.lastPing)).toLocaleString() : "never";
+        const pStatus = document.createElement('div');
+        if (isSelected) {
+            pStatus.className += "peerInfo participantStatus " + peerState(peer);
+        } else {
+            pStatus.className += "peerInfo " + peerState(peer);
+        }
+        pStatus.innerText = `${peer.id ?? "???"} [${peer.name}] last ping: ${lastPingStr}`;
+
+        const connectStreamButton = (streamType, isSpirit) => {
+            const connectButton = document.createElement('button');
+            connectButton.innerText = (isSpirit && "?" || "") + streamType;
+            connectButton.onclick = () => client.connect({peerId: peer.id}, streamType, onPeerTrack);
+            pStatus.appendChild(connectButton);
+            const playerLink = document.createElement('a');
+            playerLink.innerText = "" + (isSpirit && "?" || "") + streamType;
+            playerLink.href = `${window.location}player?` +
+                `peerName=${peer.name}&streamType=${streamType}&credential=${localStorage.getItem("adminCredentials")}`
+            pStatus.appendChild(playerLink);
+        }
+        if (peer.streamTypes && peer.streamTypes.length > 0) {
+            for (const streamType of peer.streamTypes) {
+                connectStreamButton(streamType);
+            }
+
+            if (isSelected) {
+                const recordButton = document.createElement('button');
+                recordButton.innerText = "Record";
+                recordButton.onclick = () => {
+                    let recordId = prompt("Please enter record id", peer.name + "_test");
+                    adminClient.recordStart(peer.name, recordId, 30 * 1000);
+                }
+                pStatus.appendChild(recordButton);
+
+                if (peer.currentRecordId) {
+                    const recordStopButton = document.createElement('button');
+                    recordStopButton.innerText = "Stop Record";
+                    recordStopButton.onclick = () => {
+                        adminClient.recordStop(peer.name, peer.currentRecordId);
+                    }
+                    pStatus.appendChild(recordStopButton);
+                }
+
+                const recordUploadButton = document.createElement('button');
+                recordUploadButton.innerText = "Record upload";
+                recordUploadButton.onclick = () => {
+                    let recordId = prompt("Please enter record id", peer.name + "_test");
+                    adminClient.recordUpload(peer.name, recordId);
+                }
+                pStatus.appendChild(recordUploadButton);
+            }
+        } else {
+            connectStreamButton("desktop", true);
+            connectStreamButton("webcam", true);
+        }
+        return pStatus;
+    }
+
+    window.addEventListener("close", () => client.close());
+</script>
+</body>
+</html>

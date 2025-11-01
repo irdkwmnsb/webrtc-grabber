@@ -34,7 +34,7 @@ The main use case is streaming live screen video from contestants' screens on
 
 [WebRTC](https://webrtc.org/) is a modern protocol for real-time video communication and screen sharing. It provides low-latency peer-to-peer connections with on-demand stream initiation (typically under 1 second) and portable deployment across platforms.
 
-<img src="img/webrtc-protocol.png">
+<img src="docs/img/webrtc-protocol.png">
 
 In the ICPC competition environment with strict network segmentation between "blue" (participant) and "red" (production) networks, direct peer-to-peer communication is challenging. The solution uses an **SFU (Selective Forwarding Unit)** architecture with optional **TURN** relay for NAT traversal when needed.
 
@@ -61,7 +61,7 @@ Grabber is an Electron application that runs in the background and captures scre
 
 ### Configuration <a name="grabber-config"></a>
 
-Grabber [`config.json`](packages/grabber/config.json):
+Grabber [`config.json`](grabber/config.json):
 
 ```json
 {
@@ -119,7 +119,7 @@ After that, you can run the grabber using executable:
 #### Windows
 
 - Launch in background (see
-  [`runner.bat`](packages/grabber/scripts/runner.bat)):
+  [`runner.bat`](scripts/runner.bat)):
 
   ```
   $ ~dp0grabber.exe . --peerName={number of computer} --signalingUrl="{signalling url}"
@@ -134,12 +134,12 @@ After that, you can run the grabber using executable:
   ```
 
 - Stop the grabber with
-  the [`stopper.bat`](packages/grabber/scripts/stopper.bat)
+  the [`stopper.bat`](scripts/stopper.bat)
   script.
 
 #### Linux
 
-Use [`grabber-linux.sh`](packages/grabber/scripts/grabber-linux.sh) script:
+Use [`grabber-linux.sh`](scripts/grabber-linux.sh) script:
 
 - Launch in background:
 
@@ -161,13 +161,13 @@ Use [`grabber-linux.sh`](packages/grabber/scripts/grabber-linux.sh) script:
 #### MacOS
 
 The same as for Linux, but name of the script is
-[`grabber-darwin.sh`](packages/grabber/scripts/grabber-darwin.sh).
+[`grabber-darwin.sh`](scripts/grabber-darwin.sh).
 
-## Relay Server (Signaling + SFU)
+## Signalling Server (Signalling + SFU)
 
 ---
 
-The relay server is a high-performance Go application combining WebRTC signaling and SFU (Selective Forwarding Unit) functionality. It uses the Fiber web framework with native WebSocket support for efficient real-time communication.
+The signalling server is a high-performance Go application combining WebRTC signalling and SFU (Selective Forwarding Unit) functionality. It uses the Fiber web framework with native WebSocket support for efficient real-time communication.
 
 ### Key Features
 
@@ -180,7 +180,7 @@ The relay server is a high-performance Go application combining WebRTC signaling
 
 ### Configuration <a name="relay-config"></a>
 
-Relay server [`config.json`](packages/relay/conf/config.json):
+Signalling server [`config.json`](configs/signalling.json):
 
 ```json
 {
@@ -242,25 +242,24 @@ Relay server [`config.json`](packages/relay/conf/config.json):
 
 ### Build sources <a name="relay-build"></a>
 
-Clone the repository and run the following commands from `packages/relay`:
+Clone the repository and run the following commands:
 
 ```shell
-cd packages/relay/cmd/signaling
-go mod tidy
-go build -o signaling
+cd cmd/signalling
+go build -o signalling
 ```
 
 For cross-compilation:
 
 ```shell
 # Linux
-GOOS=linux GOARCH=amd64 go build -o signaling-linux
+GOOS=linux GOARCH=amd64 go build -o signalling-linux ./cmd/signalling
 
 # Windows
-GOOS=windows GOARCH=amd64 go build -o signaling.exe
+GOOS=windows GOARCH=amd64 go build -o signalling.exe ./cmd/signalling
 
 # macOS
-GOOS=darwin GOARCH=amd64 go build -o signaling-darwin
+GOOS=darwin GOARCH=amd64 go build -o signalling-darwin ./cmd/signalling
 ```
 
 ### Run <a name="relay-run"></a>
@@ -282,7 +281,7 @@ $ sh signalling.sh
 Or run directly:
 
 ```shell
-$ ./signaling
+$ ./signalling
 ```
 
 The server will start on the configured port (default: 8000). Access the admin dashboard at `http://localhost:8000`.
@@ -291,29 +290,29 @@ The server will start on the configured port (default: 8000). Access the admin d
 
 The SFU implementation is built into the relay server and provides efficient one-to-many media distribution.
 
-<img src="img/sfu.png">
+<img src="docs/img/sfu.png">
 
 #### Core Components
 
-1. **PeerManager** (`packages/relay/internal/signalling/peer_manager.go`)
+1. **PeerManager** (`internal/signalling/peer_manager.go`)
    - Orchestrates all WebRTC peer connections
    - Manages publishers (grabbers) and subscribers (players)
    - Handles concurrent publisher setup with atomic synchronization
    - Implements automatic cleanup on disconnections
 
-2. **TrackBroadcaster** (`packages/relay/internal/signalling/track_broadcaster.go`)
+2. **TrackBroadcaster** (`pkg/sfu/track_broadcaster.go`)
    - Reads RTP packets from publisher tracks
    - Broadcasts packets to all subscribers concurrently
    - Uses semaphore-based throttling (max 20 concurrent writes)
    - Automatically removes failed subscribers
 
-3. **Server** (`packages/relay/internal/signalling/server.go`)
+3. **Server** (`internal/signalling/server.go`)
    - HTTP/WebSocket server using Fiber framework
    - Routes signaling messages between grabbers and players
    - Manages three WebSocket endpoints
    - Enforces IP-based access control
 
-4. **Storage** (`packages/relay/internal/signalling/storage.go`)
+4. **Storage** (`internal/signalling/storage.go`)
    - Thread-safe peer registry with health monitoring
    - Tracks ping timestamps and connection counts
    - Provides participant status for admin dashboard
@@ -371,16 +370,16 @@ Full API documentation is available via `go doc`:
 
 ```shell
 # View package documentation
-go doc github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/signalling
+go doc github.com/irdkwmnsb/webrtc-grabber/internal/signalling
+go doc github.com/irdkwmnsb/webrtc-grabber/pkg/sfu
 
 # View specific type documentation
-go doc signalling.PeerManager
-go doc signalling.TrackBroadcaster
 go doc signalling.Server
+go doc sfu.TrackBroadcaster
 
 # Start HTML documentation server
 godoc -http=:6060
-# Then visit: http://localhost:6060/pkg/github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/signalling/
+# Then visit: http://localhost:6060/pkg/github.com/irdkwmnsb/webrtc-grabber/
 ```
 
 ## TURN
@@ -412,11 +411,10 @@ docker run -d --network=host \
 
 ### Build sources <a name="turn-build"></a>
 
-Clone the repository and run the following commands from `packages/go-turn`:
+Clone the repository and run the following commands:
 
 ```shell
-$ go mod tidy
-$ go build
+$ go build -o turn ./cmd/turn
 ```
 
 ### Run <a name="turn-run"></a>
