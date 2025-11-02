@@ -1,3 +1,14 @@
+webrtc-grabber (1.0.4.2.g98a96d0-1) jammy; urgency=medium
+
+  * Grabber: type error fix (2e0e4fea84ca7a002cd2aab5cae000e2eda9cbd2).
+  * Relay: SFU (#19 fc168b722907586007762f71f916ccbf1917d65c, 70b7def7a7ad019140fced83c1697d6efbb3d206).
+  * Turn: ipv6 support (aa16baa060c598818979e2946378afd1dd23259a).
+  * Relay, turn: upgrade go, upgrade deps (52aba343f698d2754b1cfffb219924c3fc703973).
+  * Debian build: support SFU.
+  * Debian build: use node 22, go 1.25.0.
+
+ -- Dmitrii Kuptsov <demulkup@ya.ru>  Sun, 12 Oct 2025 14:25:33 +0300
+
 webrtc-grabber (1.0.1.alpha.6.g90b1562-1) jammy; urgency=medium
 
   * Finalize webcam, audio, recording support.
