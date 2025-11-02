@@ -17,14 +17,14 @@ jobs:
       - uses: actions/setup-node@v4
 
       - name: Install agent dependencies
-        working-directory: ./grabber
+        working-directory: ./agent
         run: npm ci
 
       - name: Run agent build
         working-directory: .
-        run: bash ./scripts/grabber_build.sh linux x64
+        run: bash ./scripts/agent_build.sh linux x64
       - name: Create tar archive
-        working-directory: ./grabber/build/
+        working-directory: ./agent/build/
         env:
           COMMIT_SHA: "${{ github.sha }}"
           BUILD_DATE: "${{ github.event.repository.updated_at }}"
@@ -43,7 +43,7 @@ jobs:
       - uses: actions/setup-node@v4
 
       - name: Install agent dependencies
-        working-directory: .\grabber
+        working-directory: .\agent
         run: npm ci
 
       - name: Run agent build
@@ -52,10 +52,10 @@ jobs:
         env:
           COMMIT_SHA: "${{ github.sha }}"
           BUILD_DATE: "${{ github.event.repository.updated_at }}"
-        run: scripts\grabber_build_win64.bat
+        run: scripts\agent_build_win64.bat
 
       - uses: actions/upload-artifact@v4
         with:
           name: webrtc_grabber_agent_win_x64
-          path: ./grabber/build/
+          path: ./agent/build/
           retention-days: 7

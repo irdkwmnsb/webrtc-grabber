@@ -48,7 +48,7 @@ OLD_BUILD_DIR="build/grabber-$1-$2"
 NEW_BUILD_DIR="build/webrtc_grabber_$1_$2"
 
 # Move to working directory
-cd grabber
+cd agent
 
 # Remove old build directory
 if [ -d "build" ]; then
