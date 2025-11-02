@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebRTC Grabber. Recording</title>
+    <script>
+        function parseNumberOrNull(number) {
+            try {
+                return Number.parseInt(number);
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function record() {
+            const key = document.getElementById("key").value;
+            const peerName = document.getElementById("peerName").value;
+            const streamType = document.getElementById("streamTypeDesktop").checked ? "desktop" : "webcam";
+            const duration = parseNumberOrNull(document.getElementById("duration").value);
+
+            fetch("/record/start", {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    key,
+                    peerName,
+                    streamType,
+                    duration,
+                })
+            }).then(async r => {
+                const recordingInfo = document.getElementById("recordingInfo");
+                if (r.ok) {
+                    const key = await r.text();
+                    recordingInfo.innerHTML = `Successful. Recording key is ${key}<br>
+<a href='/recordings/${key}.ivf'>/recordings/'${key}.ivf</a> (will availdable after record completion)`;
+                } else {
+                    recordingInfo.innerText = "Failed to start recording. Status code: " + r.status + ". " + key;
+                }
+            })
+        }
+    </script>
+</head>
+<body>
+<div>
+    <a href="/recordings">all recordings</a>
+</div>
+<hr>
+<div>
+    <label>
+        <input id="key" value="">
+        key
+    </label>
+    <br/>
+    <label>
+        <input id="peerName" value="001">
+        peer name
+    </label>
+    <br/>
+    <label>
+        <input type="radio" id="streamTypeDesktop" name="streamType" value="desktop" checked>
+        <label for="streamTypeDesktop">desktop</label>
+        <input type="radio" id="streamTypeWebcam" name="streamType" value="webcam">
+        <label for="streamTypeWebcam">webcam</label>
+    </label>
+    <br>
+    <label>
+        <input id="duration" value="60">
+        duration (in seconds)
+    </label>
+    <br/>
+    <button onclick="record()">record</button>
+</div>
+<div id="recordingInfo">
+</div>
+</body>
+</html>
