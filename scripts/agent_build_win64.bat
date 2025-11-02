@@ -1,5 +1,5 @@
 @echo off
-pushd grabber
+pushd agent 
 call rmdir /S /Q build\webrtc_grabber_win_x64
 call npm run dump_version
 call npm run build_win32_x64
