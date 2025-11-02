@@ -3,11 +3,11 @@ FROM golang:1.25-alpine AS builder
 WORKDIR /build
 
 # Copy go mod files
-COPY go.mod go.sum ./
+COPY server/go.mod server/go.sum ./
 RUN go mod download
 
 # Copy source code
-COPY cmd/turn ./cmd/turn
+COPY server/cmd/turn ./cmd/turn
 
 # Build the binary
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o turn ./cmd/turn
