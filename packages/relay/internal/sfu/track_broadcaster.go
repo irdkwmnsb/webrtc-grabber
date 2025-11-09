@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"github.com/pion/webrtc/v4"
 )
@@ -128,6 +129,9 @@ func (tb *TrackBroadcaster) broadcastLoop(remoteTrack *webrtc.TrackRemote, publi
 			return
 		}
 
+		metrics.SFUPacketsReceived.Inc()
+		metrics.SFUBytesReceived.Add(float64(n))
+
 		tb.broadcastToSubscribers(buffer[:n])
 	}
 }
@@ -175,8 +179,12 @@ func (tb *TrackBroadcaster) broadcastToSubscribers(data []byte) {
 			defer wg.Done()
 			defer func() { <-semaphore }()
 
-			if _, err := tb.localTrack.Write(data); err != nil {
+			n, err := tb.localTrack.Write(data)
+			if err != nil {
 				tb.subscribers.Delete(key)
+			} else {
+				metrics.SFUPacketsSent.Inc()
+				metrics.SFUBytesSent.Add(float64(n))
 			}
 		}()
 		return true

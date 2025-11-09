@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/netip"
+	"runtime"
 	"slices"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sfu"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/utils"
@@ -118,6 +120,14 @@ func NewServer(config *config.ServerConfig, app *fiber.App) (*Server, error) {
 	}
 	server.storage.setParticipants(config.Participants)
 	server.oldPeersCleaner = utils.SetIntervalTimer(time.Minute, server.storage.deleteOldPeers)
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			metrics.GoRoutines.Set(float64(runtime.NumGoroutine()))
+		}
+	}()
 
 	return &server, nil
 }
@@ -364,6 +374,16 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.playersSockets.AddSocket(c)
 	log.Printf("authorized %s", socketID)
+
+	metrics.ActivePlayers.Inc()
+	metrics.PlayersConnectedTotal.Inc()
+	metrics.ActiveWebSocketConnections.Inc()
+	metrics.WebSocketConnectionsTotal.Inc()
+	defer func() {
+		metrics.ActivePlayers.Dec()
+		metrics.ActiveWebSocketConnections.Dec()
+		metrics.WebSocketDisconnectionsTotal.Inc()
+	}()
 	newC := sockets.NewSocket(c)
 
 	var message api.PlayerMessage
@@ -432,6 +452,16 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	s.playersSockets.AddSocket(c)
 	newC := sockets.NewSocket(c)
 	log.Printf("authorized %s", socketID)
+
+	metrics.ActivePlayers.Inc()
+	metrics.PlayersConnectedTotal.Inc()
+	metrics.ActiveWebSocketConnections.Inc()
+	metrics.WebSocketConnectionsTotal.Inc()
+	defer func() {
+		metrics.ActivePlayers.Dec()
+		metrics.ActiveWebSocketConnections.Dec()
+		metrics.WebSocketDisconnectionsTotal.Inc()
+	}()
 
 	messages := make(chan interface{})
 	defer close(messages)
@@ -615,6 +645,16 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.grabberSockets.AddSocket(c)
 	newC := sockets.NewSocket(c)
+
+	metrics.ActiveAgents.Inc()
+	metrics.AgentsRegisteredTotal.Inc()
+	metrics.ActiveWebSocketConnections.Inc()
+	metrics.WebSocketConnectionsTotal.Inc()
+	defer func() {
+		metrics.ActiveAgents.Dec()
+		metrics.ActiveWebSocketConnections.Dec()
+		metrics.WebSocketDisconnectionsTotal.Inc()
+	}()
 
 	if err := newC.WriteJSON(api.GrabberMessage{
 		Event: api.GrabberMessageEventInitPeer,

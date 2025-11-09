@@ -8,6 +8,8 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/pprof"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/signalling"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/valyala/fasthttp/fasthttpadaptor"
 )
 
 func main() {
@@ -29,6 +31,13 @@ func main() {
 
 	server.SetupWebSocketsAndApi()
 	app.Use(pprof.New())
+
+	promHandler := promhttp.Handler()
+	app.Get("/metrics", func(c *fiber.Ctx) error {
+		fasthttpadaptor.NewFastHTTPHandler(promHandler)(c.Context())
+		return nil
+	})
+
 	app.Static("/", "./asset")
 	app.Static("/player", "./asset/player.html")
 	app.Static("/capture", "./asset/capture.html")

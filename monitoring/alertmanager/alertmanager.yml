@@ -1,0 +1,98 @@
+global:
+  resolve_timeout: 5m
+
+templates:
+  - '/etc/alertmanager/*.tmpl'
+
+route:
+  receiver: 'default'
+  group_by: ['alertname', 'component']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  routes:
+    - match:
+        severity: critical
+      receiver: 'critical'
+      continue: true
+
+    - match:
+        severity: warning
+      receiver: 'warning'
+      continue: true
+
+    - match:
+        severity: info
+      receiver: 'info'
+
+receivers:
+  - name: 'default'
+    webhook_configs:
+      - url: 'http://localhost:5001/webhook'
+        send_resolved: true
+
+  - name: 'critical'
+    telegram_configs:
+      - bot_token: 'BOT_TOKEN'
+        chat_id: CHAT_ID
+        parse_mode: 'HTML'
+        message: |
+          🚨 <b>CRITICAL ALERT</b>
+
+          <b>Alert:</b> {{ .GroupLabels.alertname }}
+          <b>Severity:</b> {{ .CommonLabels.severity }}
+          <b>Component:</b> {{ .CommonLabels.component }}
+
+          {{ range .Alerts }}
+          <b>Description:</b> {{ .Annotations.description }}
+          <b>Status:</b> {{ .Status }}
+          {{ if .StartsAt }}<b>Started:</b> {{ .StartsAt.Format "2006-01-02 15:04:05" }}{{ end }}
+          {{ end }}
+        send_resolved: true
+
+  - name: 'warning'
+    telegram_configs:
+      - bot_token: 'BOT_TOKEN'
+        chat_id: CHAT_ID
+        parse_mode: 'HTML'
+        message: |
+          ⚠️ <b>WARNING ALERT</b>
+
+          <b>Alert:</b> {{ .GroupLabels.alertname }}
+          <b>Component:</b> {{ .CommonLabels.component }}
+
+          {{ range .Alerts }}
+          <b>Description:</b> {{ .Annotations.description }}
+          <b>Status:</b> {{ .Status }}
+          {{ if .StartsAt }}<b>Started:</b> {{ .StartsAt.Format "2006-01-02 15:04:05" }}{{ end }}
+          {{ end }}
+        send_resolved: true
+
+  - name: 'info'
+    telegram_configs:
+      - bot_token: 'BOT_TOKEN'
+        chat_id: CHAT_ID
+        parse_mode: 'HTML'
+        message: |
+          ℹ️ <b>INFO ALERT</b>
+
+          <b>Alert:</b> {{ .GroupLabels.alertname }}
+          <b>Component:</b> {{ .CommonLabels.component }}
+
+          {{ range .Alerts }}
+          <b>Description:</b> {{ .Annotations.description }}
+          {{ end }}
+        send_resolved: true
+
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'component']
+
+  - source_match:
+      severity: 'warning'
+    target_match:
+      severity: 'info'
+    equal: ['alertname', 'component']

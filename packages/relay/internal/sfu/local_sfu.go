@@ -93,6 +93,7 @@ import (
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/utils"
 	"github.com/pion/interceptor"
@@ -408,6 +409,7 @@ func (pm *LocalSFU) DeleteSubscriber(id sockets.SocketID) {
 
 	if subscriber.pc != nil {
 		_ = subscriber.pc.Close()
+		metrics.ActivePeerConnections.Dec()
 	}
 
 	publisher, ok := pm.publishers.Load(subscriber.publisherKey)
@@ -417,6 +419,15 @@ func (pm *LocalSFU) DeleteSubscriber(id sockets.SocketID) {
 
 	for _, broadcaster := range publisher.GetBroadcasters() {
 		broadcaster.RemoveSubscriber(subscriber.pc)
+
+		localTrack := broadcaster.GetLocalTrack()
+		trackType := "unknown"
+		if localTrack.Kind() == webrtc.RTPCodecTypeVideo {
+			trackType = "video"
+		} else if localTrack.Kind() == webrtc.RTPCodecTypeAudio {
+			trackType = "audio"
+		}
+		metrics.ActiveTracks.WithLabelValues(trackType).Dec()
 	}
 
 	remainingCount := publisher.RemoveSubscriber(subscriber.pc)
@@ -533,8 +544,12 @@ func (pm *LocalSFU) validatePublisher(publisherKey string, ctx *NewSubscriberCon
 func (pm *LocalSFU) createSubscriberPeerConnection(id sockets.SocketID, streamType string) (*webrtc.PeerConnection, error) {
 	subscriberPC, err := pm.api.NewPeerConnection(pm.config.PeerConnectionConfig.WebrtcConfiguration())
 	if err != nil {
+		metrics.PeerConnectionFailuresTotal.WithLabelValues("subscriber_creation_failed").Inc()
 		return nil, fmt.Errorf("failed to create peer connection for %s: %w", id, err)
 	}
+
+	metrics.ActivePeerConnections.Inc()
+	metrics.PeerConnectionsCreatedTotal.Inc()
 
 	subscriberPeerID := fmt.Sprintf("%s_%s", id, streamType)
 	pm.setupICEStateMonitoring(subscriberPC, id, subscriberPeerID, streamType)
@@ -576,11 +591,21 @@ func (pm *LocalSFU) addTracksToSubscriber(subscriber *Subscriber, publisherKey s
 
 	tracksAdded := 0
 	for _, broadcaster := range publisher.GetBroadcasters() {
-		if _, err := subscriber.pc.AddTrack(broadcaster.GetLocalTrack()); err != nil {
+		localTrack := broadcaster.GetLocalTrack()
+		if _, err := subscriber.pc.AddTrack(localTrack); err != nil {
 			return fmt.Errorf("failed to add track: %w", err)
 		}
 		broadcaster.AddSubscriber(subscriber.pc)
 		tracksAdded++
+
+		trackType := "unknown"
+		if localTrack.Kind() == webrtc.RTPCodecTypeVideo {
+			trackType = "video"
+		} else if localTrack.Kind() == webrtc.RTPCodecTypeAudio {
+			trackType = "audio"
+		}
+		metrics.TracksAddedTotal.WithLabelValues(trackType).Inc()
+		metrics.ActiveTracks.WithLabelValues(trackType).Inc()
 	}
 
 	if tracksAdded == 0 {

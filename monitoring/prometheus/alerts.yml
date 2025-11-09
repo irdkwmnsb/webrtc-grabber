@@ -1,0 +1,113 @@
+groups:
+  - name: webrtc_grabber_alerts
+    interval: 30s
+    rules:
+      - alert: SignallingServerDown
+        expr: up{job="signalling-server"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: signalling
+        annotations:
+          summary: "Signalling server is down"
+          description: "The signalling server has been down for more than 1 minute."
+
+      - alert: HighWebSocketDisconnections
+        expr: rate(webrtc_grabber_websocket_disconnections_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: websocket
+        annotations:
+          summary: "High rate of WebSocket disconnections"
+          description: "WebSocket disconnection rate is {{ $value }} connections/sec over the last 5 minutes."
+
+      - alert: NoActiveAgents
+        expr: webrtc_grabber_active_agents == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: agents
+        annotations:
+          summary: "No active agents (grabbers)"
+          description: "There have been no active agents for more than 5 minutes."
+
+      - alert: NoActivePlayers
+        expr: webrtc_grabber_active_players == 0
+        for: 10m
+        labels:
+          severity: info
+          component: players
+        annotations:
+          summary: "No active players"
+          description: "There have been no active players for more than 10 minutes."
+
+      - alert: HighPeerConnectionFailureRate
+        expr: rate(webrtc_grabber_peer_connection_failures_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: webrtc
+        annotations:
+          summary: "High peer connection failure rate"
+          description: "Peer connection failure rate is {{ $value }} failures/sec. Reason: {{ $labels.reason }}"
+
+      - alert: PeerConnectionsStuckConnecting
+        expr: webrtc_grabber_active_peer_connections > 0 and rate(webrtc_grabber_peer_connections_created_total[5m]) == 0
+        for: 10m
+        labels:
+          severity: warning
+          component: webrtc
+        annotations:
+          summary: "Peer connections stuck"
+          description: "There are {{ $value }} active peer connections but no new connections are being created."
+
+      - alert: NoActiveTracks
+        expr: sum(webrtc_grabber_active_tracks) == 0 and webrtc_grabber_active_agents > 0
+        for: 3m
+        labels:
+          severity: warning
+          component: tracks
+        annotations:
+          summary: "No active media tracks despite active agents"
+          description: "There are active agents but no media tracks are being streamed."
+
+      - alert: HighPacketLossRate
+        expr: rate(webrtc_grabber_sfu_packets_lost_total[5m]) / rate(webrtc_grabber_sfu_packets_received_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: sfu
+        annotations:
+          summary: "High packet loss rate in SFU"
+          description: "SFU packet loss rate is {{ $value | humanizePercentage }}."
+
+      - alert: HighGoroutineCount
+        expr: webrtc_grabber_goroutines > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High number of goroutines"
+          description: "Goroutine count is {{ $value }}. Possible goroutine leak."
+
+      - alert: VeryHighGoroutineCount
+        expr: webrtc_grabber_goroutines > 5000
+        for: 2m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Very high number of goroutines"
+          description: "Goroutine count is {{ $value }}. Critical goroutine leak detected."
+
+      - alert: HighRelayICECandidateUsage
+        expr: rate(webrtc_grabber_ice_candidates_total{type="relay"}[5m]) / (rate(webrtc_grabber_ice_candidates_total[5m]) + 0.001) > 0.8
+        for: 10m
+        labels:
+          severity: info
+          component: ice
+        annotations:
+          summary: "High TURN relay usage"
+          description: "{{ $value | humanizePercentage }} of ICE candidates are relay type. Most connections are going through TURN."

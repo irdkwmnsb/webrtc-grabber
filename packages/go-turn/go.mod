@@ -2,7 +2,10 @@ module github.com/irdkwmnsb/webrtc-grabber/packages/go-turn
 
 go 1.19
 
-require github.com/pion/turn/v2 v2.0.9
+require (
+	github.com/pion/turn/v2 v2.0.9
+	github.com/prometheus/client_golang v1.19.0
+)
 
 require (
 	github.com/pion/logging v0.2.2 // indirect
