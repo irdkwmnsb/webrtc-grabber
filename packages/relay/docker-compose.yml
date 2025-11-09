@@ -1,0 +1,12 @@
+version: "3"
+
+services:
+  signaling:
+    build:
+      context: ../..
+      dockerfile: packages/relay/Dockerfile
+    container_name: webrtc-signaling
+    network_mode: "host"
+    volumes:
+      - ./conf/config.json:/app/conf/config.json:ro
+    restart: unless-stopped
