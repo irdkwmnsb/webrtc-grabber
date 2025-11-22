@@ -115,10 +115,15 @@ func (s *Storage) deletePeer(streamId sockets.SocketID) {
 // This method iterates over all peers and should complete quickly even
 // with hundreds of peers due to the simple time comparison.
 func (s *Storage) deleteOldPeers() {
+	peersToDelete := make([]sockets.SocketID, 0)
 	for peerSocketId, peer := range s.peers {
 		if peer.LastPing != nil && time.Since(*peer.LastPing).Seconds() > 60 {
-			s.deletePeer(peerSocketId)
+			peersToDelete = append(peersToDelete, peerSocketId)
 		}
+	}
+
+	for _, peerSocketId := range peersToDelete {
+		s.deletePeer(peerSocketId)
 	}
 }
 
