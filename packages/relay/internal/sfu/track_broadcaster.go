@@ -5,11 +5,11 @@ import (
 	"errors"
 	"io"
 	"log"
+	"sync"
 	"sync/atomic"
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
-	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -17,6 +17,12 @@ const (
 	rtpBufferSize   = 1500
 	packetQueueSize = 100
 )
+
+var bufferPool = sync.Pool {
+	New: func() any {
+		return make([]byte, rtpBufferSize)
+	},
+}
 
 type TrackBroadcaster struct {
 	localTrack      *webrtc.TrackLocalStaticRTP
@@ -26,7 +32,7 @@ type TrackBroadcaster struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	packetChan chan *rtp.Packet
+	packetChan chan []byte
 }
 
 func NewTrackBroadcaster(remoteTrack *webrtc.TrackRemote, publisherSocketID sockets.SocketID) (*TrackBroadcaster, error) {
@@ -46,7 +52,7 @@ func NewTrackBroadcaster(remoteTrack *webrtc.TrackRemote, publisherSocketID sock
 		remoteSSRC: uint32(remoteTrack.SSRC()),
 		ctx:        ctx,
 		cancel:     cancel,
-		packetChan: make(chan *rtp.Packet, packetQueueSize),
+		packetChan: make(chan []byte, packetQueueSize),
 	}
 
 	go broadcaster.readLoop(remoteTrack, publisherSocketID)
@@ -65,7 +71,10 @@ func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, publisherS
 		default:
 		}
 
-		pkt, _, err := remoteTrack.ReadRTP()
+		buf := bufferPool.Get().([]byte)
+		buf = buf[:cap(buf)]
+
+		n, _, err := remoteTrack.Read(buf)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				log.Printf("Publisher %s closed track", publisherSocketID)
@@ -76,11 +85,12 @@ func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, publisherS
 		}
 
 		metrics.SFUPacketsReceived.Inc()
-		metrics.SFUBytesReceived.Add(float64(len(pkt.Payload)))
+		metrics.SFUBytesReceived.Add(float64(n))
 
 		select {
-		case tb.packetChan <- pkt:
+		case tb.packetChan <- buf[:n]:
 		default:
+			bufferPool.Put(buf)
 		}
 	}
 }
@@ -91,14 +101,14 @@ func (tb *TrackBroadcaster) writeLoop() {
 		case <-tb.ctx.Done():
 			return
 		case pkt := <-tb.packetChan:
-			if err := tb.localTrack.WriteRTP(pkt); err != nil {
+			if _, err := tb.localTrack.Write(pkt); err != nil {
 				if errors.Is(err, io.ErrClosedPipe) {
 					return
 				}
 				log.Printf("Error writing to local track: %v", err)
 			} else {
 				metrics.SFUPacketsSent.Inc()
-				metrics.SFUBytesSent.Add(float64(len(pkt.Payload)))
+				metrics.SFUBytesSent.Add(float64(len(pkt)))
 			}
 		}
 	}
