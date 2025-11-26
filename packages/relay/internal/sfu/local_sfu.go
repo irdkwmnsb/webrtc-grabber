@@ -98,6 +98,7 @@ import (
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/utils"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/intervalpli"
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -592,9 +593,12 @@ func (pm *LocalSFU) addTracksToSubscriber(subscriber *Subscriber, publisherKey s
 	tracksAdded := 0
 	for _, broadcaster := range publisher.GetBroadcasters() {
 		localTrack := broadcaster.GetLocalTrack()
-		if _, err := subscriber.pc.AddTrack(localTrack); err != nil {
+		rtpSender, err := subscriber.pc.AddTrack(localTrack)
+		if err != nil {
 			return fmt.Errorf("failed to add track: %w", err)
 		}
+		go pm.processRTCPFeedback(subscriber.pc, rtpSender, publisher.pc, broadcaster.GetRemoteSSRC(), id)
+
 		broadcaster.AddSubscriber(subscriber.pc)
 		tracksAdded++
 
@@ -612,6 +616,40 @@ func (pm *LocalSFU) addTracksToSubscriber(subscriber *Subscriber, publisherKey s
 		return fmt.Errorf("no tracks were added")
 	}
 	return nil
+}
+
+func (pm *LocalSFU) processRTCPFeedback(
+	subscriberPC *webrtc.PeerConnection,
+	sender *webrtc.RTPSender,
+	publisherPC *webrtc.PeerConnection,
+	remoteSSRC uint32,
+	subscriberID sockets.SocketID,
+) {
+	rtcpBuf := make([]byte, 1500)
+
+	for {
+		n, _, err := sender.Read(rtcpBuf)
+		if err != nil {
+			return
+		}
+
+		packets, err := rtcp.Unmarshal(rtcpBuf[n:])
+		if err != nil {
+			continue
+		}
+
+		for _, pkt := range packets {
+			switch pkt.(type) {
+			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
+				log.Printf("Relaying PLI from %s to publisher for SSRC %d", subscriberID, remoteSSRC)
+				if err := publisherPC.WriteRTCP([]rtcp.Packet{
+					&rtcp.PictureLossIndication{MediaSSRC: remoteSSRC},
+				}); err != nil {
+					return
+				}
+			}
+		}
+	}
 }
 
 // completeSignaling handles the WebRTC offer/answer exchange and ICE candidate setup
