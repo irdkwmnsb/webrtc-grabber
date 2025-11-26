@@ -597,7 +597,7 @@ func (pm *LocalSFU) addTracksToSubscriber(subscriber *Subscriber, publisherKey s
 		if err != nil {
 			return fmt.Errorf("failed to add track: %w", err)
 		}
-		go pm.processRTCPFeedback(subscriber.pc, rtpSender, publisher.pc, broadcaster.GetRemoteSSRC(), id)
+		go pm.processRTCPFeedback(rtpSender, publisher.pc, broadcaster.GetRemoteSSRC(), id)
 
 		broadcaster.AddSubscriber(subscriber.pc)
 		tracksAdded++
@@ -619,7 +619,6 @@ func (pm *LocalSFU) addTracksToSubscriber(subscriber *Subscriber, publisherKey s
 }
 
 func (pm *LocalSFU) processRTCPFeedback(
-	subscriberPC *webrtc.PeerConnection,
 	sender *webrtc.RTPSender,
 	publisherPC *webrtc.PeerConnection,
 	remoteSSRC uint32,
