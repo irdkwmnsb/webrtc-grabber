@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"strings"
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 	"github.com/pion/webrtc/v4"
@@ -227,12 +228,23 @@ func parseCodecs(rawCodecs []RawCodec) []Codec {
 	result := make([]Codec, 0, len(rawCodecs))
 
 	for _, rawCodec := range rawCodecs {
-		params := webrtc.RTPCodecParameters{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:  rawCodec.Params.MimeType,
-				ClockRate: rawCodec.Params.ClockRate,
-				Channels:  rawCodec.Params.Channels,
-			},
+		capability := webrtc.RTPCodecCapability {
+			MimeType: rawCodec.Params.MimeType,
+			ClockRate: rawCodec.Params.ClockRate,
+			Channels: rawCodec.Params.Channels,
+		}
+
+		if strings.HasPrefix(strings.ToLower(rawCodec.Params.MimeType), "video/") {
+			capability.RTCPFeedback = []webrtc.RTCPFeedback {
+				{ Type: "nack" },
+				{ Type: "nack", Parameter: "pli" },
+				{Type: "ccm", Parameter: "fir"},
+				{Type: "goog-remb"},
+			}
+		}
+
+		params := webrtc.RTPCodecParameters {
+			RTPCodecCapability: capability,
 			PayloadType: webrtc.PayloadType(rawCodec.Params.PayloadType),
 		}
 

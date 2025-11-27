@@ -98,6 +98,7 @@ import (
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/utils"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/intervalpli"
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -119,7 +120,7 @@ const (
 // The setupChan is closed once setup completes, allowing waiting goroutines to proceed.
 type Publisher struct {
 	// subscribers holds all active subscriber peer connections
-	subscribers []*webrtc.PeerConnection
+	subscribers map[*webrtc.PeerConnection]struct{}
 
 	// broadcasters manages track distribution to subscribers
 	broadcasters []*TrackBroadcaster
@@ -140,7 +141,7 @@ type Publisher struct {
 // NewPublisher creates a new Publisher instance with initialized empty collections.
 func NewPublisher() *Publisher {
 	return &Publisher{
-		subscribers:  make([]*webrtc.PeerConnection, 0),
+		subscribers:  make(map[*webrtc.PeerConnection]struct{}),
 		broadcasters: make([]*TrackBroadcaster, 0),
 		setupChan:    make(chan struct{}),
 	}
@@ -151,7 +152,7 @@ func NewPublisher() *Publisher {
 func (p *Publisher) AddSubscriber(pc *webrtc.PeerConnection) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.subscribers = append(p.subscribers, pc)
+	p.subscribers[pc] = struct{}{}
 }
 
 // RemoveSubscriber removes a subscriber peer connection from the publisher's list.
@@ -159,26 +160,24 @@ func (p *Publisher) AddSubscriber(pc *webrtc.PeerConnection) {
 // This method is thread-safe.
 func (p *Publisher) RemoveSubscriber(pc *webrtc.PeerConnection) int {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+    defer p.mu.Unlock()
 
-	newSubscribers := make([]*webrtc.PeerConnection, 0, len(p.subscribers))
-	for _, sub := range p.subscribers {
-		if sub != pc {
-			newSubscribers = append(newSubscribers, sub)
-		}
-	}
-	p.subscribers = newSubscribers
-	return len(p.subscribers)
+    delete(p.subscribers, pc)
+
+    return len(p.subscribers)
 }
 
 // GetSubscribers returns a copy of the current subscribers list.
 // This method is thread-safe and returns a snapshot of subscribers.
 func (p *Publisher) GetSubscribers() []*webrtc.PeerConnection {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-	subs := make([]*webrtc.PeerConnection, len(p.subscribers))
-	copy(subs, p.subscribers)
-	return subs
+    defer p.mu.RUnlock()
+
+    subs := make([]*webrtc.PeerConnection, 0, len(p.subscribers))
+    for pc := range p.subscribers {
+        subs = append(subs, pc)
+    }
+    return subs
 }
 
 // AddBroadcaster adds a track broadcaster to the publisher.
@@ -225,7 +224,7 @@ func (p *Publisher) Close() {
 		broadcaster.Stop()
 	}
 
-	for _, sub := range p.subscribers {
+	for sub := range p.subscribers {
 		_ = sub.Close()
 	}
 
@@ -585,6 +584,7 @@ func (pm *LocalSFU) addTracksToSubscriber(subscriber *Subscriber, publisherKey s
 	if !ok {
 		return fmt.Errorf("publisher not found: %s", publisherKey)
 	}
+	publisher.AddSubscriber(subscriber.pc)
 
 	trackCount := publisher.BroadcasterCount()
 	log.Printf("Adding %d tracks to subscriber %s", trackCount, id)
@@ -592,9 +592,12 @@ func (pm *LocalSFU) addTracksToSubscriber(subscriber *Subscriber, publisherKey s
 	tracksAdded := 0
 	for _, broadcaster := range publisher.GetBroadcasters() {
 		localTrack := broadcaster.GetLocalTrack()
-		if _, err := subscriber.pc.AddTrack(localTrack); err != nil {
+		rtpSender, err := subscriber.pc.AddTrack(localTrack)
+		if err != nil {
 			return fmt.Errorf("failed to add track: %w", err)
 		}
+		go pm.processRTCPFeedback(rtpSender, publisher.pc, broadcaster.GetRemoteSSRC(), id)
+
 		broadcaster.AddSubscriber(subscriber.pc)
 		tracksAdded++
 
@@ -612,6 +615,39 @@ func (pm *LocalSFU) addTracksToSubscriber(subscriber *Subscriber, publisherKey s
 		return fmt.Errorf("no tracks were added")
 	}
 	return nil
+}
+
+func (pm *LocalSFU) processRTCPFeedback(
+	sender *webrtc.RTPSender,
+	publisherPC *webrtc.PeerConnection,
+	remoteSSRC uint32,
+	subscriberID sockets.SocketID,
+) {
+	rtcpBuf := make([]byte, 1500)
+
+	for {
+		n, _, err := sender.Read(rtcpBuf)
+		if err != nil {
+			return
+		}
+
+		packets, err := rtcp.Unmarshal(rtcpBuf[n:])
+		if err != nil {
+			continue
+		}
+
+		for _, pkt := range packets {
+			switch pkt.(type) {
+			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
+				log.Printf("Relaying PLI from %s to publisher for SSRC %d", subscriberID, remoteSSRC)
+				if err := publisherPC.WriteRTCP([]rtcp.Packet{
+					&rtcp.PictureLossIndication{MediaSSRC: remoteSSRC},
+				}); err != nil {
+					return
+				}
+			}
+		}
+	}
 }
 
 // completeSignaling handles the WebRTC offer/answer exchange and ICE candidate setup
@@ -857,6 +893,14 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 	log.Printf("Setting up publisher peer connection for %s, streamType=%s", publisherSocketID, streamType)
 
 	defer func() {
+        if r := recover(); r != nil {
+            log.Printf("CRITICAL PANIC in setupGrabberPeerConnection: %v\nstack: %s", r, debug.Stack())
+            atomic.StoreInt32(&publisher.setupInProgress, 0)
+            pm.cleanupPublisher(publisherKey)
+        }
+    }()
+
+	defer func() {
 		atomic.StoreInt32(&publisher.setupInProgress, 0)
 		close(publisher.setupChan)
 	}()
@@ -936,7 +980,7 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		log.Printf("ICE connection state for publisher %s: %s", publisherSocketID, state.String())
-		if state == webrtc.ICEConnectionStateDisconnected || state == webrtc.ICEConnectionStateFailed {
+		if state == webrtc.ICEConnectionStateClosed || state == webrtc.ICEConnectionStateFailed {
 			log.Printf("Grabber %s disconnected or failed, cleaning up", publisherKey)
 			pm.cleanupPublisher(publisherKey)
 		}
