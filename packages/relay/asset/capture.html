@@ -82,11 +82,6 @@
         aspectRatio: 16 / 9,
         frameRate: { ideal: 30, max: 30 }
     };
-    const webcamAudioConstraint = {
-        echoCancellation: true,
-        noiseSuppression: true,
-        sampleRate: 48000
-    };
     const desktopConstraint = {
         video: {
             displaySurface: "window",
@@ -215,13 +210,6 @@
                 const options = {};
                 if (mimeType) {
                     options.mimeType = mimeType;
-                }
-                
-                if (streamKey === 'desktop') {
-                    options.videoBitsPerSecond = 2500000; // 2.5 Mbps
-                } else if (streamKey === 'webcam') {
-                    options.videoBitsPerSecond = 1500000; // 1.5 Mbps
-                    options.audioBitsPerSecond = 128000;  // 128 kbps
                 }
                 
                 let mediaRecorder;
@@ -389,8 +377,9 @@
 
         const webcamStream = await navigator.mediaDevices.getUserMedia({
             video: webcamConstraint,
-            audio: webcamAudioConstraint,
+            audio: true,
         }).catch(() => undefined);
+        
         if (webcamStream) {
             detectedStreams["webcam"] = webcamStream;
         }
