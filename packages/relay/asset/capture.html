@@ -167,17 +167,7 @@
         }
     }
 
-function createSilentAudioTrack() {
-    const ctx = new AudioContext();
-    const oscillator = ctx.createOscillator();
-    const dst = ctx.createMediaStreamDestination();
-    oscillator.connect(dst);
-    oscillator.start();
-    const track = dst.stream.getAudioTracks()[0];
-    track.enabled = false; // Mute it
-    console.log('Created silent audio track');
-    return track;
-}
+
 
 class RecordingManager {
     constructor() {
@@ -186,10 +176,9 @@ class RecordingManager {
             recordId: null,
             recordedChunks: new Map(),
         };
-        this.silentAudioTrack = null;
     }
 
-    getSupportedMimeType() {
+    getSupportedMimeType(isAudioEnabled) {
         const types = [
             'video/webm;codecs=vp8,opus',
             'video/webm;codecs=vp8',
@@ -198,6 +187,9 @@ class RecordingManager {
         
         for (const type of types) {
             if (MediaRecorder.isTypeSupported(type)) {
+                if (type.includes("opus") && !isAudioEnabled) {
+                    continue;
+                }
                 console.log(`Using mime type: ${type}`);
                 return type;
             }
@@ -247,12 +239,8 @@ class RecordingManager {
             
             if (streamKey === 'desktop' && stream.getAudioTracks().length === 0) {
                 console.log('Desktop has no audio, adding silent track');
-                if (!this.silentAudioTrack || this.silentAudioTrack.readyState === 'ended') {
-                    this.silentAudioTrack = createSilentAudioTrack();
-                }
                 recordStream = new MediaStream([
                     ...stream.getVideoTracks(),
-                    this.silentAudioTrack
                 ]);
                 console.log('Created new stream with silent audio');
             }
