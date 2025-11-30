@@ -54,6 +54,15 @@
         #captureButton.active:hover {
             background: #1eb11c;
         }
+
+        #captureButton.recording {
+            border-color: #ff0000;
+            color: #ff0000;
+        }
+
+        #captureButton.recording:hover {
+            background: #ff0000;
+        }
     </style>
     <script src="/sockets.js"></script>
 </head>
@@ -88,6 +97,7 @@
         constructor(peerName) {
             this.peerName = peerName;
             this.target = new EventTarget();
+            this.signallingUrl = window.location.origin;
 
             const socketPath = "/ws/peers/" + peerName;
 
@@ -105,14 +115,36 @@
             const player_ice_handle = async function ({ ice: { peerId, candidate } }) {
                 this.target.dispatchEvent(new CustomEvent('player_ice', { detail: { peerId, candidate } }));
             }
+            const record_start_handle = async function ({ recordStart: { recordId, timeout } }) {
+                this.target.dispatchEvent(new CustomEvent('record_start', { detail: { recordId, timeout } }));
+            }
+            const record_stop_handle = async function ({ recordStop: { recordId } }) {
+                this.target.dispatchEvent(new CustomEvent('record_stop', { detail: { recordId } }));
+            }
+            const record_upload_handle = async function ({ recordUpload: { recordId } }) {
+                this.target.dispatchEvent(new CustomEvent('record_upload', { detail: { recordId } }));
+            }
+            const players_disconnect_handle = async function ({ event }) {
+                this.target.dispatchEvent(new CustomEvent("players_disconnect", { detail: {} }));
+            }
 
             this.socket.on("init_peer", init_peer_handle.bind(this));
             this.socket.on("offer", offer_handle.bind(this));
             this.socket.on("player_ice", player_ice_handle.bind(this));
+            this.socket.on("record_start", record_start_handle.bind(this));
+            this.socket.on("record_stop", record_stop_handle.bind(this));
+            this.socket.on("record_upload", record_upload_handle.bind(this));
+            this.socket.on("players_disconnect", players_disconnect_handle.bind(this));
         }
 
-        send_ping(connectionsCount, streamTypes) {
-            this.socket.emit("ping", { ping: { connectionsCount: connectionsCount, streamTypes: streamTypes } });
+        send_ping(connectionsCount, streamTypes, currentRecordId) {
+            this.socket.emit("ping", { 
+                ping: { 
+                    connectionsCount: connectionsCount, 
+                    streamTypes: streamTypes,
+                    currentRecordId: currentRecordId
+                } 
+            });
         }
 
         send_offer_answer(playerId, answer) {
@@ -122,8 +154,261 @@
         send_grabber_ice(peerId, candidate) {
             this.socket.emit("grabber_ice", { ice: { peerId, candidate } });
         }
+
+        async record_upload(fileName, fileBlob) {
+            const formData = new FormData();
+            formData.append('file', fileBlob, fileName);
+            
+            const url = `${this.signallingUrl}/api/agent/${this.peerName}/record_upload`;
+            return fetch(url, {
+                method: "POST",
+                body: formData,
+            });
+        }
     }
 
+function createSilentAudioTrack() {
+    const ctx = new AudioContext();
+    const oscillator = ctx.createOscillator();
+    const dst = ctx.createMediaStreamDestination();
+    oscillator.connect(dst);
+    oscillator.start();
+    const track = dst.stream.getAudioTracks()[0];
+    track.enabled = false; // Mute it
+    console.log('Created silent audio track');
+    return track;
+}
+
+class RecordingManager {
+    constructor() {
+        this.activeRecording = {
+            recorders: [],
+            recordId: null,
+            recordedChunks: new Map(),
+        };
+        this.silentAudioTrack = null;
+    }
+
+    getSupportedMimeType() {
+        const types = [
+            'video/webm;codecs=vp8,opus',
+            'video/webm;codecs=vp8',
+            'video/webm',
+        ];
+        
+        for (const type of types) {
+            if (MediaRecorder.isTypeSupported(type)) {
+                console.log(`Using mime type: ${type}`);
+                return type;
+            }
+        }
+        
+        console.warn('No supported mime type found, using default');
+        return '';
+    }
+
+    async waitForStreamReady(stream, streamKey) {
+        const videoTracks = stream.getVideoTracks();
+        if (videoTracks.length === 0) {
+            console.warn(`No video tracks in ${streamKey}`);
+            return false;
+        }
+
+        const track = videoTracks[0];
+        console.log(`Waiting for ${streamKey} track readyState: ${track.readyState}`);
+        
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        if (track.readyState !== 'live') {
+            console.warn(`${streamKey} track not live: ${track.readyState}`);
+            return false;
+        }
+        
+        return true;
+    }
+
+    async startRecording(recordId, timeout, streams, client) {
+        this.stopRecording(this.activeRecording.recordId);
+        
+        this.activeRecording.recordId = recordId;
+        this.activeRecording.recorders = [];
+        this.activeRecording.recordedChunks.clear();
+
+        const mimeType = this.getSupportedMimeType();
+
+        for (const [streamKey, stream] of Object.entries(streams)) {
+            const isReady = await this.waitForStreamReady(stream, streamKey);
+            if (!isReady) {
+                console.error(`Stream ${streamKey} not ready, skipping`);
+                continue;
+            }
+
+            let recordStream = stream;
+            
+            if (streamKey === 'desktop' && stream.getAudioTracks().length === 0) {
+                console.log('Desktop has no audio, adding silent track');
+                if (!this.silentAudioTrack || this.silentAudioTrack.readyState === 'ended') {
+                    this.silentAudioTrack = createSilentAudioTrack();
+                }
+                recordStream = new MediaStream([
+                    ...stream.getVideoTracks(),
+                    this.silentAudioTrack
+                ]);
+                console.log('Created new stream with silent audio');
+            }
+
+            const chunks = [];
+            this.activeRecording.recordedChunks.set(streamKey, chunks);
+
+            console.log(`Creating recorder for ${streamKey} with mime type: ${mimeType}`);
+            
+            const options = {};
+            if (mimeType) {
+                options.mimeType = mimeType;
+            }
+            
+            let mediaRecorder;
+            try {
+                mediaRecorder = new MediaRecorder(recordStream, options);
+            } catch (e) {
+                console.error(`Failed to create MediaRecorder for ${streamKey}:`, e);
+                try {
+                    mediaRecorder = new MediaRecorder(recordStream);
+                    console.log(`Created MediaRecorder for ${streamKey} with default options`);
+                } catch (e2) {
+                    console.error(`Failed to create MediaRecorder for ${streamKey} with defaults:`, e2);
+                    continue;
+                }
+            }
+
+            mediaRecorder.addEventListener('dataavailable', event => {
+                if (event.data && event.data.size > 0) {
+                    chunks.push(event.data);
+                    console.log(`✓ Chunk received for ${streamKey}: ${event.data.size} bytes (total chunks: ${chunks.length})`);
+                } else {
+                    console.warn(`Empty chunk received for ${streamKey}`, event.data);
+                }
+            });
+
+            mediaRecorder.addEventListener('start', () => {
+                console.log(`MediaRecorder STARTED for ${streamKey}, state: ${mediaRecorder.state}`);
+            });
+
+            mediaRecorder.addEventListener('stop', () => {
+                const totalSize = chunks.reduce((sum, chunk) => sum + chunk.size, 0);
+                console.log(`Recording STOPPED for ${streamKey}, total chunks: ${chunks.length}, total size: ${totalSize} bytes`);
+            });
+
+            mediaRecorder.addEventListener('error', (event) => {
+                console.error(`MediaRecorder ERROR for ${streamKey}:`, event.error);
+            });
+
+            const videoTracks = recordStream.getVideoTracks();
+            const audioTracks = recordStream.getAudioTracks();
+            console.log(`${streamKey} recording stream - video tracks: ${videoTracks.length}, audio tracks: ${audioTracks.length}`);
+            videoTracks.forEach(track => {
+                console.log(`  Video: ${track.label}, enabled: ${track.enabled}, readyState: ${track.readyState}`);
+            });
+            audioTracks.forEach(track => {
+                console.log(`  Audio: ${track.label}, enabled: ${track.enabled}, readyState: ${track.readyState}`);
+            });
+
+            try {
+                console.log(`Starting recorder for ${streamKey} with 1000ms timeslice...`);
+                mediaRecorder.start(1000);
+                this.activeRecording.recorders.push(mediaRecorder);
+                console.info(`✓ Started recording ${recordId} [${streamKey}], initial state: ${mediaRecorder.state}`);
+                
+                setTimeout(() => {
+                    console.log(`${streamKey} recorder state after 200ms: ${mediaRecorder.state}`);
+                }, 200);
+            } catch (e) {
+                console.error(`Failed to start recording for ${streamKey}:`, e);
+            }
+        }
+
+        if (this.activeRecording.recorders.length === 0) {
+            console.error('No recorders started!');
+            this.activeRecording.recordId = null;
+            return;
+        }
+
+        console.log(`Successfully started ${this.activeRecording.recorders.length} recorder(s)`);
+
+        setTimeout(() => {
+            console.log(`Timeout reached (${timeout}ms), stopping recording ${recordId}`);
+            this.stopRecording(recordId);
+        }, timeout);
+    }
+
+    stopRecording(recordId) {
+        if (this.activeRecording.recordId === null || 
+            this.activeRecording.recordId !== recordId) {
+            console.log(`Not stopping recording: current=${this.activeRecording.recordId}, requested=${recordId}`);
+            return;
+        }
+
+        console.log(`Stopping ${this.activeRecording.recorders.length} recorders for ${recordId}`);
+        
+        this.activeRecording.recorders.forEach((r, index) => {
+            try {
+                console.log(`Recorder ${index} state before stop: ${r.state}`);
+                if (r.state !== 'inactive') {
+                    console.log(`Stopping recorder ${index}`);
+                    r.stop();
+                } else {
+                    console.log(`Recorder ${index} already inactive`);
+                }
+            } catch (e) {
+                console.error(`Error stopping recorder ${index}:`, e);
+            }
+        });
+        
+        this.activeRecording.recorders = [];
+        const stoppedRecordId = this.activeRecording.recordId;
+        this.activeRecording.recordId = null;
+        
+        console.info(`Stopped recording ${stoppedRecordId}`);
+    }
+
+    async uploadRecordings(recordId, client) {
+        console.log('Waiting 1 second for final chunks...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        const chunksMap = new Map(this.activeRecording.recordedChunks);
+        
+        if (!chunksMap.size) {
+            console.warn('No recordings to upload');
+            return;
+        }
+
+        console.log(`Uploading recordings for ${recordId}:`, 
+            Array.from(chunksMap.entries()).map(([k, v]) => `${k}: ${v.length} chunks`));
+
+        for (const [streamKey, chunks] of chunksMap.entries()) {
+            if (chunks.length === 0) {
+                console.warn(`No chunks for ${streamKey}, skipping upload`);
+                continue;
+            }
+
+            const totalSize = chunks.reduce((sum, chunk) => sum + chunk.size, 0);
+            const blob = new Blob(chunks, { type: 'video/webm' });
+            const fileName = `${recordId}_${streamKey}.webm`;
+            
+            console.log(`Uploading ${fileName}: ${chunks.length} chunks, ${blob.size} bytes (sum: ${totalSize})`);
+            
+            try {
+                const response = await client.record_upload(fileName, blob);
+                const text = await response.text();
+                console.log(`✓ Upload ${fileName} response: ${text}`);
+            } catch (e) {
+                console.error(`Failed to upload ${fileName}: ${e}`);
+            }
+        }
+        
+        this.activeRecording.recordedChunks.clear();
+    }
+}
     const extractArguments = () => {
         const params = new URLSearchParams(window.location.search);
         if (!params.has("peerName")) {
@@ -182,6 +467,8 @@
             captureButton.innerText = "connecting ...";
         } else if (newState === "active") {
             captureButton.innerText = "OK";
+        } else if (newState === "recording") {
+            captureButton.innerText = "Recording";
         }
     }
 
@@ -191,11 +478,13 @@
 
         const streams = await detectStreams();
         const pcs = new Map();
+        const recordingManager = new RecordingManager();
         let peerConnectionConfig = undefined;
         let pingTimerId = undefined;
 
         updateState("connecting");
         const client = new GrabberCaptureClient(connectionArgs.peerName);
+        
         client.target.addEventListener("init_peer", async ({ detail: { pcConfig, pingInterval } }) => {
             peerConnectionConfig = pcConfig;
             pingInterval = pingInterval ?? 3000;
@@ -204,7 +493,7 @@
             }
             pingTimerId = setInterval(() => {
                 console.log("ping");
-                client.send_ping(pcs.size, Object.keys(streams));
+                client.send_ping(pcs.size, Object.keys(streams), recordingManager.activeRecording.recordId);
             }, pingInterval);
             console.log(`init peer (pingInterval = ${pingInterval})`);
             updateState("active");
@@ -223,13 +512,13 @@
                     pc.addTrack(track, stream);
                 });
             } else {
-                console.warn(`No surch ${streamType} as captured stream`);
+                console.warn(`No such ${streamType} as captured stream`);
             }
 
             pc.addEventListener("icecandidate", (event) => {
                 console.log(`send ice for player ${playerId}`);
                 client.send_grabber_ice(playerId, event.candidate);
-            })
+            });
 
             pc.addEventListener('connectionstatechange', ({ target: connection }) => {
                 console.log(`change player ${playerId} connection state ${connection.connectionState}`);
@@ -251,6 +540,36 @@
         client.target.addEventListener('player_ice', async ({ detail: { peerId, candidate } }) => {
             pcs.get(peerId).addIceCandidate(candidate)
                 .then(() => console.log(`add player_ice from ${peerId}`));
+        });
+
+        client.target.addEventListener('record_start', async ({ detail: { recordId, timeout } }) => {
+    console.log(`Start recording: ${recordId}, timeout: ${timeout}ms`);
+    updateState("recording");
+    await recordingManager.startRecording(recordId, timeout, streams, client);
+});
+        client.target.addEventListener('record_stop', async ({ detail: { recordId } }) => {
+            console.log(`Stop recording: ${recordId}`);
+            recordingManager.stopRecording(recordId);
+            updateState("active");
+        });
+
+        client.target.addEventListener('record_upload', async ({ detail: { recordId } }) => {
+            console.log(`Upload recording: ${recordId}`);
+            await recordingManager.uploadRecordings(recordId, client);
+        });
+
+        client.target.addEventListener('players_disconnect', async () => {
+            console.log("Players disconnected");
+            pcs.forEach((connection, playerId) => {
+                try {
+                    connection.close();
+                    console.log(`Closed connection for ${playerId}`);
+                } catch (e) {
+                    console.error(`Failed to close connection for ${playerId}`);
+                }
+            });
+            pcs.clear();
+            recordingManager.stopRecording(recordingManager.activeRecording.recordId);
         });
     };
 
