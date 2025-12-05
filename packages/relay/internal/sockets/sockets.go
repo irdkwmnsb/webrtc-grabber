@@ -2,6 +2,7 @@ package sockets
 
 import (
 	"sync"
+	"time"
 
 	"github.com/gofiber/contrib/websocket"
 )
@@ -20,9 +21,15 @@ type socketImpl struct {
 }
 
 func NewSocket(ws *websocket.Conn) *socketImpl {
-	return &socketImpl{
+	s := &socketImpl{
 		ws: ws,
 	}
+	ws.SetPingHandler(func(appData string) error {
+		s.mx.Lock()
+		defer s.mx.Unlock()
+		return s.ws.WriteControl(websocket.PingMessage, []byte(appData), time.Now().Add(time.Second))
+	})
+	return s
 }
 
 func (s *socketImpl) Close() error {

@@ -384,7 +384,7 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 		metrics.ActiveWebSocketConnections.Dec()
 		metrics.WebSocketDisconnectionsTotal.Inc()
 	}()
-	newC := sockets.NewSocket(c)
+	newC := s.playersSockets.AddSocket(c)
 
 	var message api.PlayerMessage
 	sendPeerStatus := func() {
@@ -450,7 +450,7 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.playersSockets.AddSocket(c)
-	newC := sockets.NewSocket(c)
+	newC := s.playersSockets.AddSocket(c)
 	log.Printf("authorized %s", socketID)
 
 	metrics.ActivePlayers.Inc()
@@ -544,7 +544,7 @@ func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 	log.Printf("EVENT: %v, STREAM TYPE: %v", m.Event, m.Offer.StreamType)
 	switch m.Event {
 	case api.PlayerMessageEventPong:
-		log.Printf("Received pong from player %s", id)
+		// log.Printf("Received pong from player %s", id)
 		return nil
 	case api.PlayerMessageEventOffer:
 		if m.Offer == nil {
@@ -644,7 +644,7 @@ func (s *Server) setupGrabberSockets() {
 func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.grabberSockets.AddSocket(c)
-	newC := sockets.NewSocket(c)
+	newC := s.grabberSockets.AddSocket(c)
 
 	metrics.ActiveAgents.Inc()
 	metrics.AgentsRegisteredTotal.Inc()
