@@ -160,24 +160,24 @@ func (p *Publisher) AddSubscriber(pc *webrtc.PeerConnection) {
 // This method is thread-safe.
 func (p *Publisher) RemoveSubscriber(pc *webrtc.PeerConnection) int {
 	p.mu.Lock()
-    defer p.mu.Unlock()
+	defer p.mu.Unlock()
 
-    delete(p.subscribers, pc)
+	delete(p.subscribers, pc)
 
-    return len(p.subscribers)
+	return len(p.subscribers)
 }
 
 // GetSubscribers returns a copy of the current subscribers list.
 // This method is thread-safe and returns a snapshot of subscribers.
 func (p *Publisher) GetSubscribers() []*webrtc.PeerConnection {
 	p.mu.RLock()
-    defer p.mu.RUnlock()
+	defer p.mu.RUnlock()
 
-    subs := make([]*webrtc.PeerConnection, 0, len(p.subscribers))
-    for pc := range p.subscribers {
-        subs = append(subs, pc)
-    }
-    return subs
+	subs := make([]*webrtc.PeerConnection, 0, len(p.subscribers))
+	for pc := range p.subscribers {
+		subs = append(subs, pc)
+	}
+	return subs
 }
 
 // AddBroadcaster adds a track broadcaster to the publisher.
@@ -893,12 +893,12 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 	log.Printf("Setting up publisher peer connection for %s, streamType=%s", publisherSocketID, streamType)
 
 	defer func() {
-        if r := recover(); r != nil {
-            log.Printf("CRITICAL PANIC in setupGrabberPeerConnection: %v\nstack: %s", r, debug.Stack())
-            atomic.StoreInt32(&publisher.setupInProgress, 0)
-            pm.cleanupPublisher(publisherKey)
-        }
-    }()
+		if r := recover(); r != nil {
+			log.Printf("CRITICAL PANIC in setupGrabberPeerConnection: %v\nstack: %s", r, debug.Stack())
+			atomic.StoreInt32(&publisher.setupInProgress, 0)
+			pm.cleanupPublisher(publisherKey)
+		}
+	}()
 
 	defer func() {
 		atomic.StoreInt32(&publisher.setupInProgress, 0)
@@ -946,7 +946,7 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 		log.Printf("Track received: ID=%s, Kind=%s, Codec=%s, PayloadType=%d",
 			remoteTrack.ID(), remoteTrack.Kind(), remoteTrack.Codec().MimeType, remoteTrack.Codec().PayloadType)
 
-		broadcaster, err := NewTrackBroadcaster(remoteTrack, publisherSocketID)
+		broadcaster, err := NewTrackBroadcaster(streamType, remoteTrack, publisherSocketID)
 		if err != nil {
 			log.Printf("Failed to create broadcaster for publisher %s: %v", publisherSocketID, err)
 			return
