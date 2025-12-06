@@ -111,3 +111,33 @@ groups:
         annotations:
           summary: "High TURN relay usage"
           description: "{{ $value | humanizePercentage }} of ICE candidates are relay type. Most connections are going through TURN."
+
+      - alert: PeerWasDisconnected
+        expr: time() - webrtc_grabber_last_pings >= 15
+        for: 5s
+        labels:
+          severity: warning
+          component: agents
+        annotations:
+          summary: "Peer {{ $labels.peer }} was disconnected"
+          description: "Peer {{ $labels.peer }} did not send ping for too long."
+
+      - alert: StreamWasLost
+        expr: time() - webrtc_grabber_is_stream_active >= 15
+        for: 5s
+        labels:
+          severity: warning
+          component: agents
+        annotations:
+          summary: "Peer {{ $labels.peer }}'s {{ $labels.type }} stream was lost."
+          description: "Peer {{ $labels.peer }} did not send {{ $labels.type }} stream for too long."
+
+      - alert: SoundWasLost
+        expr: time() - webrtc_grabber_last_audio_packet >= 15
+        for: 5s
+        labels:
+          severity: warning
+          component: agents
+        annotations:
+          summary: "No sound from {{ $labels.peer }}."
+          description: "Peer {{ $labels.peer }} did not send audio packets for too long."

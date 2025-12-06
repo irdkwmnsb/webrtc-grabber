@@ -7,6 +7,7 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
@@ -18,13 +19,15 @@ const (
 	packetQueueSize = 100
 )
 
-var bufferPool = sync.Pool {
+var bufferPool = sync.Pool{
 	New: func() any {
 		return make([]byte, rtpBufferSize)
 	},
 }
 
 type TrackBroadcaster struct {
+	publisher       sockets.SocketID
+	streamType      string
 	localTrack      *webrtc.TrackLocalStaticRTP
 	remoteSSRC      uint32
 	subscriberCount int32
@@ -35,7 +38,7 @@ type TrackBroadcaster struct {
 	packetChan chan []byte
 }
 
-func NewTrackBroadcaster(remoteTrack *webrtc.TrackRemote, publisherSocketID sockets.SocketID) (*TrackBroadcaster, error) {
+func NewTrackBroadcaster(streamType string, remoteTrack *webrtc.TrackRemote, publisherSocketID sockets.SocketID) (*TrackBroadcaster, error) {
 	localTrack, err := webrtc.NewTrackLocalStaticRTP(
 		remoteTrack.Codec().RTPCodecCapability,
 		remoteTrack.ID(),
@@ -48,6 +51,8 @@ func NewTrackBroadcaster(remoteTrack *webrtc.TrackRemote, publisherSocketID sock
 	ctx, cancel := context.WithCancel(context.Background())
 
 	broadcaster := &TrackBroadcaster{
+		publisher:  publisherSocketID,
+		streamType: streamType,
 		localTrack: localTrack,
 		remoteSSRC: uint32(remoteTrack.SSRC()),
 		ctx:        ctx,
@@ -86,6 +91,9 @@ func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, publisherS
 
 		metrics.SFUPacketsReceived.Inc()
 		metrics.SFUBytesReceived.Add(float64(n))
+		if remoteTrack.Kind() == webrtc.RTPCodecTypeAudio {
+			metrics.LastAudioPacket.WithLabelValues(string(publisherSocketID)).Set(float64(time.Now().Unix()))
+		}
 
 		select {
 		case tb.packetChan <- buf[:n]:

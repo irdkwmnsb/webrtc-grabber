@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 )
 
@@ -151,6 +152,12 @@ func (s *Storage) ping(socketId sockets.SocketID, status api.PeerStatus) {
 
 	peer := s.peers[socketId]
 	peer.LastPing = &now
+
+	metrics.LastPings.WithLabelValues(peer.Name).Set(float64(now.Unix()))
+	for _, t := range status.StreamTypes {
+		metrics.IsStreamActive.WithLabelValues(peer.Name, string(t)).Set(float64(now.Unix()))
+	}
+
 	peer.ConnectionsCount = status.ConnectionsCount
 	peer.StreamTypes = status.StreamTypes
 	peer.CurrentRecordId = status.CurrentRecordId
