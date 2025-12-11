@@ -111,8 +111,8 @@ var (
 		Help: "Unix-time of last audio packet",
 	}, []string{"peer"})
 
-	IsStreamActive = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "webrtc_grabber_is_stream_active",
-		Help: "Whether peer has subscribers on the stream type",
+	LastStreams = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "webrtc_grabber_last_streams",
+		Help: "Unix-time of stream types from peer's ping",
 	}, []string{"peer", "type"})
 )

@@ -155,7 +155,7 @@ func (s *Storage) ping(socketId sockets.SocketID, status api.PeerStatus) {
 
 	metrics.LastPings.WithLabelValues(peer.Name).Set(float64(now.Unix()))
 	for _, t := range status.StreamTypes {
-		metrics.IsStreamActive.WithLabelValues(peer.Name, string(t)).Set(float64(now.Unix()))
+		metrics.LastStreams.WithLabelValues(peer.Name, string(t)).Set(float64(now.Unix()))
 	}
 
 	peer.ConnectionsCount = status.ConnectionsCount
