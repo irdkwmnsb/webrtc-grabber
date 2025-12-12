@@ -10,6 +10,7 @@ import (
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 	"github.com/pion/webrtc/v4"
+	"gopkg.in/yaml.v3"
 )
 
 // ServerConfig holds the complete server configuration loaded from conf/config.json.
@@ -64,28 +65,36 @@ type ServerConfig struct {
 	WebcamTrackCount int    `json:"webcamTrackCount"`
 	RecordTimeout    uint   `json:"recordTimeout"`
 	RecordStorageDir string `json:"recordStorageDirectory"`
+
+	// WebRTCPortMin is the minimum UDP port for WebRTC connections.
+	// If 0, the system will use any available port.
+	WebRTCPortMin uint16 `json:"webrtcPortMin"`
+
+	// WebRTCPortMax is the maximum UDP port for WebRTC connections.
+	// Must be greater than WebRTCPortMin if both are specified.
+	WebRTCPortMax uint16 `json:"webrtcPortMax"`
 }
 
-// RawCodec represents the JSON structure for codec configuration before conversion
-// to WebRTC types. This intermediate representation allows for custom JSON unmarshaling.
+// RawCodec represents the JSON/YAML structure for codec configuration before conversion
+// to WebRTC types. This intermediate representation allows for custom JSON/YAML unmarshaling.
 type RawCodec struct {
 	// Params contains the codec parameters
 	Params struct {
 		// MimeType identifies the codec (e.g., "video/VP8", "audio/opus")
-		MimeType string `json:"mimeType"`
+		MimeType string `json:"mimeType" yaml:"mimeType"`
 
 		// ClockRate is the codec's clock rate in Hz (e.g., 90000 for video, 48000 for audio)
-		ClockRate uint32 `json:"clockRate"`
+		ClockRate uint32 `json:"clockRate" yaml:"clockRate"`
 
 		// PayloadType is the RTP payload type identifier (96-127 for dynamic types)
-		PayloadType uint8 `json:"payloadType"`
+		PayloadType uint8 `json:"payloadType" yaml:"payloadType"`
 
 		// Channels specifies the number of audio channels (e.g., 2 for stereo, 0 for video)
-		Channels uint16 `json:"channels"`
-	} `json:"params"`
+		Channels uint16 `json:"channels" yaml:"channels"`
+	} `json:"params" yaml:"params"`
 
 	// Type is the codec type as a string ("video" or "audio")
-	Type string `json:"type"`
+	Type string `json:"type" yaml:"type"`
 }
 
 // Codec represents a fully parsed codec configuration ready for use with WebRTC API.
@@ -97,80 +106,87 @@ type Codec struct {
 	Type webrtc.RTPCodecType `json:"type"`
 }
 
-// RawServerConfig is the intermediate structure used when parsing the JSON configuration file.
+// RawServerConfig is the intermediate structure used when parsing the JSON/YAML configuration file.
 // It uses string types for fields that need validation or conversion (like IP networks).
 type RawServerConfig struct {
-	PlayerCredential     *string                  `json:"adminCredential"`
-	Participants         []string                 `json:"participants"`
-	AdminsRawNetworks    []string                 `json:"adminsNetworks"`
-	PeerConnectionConfig api.PeerConnectionConfig `json:"peerConnectionConfig"`
-	PublicIP             string                   `json:"publicIp"`
-	GrabberPingInterval  int                      `json:"grabberPingInterval"`
-	ServerPort           int                      `json:"serverPort"`
-	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile"`
-	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile"`
-	Codecs               []RawCodec               `json:"codecs"`
-	WebcamTrackCount     int                      `json:"webcamTrackCount"`
-	RecordTimeout        uint                     `json:"recordTimeout"`
-	RecordStorageDir     string                   `json:"RecordStorageDirectory"`
+	PlayerCredential     *string                  `json:"adminCredential" yaml:"adminCredential"`
+	Participants         []string                 `json:"participants" yaml:"participants"`
+	AdminsRawNetworks    []string                 `json:"adminsNetworks" yaml:"adminsNetworks"`
+	PeerConnectionConfig api.PeerConnectionConfig `json:"peerConnectionConfig" yaml:"peerConnectionConfig"`
+	PublicIP             string                   `json:"publicIp" yaml:"publicIp"`
+	GrabberPingInterval  int                      `json:"grabberPingInterval" yaml:"grabberPingInterval"`
+	ServerPort           int                      `json:"serverPort" yaml:"serverPort"`
+	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile" yaml:"serverTLSCrtFile"`
+	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile" yaml:"serverTLSKeyFile"`
+	Codecs               []RawCodec               `json:"codecs" yaml:"codecs"`
+	WebcamTrackCount     int                      `json:"webcamTrackCount" yaml:"webcamTrackCount"`
+	RecordTimeout        uint                     `json:"recordTimeout" yaml:"recordTimeout"`
+	RecordStorageDir     string                   `json:"RecordStorageDirectory" yaml:"recordStorageDirectory"`
+	WebRTCPortMin        uint16                   `json:"webrtcPortMin" yaml:"webrtcPortMin"`
+	WebRTCPortMax        uint16                   `json:"webrtcPortMax" yaml:"webrtcPortMax"`
 }
 
-// LoadServerConfig reads and parses the server configuration from conf/config.json.
+// LoadServerConfig reads and parses the server configuration from conf/config.yaml or conf/config.json.
+// It tries YAML first for backward compatibility, then falls back to JSON if YAML is not found.
 // It performs validation and applies default values for optional settings.
 //
 // The function:
-//  1. Opens and reads conf/config.json
-//  2. Parses JSON into RawServerConfig
+//  1. Tries to open conf/config.yaml, falls back to conf/config.json
+//  2. Parses YAML/JSON into RawServerConfig
 //  3. Applies defaults: ServerPort (8000), WebcamTrackCount (2)
 //  4. Validates and parses AdminsRawNetworks into CIDR prefixes
 //  5. Converts RawCodec structures to WebRTC Codec types
+//  6. Validates WebRTC port range if specified
 //
 // Returns an error if:
 //   - Configuration file cannot be opened or read
-//   - JSON is malformed
+//   - YAML/JSON is malformed
 //   - IP network CIDR notation is invalid
+//   - WebRTC port range is invalid
 //
-// Example configuration:
+// Example YAML configuration:
 //
-//	{
-//	  "adminCredential": "secretpassword",
-//	  "participants": ["office-camera", "conference-room"],
-//	  "adminsNetworks": ["192.168.1.0/24", "10.0.0.0/8"],
-//	  "peerConnectionConfig": {
-//	    "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-//	  },
-//	  "grabberPingInterval": 5,
-//	  "serverPort": 8443,
-//	  "serverTLSCrtFile": "/etc/ssl/cert.pem",
-//	  "serverTLSKeyFile": "/etc/ssl/key.pem",
-//	  "codecs": [
-//	    {
-//	      "params": {
-//	        "mimeType": "video/VP8",
-//	        "clockRate": 90000,
-//	        "payloadType": 96,
-//	        "channels": 0
-//	      },
-//	      "type": "video"
-//	    }
-//	  ],
-//	  "webcamTrackCount": 2
-//	}
+//	adminCredential: secretpassword
+//	participants:
+//	  - office-camera
+//	  - conference-room
+//	adminsNetworks:
+//	  - 192.168.1.0/24
+//	  - 10.0.0.0/8
+//	peerConnectionConfig:
+//	  iceServers:
+//	    - urls: stun:stun.l.google.com:19302
+//	grabberPingInterval: 5
+//	serverPort: 8443
+//	webrtcPortMin: 10000
+//	webrtcPortMax: 20000
 func LoadServerConfig() (ServerConfig, error) {
 	var rawConfig RawServerConfig
 
-	configFile, err := os.Open("conf/config.json")
+	// Try YAML first, then JSON for backward compatibility
+	configFile, err := os.Open("conf/config.yaml")
+	isYAML := true
 
 	if err != nil {
-		return ServerConfig{}, fmt.Errorf("can not open config file, error - %w", err)
+		configFile, err = os.Open("conf/config.json")
+		isYAML = false
+		if err != nil {
+			return ServerConfig{}, fmt.Errorf("can not open config file (tried config.yaml and config.json), error - %w", err)
+		}
 	}
 
 	defer func() { _ = configFile.Close() }()
 
-	err = json.NewDecoder(bufio.NewReader(configFile)).Decode(&rawConfig)
-
-	if err != nil {
-		return ServerConfig{}, fmt.Errorf("can not decode config file to json - %w", err)
+	if isYAML {
+		err = yaml.NewDecoder(bufio.NewReader(configFile)).Decode(&rawConfig)
+		if err != nil {
+			return ServerConfig{}, fmt.Errorf("can not decode config file to yaml - %w", err)
+		}
+	} else {
+		err = json.NewDecoder(bufio.NewReader(configFile)).Decode(&rawConfig)
+		if err != nil {
+			return ServerConfig{}, fmt.Errorf("can not decode config file to json - %w", err)
+		}
 	}
 
 	if rawConfig.ServerPort == 0 {
@@ -197,6 +213,14 @@ func LoadServerConfig() (ServerConfig, error) {
 		}
 	}
 
+	// Validate WebRTC port range
+	if rawConfig.WebRTCPortMin > 0 && rawConfig.WebRTCPortMax > 0 {
+		if rawConfig.WebRTCPortMin >= rawConfig.WebRTCPortMax {
+			return ServerConfig{}, fmt.Errorf("webrtcPortMin (%d) must be less than webrtcPortMax (%d)",
+				rawConfig.WebRTCPortMin, rawConfig.WebRTCPortMax)
+		}
+	}
+
 	return ServerConfig{
 		PlayerCredential:     rawConfig.PlayerCredential,
 		Participants:         rawConfig.Participants,
@@ -211,6 +235,8 @@ func LoadServerConfig() (ServerConfig, error) {
 		WebcamTrackCount:     rawConfig.WebcamTrackCount,
 		RecordTimeout:        rawConfig.RecordTimeout,
 		RecordStorageDir:     rawConfig.RecordStorageDir,
+		WebRTCPortMin:        rawConfig.WebRTCPortMin,
+		WebRTCPortMax:        rawConfig.WebRTCPortMax,
 	}, nil
 }
 
@@ -228,24 +254,24 @@ func parseCodecs(rawCodecs []RawCodec) []Codec {
 	result := make([]Codec, 0, len(rawCodecs))
 
 	for _, rawCodec := range rawCodecs {
-		capability := webrtc.RTPCodecCapability {
-			MimeType: rawCodec.Params.MimeType,
+		capability := webrtc.RTPCodecCapability{
+			MimeType:  rawCodec.Params.MimeType,
 			ClockRate: rawCodec.Params.ClockRate,
-			Channels: rawCodec.Params.Channels,
+			Channels:  rawCodec.Params.Channels,
 		}
 
 		if strings.HasPrefix(strings.ToLower(rawCodec.Params.MimeType), "video/") {
-			capability.RTCPFeedback = []webrtc.RTCPFeedback {
-				{ Type: "nack" },
-				{ Type: "nack", Parameter: "pli" },
+			capability.RTCPFeedback = []webrtc.RTCPFeedback{
+				{Type: "nack"},
+				{Type: "nack", Parameter: "pli"},
 				{Type: "ccm", Parameter: "fir"},
 				{Type: "goog-remb"},
 			}
 		}
 
-		params := webrtc.RTPCodecParameters {
+		params := webrtc.RTPCodecParameters{
 			RTPCodecCapability: capability,
-			PayloadType: webrtc.PayloadType(rawCodec.Params.PayloadType),
+			PayloadType:        webrtc.PayloadType(rawCodec.Params.PayloadType),
 		}
 
 		result = append(result, Codec{Params: params, Type: webrtc.NewRTPCodecType(rawCodec.Type)})

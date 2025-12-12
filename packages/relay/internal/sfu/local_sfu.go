@@ -160,24 +160,24 @@ func (p *Publisher) AddSubscriber(pc *webrtc.PeerConnection) {
 // This method is thread-safe.
 func (p *Publisher) RemoveSubscriber(pc *webrtc.PeerConnection) int {
 	p.mu.Lock()
-    defer p.mu.Unlock()
+	defer p.mu.Unlock()
 
-    delete(p.subscribers, pc)
+	delete(p.subscribers, pc)
 
-    return len(p.subscribers)
+	return len(p.subscribers)
 }
 
 // GetSubscribers returns a copy of the current subscribers list.
 // This method is thread-safe and returns a snapshot of subscribers.
 func (p *Publisher) GetSubscribers() []*webrtc.PeerConnection {
 	p.mu.RLock()
-    defer p.mu.RUnlock()
+	defer p.mu.RUnlock()
 
-    subs := make([]*webrtc.PeerConnection, 0, len(p.subscribers))
-    for pc := range p.subscribers {
-        subs = append(subs, pc)
-    }
-    return subs
+	subs := make([]*webrtc.PeerConnection, 0, len(p.subscribers))
+	for pc := range p.subscribers {
+		subs = append(subs, pc)
+	}
+	return subs
 }
 
 // AddBroadcaster adds a track broadcaster to the publisher.
@@ -332,6 +332,13 @@ func NewLocalSFU(config *config.ServerConfig) (*LocalSFU, error) {
 		se.SetNAT1To1IPs([]string{
 			config.PublicIP,
 		}, webrtc.ICECandidateTypeHost)
+	}
+
+	if config.WebRTCPortMin > 0 && config.WebRTCPortMax > 0 {
+		err = se.SetEphemeralUDPPortRange(config.WebRTCPortMin, config.WebRTCPortMax)
+		if err != nil {
+			return nil, fmt.Errorf("failed to set WebRTC port range: %w", err)
+		}
 	}
 
 	webrtcApi := webrtc.NewAPI(
@@ -893,12 +900,12 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 	log.Printf("Setting up publisher peer connection for %s, streamType=%s", publisherSocketID, streamType)
 
 	defer func() {
-        if r := recover(); r != nil {
-            log.Printf("CRITICAL PANIC in setupGrabberPeerConnection: %v\nstack: %s", r, debug.Stack())
-            atomic.StoreInt32(&publisher.setupInProgress, 0)
-            pm.cleanupPublisher(publisherKey)
-        }
-    }()
+		if r := recover(); r != nil {
+			log.Printf("CRITICAL PANIC in setupGrabberPeerConnection: %v\nstack: %s", r, debug.Stack())
+			atomic.StoreInt32(&publisher.setupInProgress, 0)
+			pm.cleanupPublisher(publisherKey)
+		}
+	}()
 
 	defer func() {
 		atomic.StoreInt32(&publisher.setupInProgress, 0)
