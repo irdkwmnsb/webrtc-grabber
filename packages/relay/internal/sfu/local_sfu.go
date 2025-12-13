@@ -530,7 +530,7 @@ func (pm *LocalSFU) AddSubscriber(id sockets.SocketID, ctx *NewSubscriberContext
 // validatePublisher ensures the publisher connection exists and has available tracks
 func (pm *LocalSFU) validatePublisher(publisherKey string, ctx *NewSubscriberContext) error {
 
-	if !pm.ensureGrabberConnection(publisherKey, ctx.publisherSocketID, ctx.streamType, ctx.publisherConn) {
+	if !pm.ensureGrabberConnection(ctx.publisherName, publisherKey, ctx.publisherSocketID, ctx.streamType, ctx.publisherConn) {
 		return fmt.Errorf("could not ensure grabber connection")
 	}
 
@@ -718,7 +718,7 @@ func (pm *LocalSFU) setupICECandidateHandler(pc *webrtc.PeerConnection, c socket
 // Timeout: PublisherWaitingTime (20 seconds) for setup completion
 //
 // This method is thread-safe and handles race conditions gracefully.
-func (pm *LocalSFU) ensureGrabberConnection(publisherKey string, publisherSocketID sockets.SocketID,
+func (pm *LocalSFU) ensureGrabberConnection(publisherName, publisherKey string, publisherSocketID sockets.SocketID,
 	streamType string, publisherConn sockets.Socket) bool {
 
 	publisher, loaded := pm.publishers.LoadOrStore(publisherKey, NewPublisher())
@@ -746,7 +746,7 @@ func (pm *LocalSFU) ensureGrabberConnection(publisherKey string, publisherSocket
 		}
 	}
 
-	go pm.setupGrabberPeerConnection(publisherSocketID, publisher, streamType, publisherConn)
+	go pm.setupGrabberPeerConnection(publisherSocketID, publisherName, publisher, streamType, publisherConn)
 
 	select {
 	case <-publisher.setupChan:
@@ -894,8 +894,8 @@ func (pm *LocalSFU) AddICECandidatePublisher(publisherKey string, candidate webr
 // This method must only be called by the goroutine that successfully claimed
 // setup responsibility via atomic.CompareAndSwapInt32. The setupChan is closed
 // upon completion (success or failure) to wake up any waiting goroutines.
-func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketID, publisher *Publisher,
-	streamType string, publisherConn sockets.Socket) {
+func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketID, publisherName string,
+	publisher *Publisher, streamType string, publisherConn sockets.Socket) {
 	publisherKey := getPublisherKey(publisherSocketID, streamType)
 	log.Printf("Setting up publisher peer connection for %s, streamType=%s", publisherSocketID, streamType)
 
@@ -953,7 +953,7 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 		log.Printf("Track received: ID=%s, Kind=%s, Codec=%s, PayloadType=%d",
 			remoteTrack.ID(), remoteTrack.Kind(), remoteTrack.Codec().MimeType, remoteTrack.Codec().PayloadType)
 
-		broadcaster, err := NewTrackBroadcaster(remoteTrack, publisherSocketID)
+		broadcaster, err := NewTrackBroadcaster(remoteTrack, publisherSocketID, publisherName)
 		if err != nil {
 			log.Printf("Failed to create broadcaster for publisher %s: %v", publisherSocketID, err)
 			return
