@@ -15,7 +15,9 @@ type NewSubscriberContext struct {
 	publisherConn     sockets.Socket
 }
 
-func CreateNewSubscriberContext(publisherSocketID sockets.SocketID, publisherName,
+func CreateNewSubscriberContext(
+	publisherSocketID sockets.SocketID,
+	publisherName,
 	streamType string,
 	c sockets.Socket,
 	offer *webrtc.SessionDescription,

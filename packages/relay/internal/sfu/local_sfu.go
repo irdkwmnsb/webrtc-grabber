@@ -887,8 +887,8 @@ func (pm *LocalSFU) AddICECandidatePublisher(publisherKey string, candidate webr
 // This method must only be called by the goroutine that successfully claimed
 // setup responsibility via atomic.CompareAndSwapInt32. The setupChan is closed
 // upon completion (success or failure) to wake up any waiting goroutines.
-func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketID, publisherName string, publisher *Publisher,
-	streamType string, publisherConn sockets.Socket) {
+func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketID, publisherName string,
+	publisher *Publisher, streamType string, publisherConn sockets.Socket) {
 	publisherKey := getPublisherKey(publisherSocketID, streamType)
 	log.Printf("Setting up publisher peer connection for %s, streamType=%s", publisherSocketID, streamType)
 
