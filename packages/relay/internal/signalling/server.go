@@ -554,6 +554,7 @@ func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 		var grabberName string
 		if m.Offer.PeerId != nil {
 			grabberSocketID = sockets.SocketID(*m.Offer.PeerId)
+			grabberName = s.storage.peers[grabberSocketID].Name
 		} else if m.Offer.PeerName != nil {
 			grabberName = *m.Offer.PeerName
 			if peer, ok := s.storage.getPeerByName(grabberName); ok {
