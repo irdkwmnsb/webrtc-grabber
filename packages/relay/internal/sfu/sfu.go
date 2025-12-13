@@ -8,13 +8,14 @@ import (
 
 type NewSubscriberContext struct {
 	publisherSocketID sockets.SocketID
+	publisherName     string
 	streamType        string
 	c                 sockets.Socket
 	offer             *webrtc.SessionDescription
 	publisherConn     sockets.Socket
 }
 
-func CreateNewSubscriberContext(publisherSocketID sockets.SocketID,
+func CreateNewSubscriberContext(publisherSocketID sockets.SocketID, publisherName,
 	streamType string,
 	c sockets.Socket,
 	offer *webrtc.SessionDescription,
@@ -22,6 +23,7 @@ func CreateNewSubscriberContext(publisherSocketID sockets.SocketID,
 
 	return &NewSubscriberContext{
 		publisherSocketID: publisherSocketID,
+		publisherName:     publisherName,
 		streamType:        streamType,
 		c:                 c,
 		offer:             offer,

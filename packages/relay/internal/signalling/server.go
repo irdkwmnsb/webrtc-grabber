@@ -551,15 +551,17 @@ func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 			return nil
 		}
 		var grabberSocketID sockets.SocketID
+		var grabberName string
 		if m.Offer.PeerId != nil {
 			grabberSocketID = sockets.SocketID(*m.Offer.PeerId)
 		} else if m.Offer.PeerName != nil {
-			if peer, ok := s.storage.getPeerByName(*m.Offer.PeerName); ok {
+			grabberName = *m.Offer.PeerName
+			if peer, ok := s.storage.getPeerByName(grabberName); ok {
 				log.Println(m.Offer.StreamType)
 				if !slices.Contains(peer.StreamTypes, api.StreamType(m.Offer.StreamType)) {
 					_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
 					log.Printf("no such stream type %v in grabber with peerName %v",
-						m.Offer.StreamType, *m.Offer.PeerName)
+						m.Offer.StreamType, grabberName)
 					return nil
 				}
 				grabberSocketID = peer.SocketId
@@ -578,7 +580,7 @@ func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 			return nil
 		}
 
-		ctx := sfu.CreateNewSubscriberContext(grabberSocketID, streamType, c, &m.Offer.Offer, grabberConn)
+		ctx := sfu.CreateNewSubscriberContext(grabberSocketID, grabberName, streamType, c, &m.Offer.Offer, grabberConn)
 		answer := s.sfu.AddSubscriber(id, ctx)
 		_ = c.WriteJSON(answer)
 	case api.PlayerMessageEventPlayerIce:

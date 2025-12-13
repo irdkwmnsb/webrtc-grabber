@@ -38,7 +38,7 @@ type TrackBroadcaster struct {
 	packetChan chan []byte
 }
 
-func NewTrackBroadcaster(streamType string, remoteTrack *webrtc.TrackRemote, publisherSocketID sockets.SocketID) (*TrackBroadcaster, error) {
+func NewTrackBroadcaster(remoteTrack *webrtc.TrackRemote, publisherSocketID sockets.SocketID, publisherName string) (*TrackBroadcaster, error) {
 	localTrack, err := webrtc.NewTrackLocalStaticRTP(
 		remoteTrack.Codec().RTPCodecCapability,
 		remoteTrack.ID(),
@@ -49,10 +49,9 @@ func NewTrackBroadcaster(streamType string, remoteTrack *webrtc.TrackRemote, pub
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	socketIdStr := string(publisherSocketID)
 
 	broadcaster := &TrackBroadcaster{
-		publisher:  publisherSocketID,
-		streamType: streamType,
 		localTrack: localTrack,
 		remoteSSRC: uint32(remoteTrack.SSRC()),
 		ctx:        ctx,
@@ -60,14 +59,18 @@ func NewTrackBroadcaster(streamType string, remoteTrack *webrtc.TrackRemote, pub
 		packetChan: make(chan []byte, packetQueueSize),
 	}
 
-	go broadcaster.readLoop(remoteTrack, publisherSocketID)
+	go broadcaster.readLoop(remoteTrack, socketIdStr, publisherName)
 	go broadcaster.writeLoop()
 
 	return broadcaster, nil
 }
 
-func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, publisherSocketID sockets.SocketID) {
+func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, socketIdStr string, name string) {
 	defer tb.Stop()
+
+	if remoteTrack.Kind() == webrtc.RTPCodecTypeAudio {
+		metrics.LastAudioPacket.WithLabelValues(name).Set(float64(time.Now().Unix()))
+	}
 
 	for {
 		select {
@@ -82,18 +85,15 @@ func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, publisherS
 		n, _, err := remoteTrack.Read(buf)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				log.Printf("Publisher %s closed track", publisherSocketID)
+				log.Printf("Publisher %s closed track", socketIdStr)
 			} else {
-				log.Printf("Error reading from publisher %s: %v", publisherSocketID, err)
+				log.Printf("Error reading from publisher %s: %v", socketIdStr, err)
 			}
 			return
 		}
 
 		metrics.SFUPacketsReceived.Inc()
 		metrics.SFUBytesReceived.Add(float64(n))
-		if remoteTrack.Kind() == webrtc.RTPCodecTypeAudio {
-			metrics.LastAudioPacket.WithLabelValues(string(publisherSocketID)).Set(float64(time.Now().Unix()))
-		}
 
 		select {
 		case tb.packetChan <- buf[:n]:
