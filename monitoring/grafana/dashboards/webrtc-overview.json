@@ -1029,7 +1029,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "time() - webrtc_grabber_is_stream_active{type=\"webcam\"} > 20",
+          "expr": "(time() - webrtc_grabber_last_streams{type=\"webcam\"} > 20) and on() (time() - webrtc_grabber_last_pings < 18)",
           "legendFormat": "{{peer}}",
           "range": true,
           "refId": "A"
@@ -1104,7 +1104,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "time() - webrtc_grabber_is_stream_active{type=\"desktop\"} > 20",
+          "expr": "(time() - webrtc_grabber_last_streams{type=\"desktop\"} > 20) and on() (time() - webrtc_grabber_last_pings < 18)",
           "format": "time_series",
           "legendFormat": "{{peer}}",
           "range": true,
@@ -1180,7 +1180,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "time() - webrtc_grabber_last_audio_packet > 20",
+          "expr": "(time() - webrtc_grabber_last_audio_packet > 20) and on() (time() - webrtc_grabber_last_pings < 18)",
           "legendFormat": "{{peer}}",
           "range": true,
           "refId": "A"
@@ -1209,5 +1209,5 @@
   "timezone": "",
   "title": "WebRTC Grabber - Overview",
   "uid": "webrtc-grabber-overview",
-  "version": 53
+  "version": 55
 }
