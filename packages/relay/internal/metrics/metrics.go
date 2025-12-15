@@ -100,4 +100,19 @@ var (
 		Name: "webrtc_grabber_goroutines",
 		Help: "Number of goroutines",
 	})
+
+	LastPings = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "webrtc_grabber_last_pings",
+		Help: "Unix-time of last pings from peer",
+	}, []string{"peer"})
+
+	LastAudioPacket = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "webrtc_grabber_last_audio_packet",
+		Help: "Unix-time of last audio packet",
+	}, []string{"peer"})
+
+	LastStreams = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "webrtc_grabber_last_streams",
+		Help: "Unix-time of stream types from peer's ping",
+	}, []string{"peer", "type"})
 )

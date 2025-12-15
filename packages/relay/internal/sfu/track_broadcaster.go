@@ -7,6 +7,7 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
@@ -18,13 +19,15 @@ const (
 	packetQueueSize = 100
 )
 
-var bufferPool = sync.Pool {
+var bufferPool = sync.Pool{
 	New: func() any {
 		return make([]byte, rtpBufferSize)
 	},
 }
 
 type TrackBroadcaster struct {
+	publisher       sockets.SocketID
+	streamType      string
 	localTrack      *webrtc.TrackLocalStaticRTP
 	remoteSSRC      uint32
 	subscriberCount int32
@@ -35,7 +38,7 @@ type TrackBroadcaster struct {
 	packetChan chan []byte
 }
 
-func NewTrackBroadcaster(remoteTrack *webrtc.TrackRemote, publisherSocketID sockets.SocketID) (*TrackBroadcaster, error) {
+func NewTrackBroadcaster(remoteTrack *webrtc.TrackRemote, publisherSocketID sockets.SocketID, publisherName string) (*TrackBroadcaster, error) {
 	localTrack, err := webrtc.NewTrackLocalStaticRTP(
 		remoteTrack.Codec().RTPCodecCapability,
 		remoteTrack.ID(),
@@ -46,6 +49,7 @@ func NewTrackBroadcaster(remoteTrack *webrtc.TrackRemote, publisherSocketID sock
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	socketIdStr := string(publisherSocketID)
 
 	broadcaster := &TrackBroadcaster{
 		localTrack: localTrack,
@@ -55,14 +59,18 @@ func NewTrackBroadcaster(remoteTrack *webrtc.TrackRemote, publisherSocketID sock
 		packetChan: make(chan []byte, packetQueueSize),
 	}
 
-	go broadcaster.readLoop(remoteTrack, publisherSocketID)
+	go broadcaster.readLoop(remoteTrack, socketIdStr, publisherName)
 	go broadcaster.writeLoop()
 
 	return broadcaster, nil
 }
 
-func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, publisherSocketID sockets.SocketID) {
+func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, socketIdStr string, name string) {
 	defer tb.Stop()
+
+	if remoteTrack.Kind() == webrtc.RTPCodecTypeAudio {
+		metrics.LastAudioPacket.WithLabelValues(name).Set(float64(time.Now().Unix()))
+	}
 
 	for {
 		select {
@@ -77,9 +85,9 @@ func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, publisherS
 		n, _, err := remoteTrack.Read(buf)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				log.Printf("Publisher %s closed track", publisherSocketID)
+				log.Printf("Publisher %s closed track", socketIdStr)
 			} else {
-				log.Printf("Error reading from publisher %s: %v", publisherSocketID, err)
+				log.Printf("Error reading from publisher %s: %v", socketIdStr, err)
 			}
 			return
 		}
