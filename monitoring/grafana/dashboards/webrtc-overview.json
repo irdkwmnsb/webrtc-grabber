@@ -938,6 +938,7 @@
           "showLegend": true
         },
         "mergeValues": true,
+        "perPage": 5,
         "rowHeight": 0.9,
         "showValue": "never",
         "tooltip": {
@@ -1017,6 +1018,7 @@
           "showLegend": true
         },
         "mergeValues": true,
+        "perPage": 5,
         "rowHeight": 0.9,
         "showValue": "never",
         "tooltip": {
@@ -1092,6 +1094,7 @@
           "showLegend": true
         },
         "mergeValues": true,
+        "perPage": 5,
         "rowHeight": 0.9,
         "showValue": "never",
         "tooltip": {
@@ -1168,6 +1171,7 @@
           "showLegend": true
         },
         "mergeValues": true,
+        "perPage": 5,
         "rowHeight": 0.9,
         "showValue": "never",
         "tooltip": {
@@ -1209,5 +1213,5 @@
   "timezone": "",
   "title": "WebRTC Grabber - Overview",
   "uid": "webrtc-grabber-overview",
-  "version": 55
+  "version": 56
 }
