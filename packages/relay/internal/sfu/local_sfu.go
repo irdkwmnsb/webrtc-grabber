@@ -877,7 +877,7 @@ func (pm *LocalSFU) AddICECandidatePublisher(publisherKey string, candidate webr
 //  6. Signals completion or failure via the publisher's setupChan
 //
 // Stream type configuration:
-//   - "webcam": Video + Audio transceivers, expects WebcamTrackCount tracks (typically 2)
+//   - "webcam": Video + Audio transceivers
 //   - "screen": Video transceiver only, expects 1 track
 //
 // The method waits up to PublisherWaitingTime for all expected tracks to arrive.
@@ -931,10 +931,7 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 		return
 	}
 
-	expectedTracks := 1
 	if streamType == "webcam" {
-		expectedTracks = pm.config.WebcamTrackCount
-
 		_, err = pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
 			Direction: webrtc.RTPTransceiverDirectionRecvonly,
 		})
@@ -945,9 +942,9 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 		}
 	}
 
-	var tracksReceived atomic.Int32
-	trackSetupDone := make(chan struct{})
-	var trackSetupOnce sync.Once
+	firstTrackReceived := false
+	trackTimeout := time.NewTimer(PublisherWaitingTime)
+	defer trackTimeout.Stop()
 
 	pc.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		log.Printf("Track received: ID=%s, Kind=%s, Codec=%s, PayloadType=%d",
@@ -960,14 +957,36 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 		}
 
 		publisher.AddBroadcaster(broadcaster)
-		currentCount := int(tracksReceived.Add(1))
 
-		log.Printf("Tracks received for %s: %d/%d", publisherSocketID, currentCount, expectedTracks)
+		subscribers := publisher.GetSubscribers()
+		log.Printf("Adding new track to %d existing subscribers for %s", len(subscribers), publisherSocketID)
 
-		if currentCount >= expectedTracks {
-			trackSetupOnce.Do(func() {
-				close(trackSetupDone)
-			})
+		for _, subscriberPC := range subscribers {
+			localTrack := broadcaster.GetLocalTrack()
+			rtpSender, err := subscriberPC.AddTrack(localTrack)
+			if err != nil {
+				log.Printf("Failed to add track to existing subscriber: %v", err)
+				continue
+			}
+
+			go pm.processRTCPFeedback(rtpSender, publisher.pc, broadcaster.GetRemoteSSRC(), publisherSocketID)
+			broadcaster.AddSubscriber(subscriberPC)
+
+			trackType := "unknown"
+			if localTrack.Kind() == webrtc.RTPCodecTypeVideo {
+				trackType = "video"
+			} else if localTrack.Kind() == webrtc.RTPCodecTypeAudio {
+				trackType = "audio"
+			}
+			metrics.TracksAddedTotal.WithLabelValues(trackType).Inc()
+			metrics.ActiveTracks.WithLabelValues(trackType).Inc()
+		}
+
+		if !firstTrackReceived {
+			firstTrackReceived = true
+			trackTimeout.Reset(2 * time.Second)
+		} else {
+			trackTimeout.Reset(2 * time.Second)
 		}
 	})
 
@@ -1019,11 +1038,11 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 		return
 	}
 
-	select {
-	case <-trackSetupDone:
-		log.Printf("All expected tracks received for grabber %s", publisherSocketID)
-	case <-time.After(PublisherWaitingTime):
-		log.Printf("Timeout waiting for tracks from publisher %s", publisherSocketID)
+	<-trackTimeout.C
+	if !firstTrackReceived {
+		log.Printf("Timeout waiting for first track from publisher %s", publisherSocketID)
 		pm.cleanupPublisher(publisherKey)
+		return
 	}
+	log.Printf("Track setup completed for grabber %s with %d tracks", publisherSocketID, publisher.BroadcasterCount())
 }

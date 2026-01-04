@@ -60,10 +60,16 @@ class GrabberPlayerClient {
         pc.addTransceiver("video");
         pc.addTransceiver("audio");
 
+        const mediaStream = new MediaStream();
+        let hasCalledCallback = false;
+
         pc.addEventListener("track", (e) => {
-            console.debug("WebRTCGrabber: got track");
-            if (e.track.kind === "video" && e.streams.length > 0) {
-                onVideoTrack(e.streams[0], peerInfo, streamType);
+            console.debug(`WebRTCGrabber: got ${e.track.kind} track`);
+            mediaStream.addTrack(e.track);
+
+            if (!hasCalledCallback) {
+                hasCalledCallback = true;
+                onVideoTrack(mediaStream, peerInfo, streamType);
             }
         });
 

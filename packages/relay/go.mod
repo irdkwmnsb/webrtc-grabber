@@ -1,15 +1,17 @@
 module github.com/irdkwmnsb/webrtc-grabber/packages/relay
 
-go 1.25.0
+go 1.25.5
 
 require (
 	github.com/fasthttp/websocket v1.5.12
 	github.com/gofiber/contrib/websocket v1.3.4
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/pion/interceptor v0.1.40
+	github.com/pion/rtcp v1.2.15
 	github.com/pion/webrtc/v4 v4.1.3
 	github.com/prometheus/client_golang v1.19.0
 	github.com/valyala/fasthttp v1.65.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -27,7 +29,6 @@ require (
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.0.7 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtcp v1.2.15 // indirect
 	github.com/pion/rtp v1.8.21 // indirect
 	github.com/pion/sctp v1.8.39 // indirect
 	github.com/pion/sdp/v3 v3.0.15 // indirect

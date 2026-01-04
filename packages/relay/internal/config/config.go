@@ -59,10 +59,6 @@ type ServerConfig struct {
 	// Each codec specifies MIME type, clock rate, payload type, and channel count.
 	Codecs []Codec `json:"codecs"`
 
-	// WebcamTrackCount specifies the expected number of tracks for webcam streams.
-	// Typically 2 (one video, one audio). Defaults to 2 if not specified.
-	// Screen share streams always expect 1 track (video only).
-	WebcamTrackCount int    `json:"webcamTrackCount"`
 	RecordTimeout    uint   `json:"recordTimeout"`
 	RecordStorageDir string `json:"recordStorageDirectory"`
 
@@ -119,7 +115,6 @@ type RawServerConfig struct {
 	ServerTLSCrtFile     *string                  `json:"serverTLSCrtFile" yaml:"serverTLSCrtFile"`
 	ServerTLSKeyFile     *string                  `json:"serverTLSKeyFile" yaml:"serverTLSKeyFile"`
 	Codecs               []RawCodec               `json:"codecs" yaml:"codecs"`
-	WebcamTrackCount     int                      `json:"webcamTrackCount" yaml:"webcamTrackCount"`
 	RecordTimeout        uint                     `json:"recordTimeout" yaml:"recordTimeout"`
 	RecordStorageDir     string                   `json:"RecordStorageDirectory" yaml:"recordStorageDirectory"`
 	WebRTCPortMin        uint16                   `json:"webrtcPortMin" yaml:"webrtcPortMin"`
@@ -133,7 +128,7 @@ type RawServerConfig struct {
 // The function:
 //  1. Tries to open conf/config.yaml, falls back to conf/config.json
 //  2. Parses YAML/JSON into RawServerConfig
-//  3. Applies defaults: ServerPort (8000), WebcamTrackCount (2)
+//  3. Applies defaults: ServerPort (8000)
 //  4. Validates and parses AdminsRawNetworks into CIDR prefixes
 //  5. Converts RawCodec structures to WebRTC Codec types
 //  6. Validates WebRTC port range if specified
@@ -193,10 +188,6 @@ func LoadServerConfig() (ServerConfig, error) {
 		rawConfig.ServerPort = 8000
 	}
 
-	if rawConfig.WebcamTrackCount == 0 {
-		rawConfig.WebcamTrackCount = 2
-	}
-
 	adminsNetworks, err := parseAdminsNetworks(rawConfig.AdminsRawNetworks)
 
 	if err != nil {
@@ -232,7 +223,6 @@ func LoadServerConfig() (ServerConfig, error) {
 		ServerTLSCrtFile:     rawConfig.ServerTLSCrtFile,
 		ServerTLSKeyFile:     rawConfig.ServerTLSKeyFile,
 		Codecs:               parseCodecs(rawConfig.Codecs),
-		WebcamTrackCount:     rawConfig.WebcamTrackCount,
 		RecordTimeout:        rawConfig.RecordTimeout,
 		RecordStorageDir:     rawConfig.RecordStorageDir,
 		WebRTCPortMin:        rawConfig.WebRTCPortMin,
