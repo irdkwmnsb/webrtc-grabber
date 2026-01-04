@@ -950,6 +950,11 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 		log.Printf("Track received: ID=%s, Kind=%s, Codec=%s, PayloadType=%d",
 			remoteTrack.ID(), remoteTrack.Kind(), remoteTrack.Codec().MimeType, remoteTrack.Codec().PayloadType)
 
+		if pm.config.DisableAudio && remoteTrack.Kind() == webrtc.RTPCodecTypeAudio {
+			log.Print("Track is audio, but DisableAudio enabled, skipping track...")
+			return
+		}
+
 		broadcaster, err := NewTrackBroadcaster(remoteTrack, publisherSocketID)
 		if err != nil {
 			log.Printf("Failed to create broadcaster for publisher %s: %v", publisherSocketID, err)

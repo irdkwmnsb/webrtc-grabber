@@ -69,6 +69,8 @@ type ServerConfig struct {
 	// WebRTCPortMax is the maximum UDP port for WebRTC connections.
 	// Must be greater than WebRTCPortMin if both are specified.
 	WebRTCPortMax uint16 `json:"webrtcPortMax"`
+
+	DisableAudio bool `json:"disableAudio"`
 }
 
 // RawCodec represents the JSON/YAML structure for codec configuration before conversion
@@ -119,6 +121,7 @@ type RawServerConfig struct {
 	RecordStorageDir     string                   `json:"RecordStorageDirectory" yaml:"recordStorageDirectory"`
 	WebRTCPortMin        uint16                   `json:"webrtcPortMin" yaml:"webrtcPortMin"`
 	WebRTCPortMax        uint16                   `json:"webrtcPortMax" yaml:"webrtcPortMax"`
+	DisableAudio         bool                     `json:"disableAudio" yaml:"disableAudio"`
 }
 
 // LoadServerConfig reads and parses the server configuration from conf/config.yaml or conf/config.json.
@@ -194,6 +197,10 @@ func LoadServerConfig() (ServerConfig, error) {
 		return ServerConfig{}, fmt.Errorf("can not parse admins networks, error - %v", err)
 	}
 
+	if rawConfig.PeerConnectionConfig.IceServers == nil {
+		rawConfig.PeerConnectionConfig.IceServers = []api.IceServer{}
+	}
+
 	if rawConfig.RecordTimeout <= 0 {
 		rawConfig.RecordTimeout = 180000
 	}
@@ -227,6 +234,7 @@ func LoadServerConfig() (ServerConfig, error) {
 		RecordStorageDir:     rawConfig.RecordStorageDir,
 		WebRTCPortMin:        rawConfig.WebRTCPortMin,
 		WebRTCPortMax:        rawConfig.WebRTCPortMax,
+		DisableAudio:         rawConfig.DisableAudio,
 	}, nil
 }
 

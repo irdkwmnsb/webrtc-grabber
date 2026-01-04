@@ -33,12 +33,14 @@ type PlayerAuth struct {
 	Credential string `json:"credential"`
 }
 
+type IceServer struct {
+	Urls       string  `json:"urls" yaml:"urls"`
+	Username   *string `json:"username" yaml:"username"`
+	Credential *string `json:"credential" yaml:"credential"`
+}
+
 type PeerConnectionConfig struct {
-	IceServers []struct {
-		Urls       string  `json:"urls" yaml:"urls"`
-		Username   *string `json:"username" yaml:"username"`
-		Credential *string `json:"credential" yaml:"credential"`
-	} `json:"iceServers" yaml:"iceServers"`
+	IceServers []IceServer `json:"iceServers" yaml:"iceServers"`
 }
 
 func (c PeerConnectionConfig) WebrtcConfiguration() webrtc.Configuration {
