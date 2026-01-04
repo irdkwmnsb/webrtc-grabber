@@ -1,3 +1,5 @@
+# Base configuration with default values. Override any parameter as needed.
+# See config.go for all available parameters.
 participants:
   - "001"
   - "002"
@@ -7,39 +9,3 @@ participants:
   - "006"
   - "007"
   - "008"
-
-adminsNetworks:
-  - "0.0.0.0/0"
-
-peerConnectionConfig:
-  iceServers:
-    - urls: "turn:0.0.0.0:3478"
-      username: "live"
-      credential: "live"
-
-grabberPingInterval: 3000
-
-adminCredential: "live"
-
-serverPort: 13478
-
-webrtcPortMin: 10000
-webrtcPortMax: 20000
-
-publicIp: "1.2.3.4"
-
-codecs:
-  - type: "video"
-    params:
-      mimeType: "video/VP8"
-      clockRate: 90000
-      payloadType: 96
-      channels: 0
-  - type: "audio"
-    params:
-      mimeType: "audio/opus"
-      clockRate: 48000
-      payloadType: 111
-      channels: 2
-
-recordTimeout: 180000

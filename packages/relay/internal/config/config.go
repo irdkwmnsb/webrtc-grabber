@@ -73,6 +73,143 @@ type ServerConfig struct {
 	DisableAudio bool `json:"disableAudio"`
 }
 
+func DefaultServerConfig() ServerConfig {
+	playerPassword := "live"
+	return ServerConfig{
+		PlayerCredential: &playerPassword,
+		Participants:     []string{},
+		AdminsRawNetworks: []netip.Prefix{
+			netip.MustParsePrefix("0.0.0.0/0"),
+		},
+		PeerConnectionConfig: api.DefaultPeerConnectionConfig(),
+		PublicIP:             "",
+		GrabberPingInterval:  3000,
+		ServerPort:           13478,
+		ServerTLSCrtFile:     nil,
+		ServerTLSKeyFile:     nil,
+		Codecs:               DefaultCodecs(),
+		RecordTimeout:        180000,
+		RecordStorageDir:     "./records",
+		WebRTCPortMin:        10000,
+		WebRTCPortMax:        20000,
+		DisableAudio:         false,
+	}
+}
+
+type Option func(*ServerConfig)
+
+func WithPlayerCredential(credential *string) Option {
+	return func(sc *ServerConfig) {
+		sc.PlayerCredential = credential
+	}
+}
+
+func WithParticipants(participants []string) Option {
+	return func(sc *ServerConfig) {
+		sc.Participants = participants
+	}
+}
+
+func WithAdminsRawNetworks(networks []netip.Prefix) Option {
+	return func(sc *ServerConfig) {
+		sc.AdminsRawNetworks = networks
+	}
+}
+
+func WithPeerConnectionConfig(config api.PeerConnectionConfig) Option {
+	return func(sc *ServerConfig) {
+		sc.PeerConnectionConfig = config
+	}
+}
+
+func WithPublicIP(ip string) Option {
+	return func(sc *ServerConfig) {
+		sc.PublicIP = ip
+	}
+}
+
+func WithGrabberPingInterval(interval int) Option {
+	return func(sc *ServerConfig) {
+		sc.GrabberPingInterval = interval
+	}
+}
+
+func WithServerPort(port int) Option {
+	return func(sc *ServerConfig) {
+		sc.ServerPort = port
+	}
+}
+
+func WithServerTLSCrtFile(crtFile *string) Option {
+	return func(sc *ServerConfig) {
+		sc.ServerTLSCrtFile = crtFile
+	}
+}
+
+func WithServerTLSKeyFile(keyFile *string) Option {
+	return func(sc *ServerConfig) {
+		sc.ServerTLSKeyFile = keyFile
+	}
+}
+
+func WithTLS(crtFile, keyFile string) Option {
+	return func(sc *ServerConfig) {
+		sc.ServerTLSCrtFile = &crtFile
+		sc.ServerTLSKeyFile = &keyFile
+	}
+}
+
+func WithCodecs(codecs []Codec) Option {
+	return func(sc *ServerConfig) {
+		sc.Codecs = codecs
+	}
+}
+
+func WithRecordTimeout(timeout uint) Option {
+	return func(sc *ServerConfig) {
+		sc.RecordTimeout = timeout
+	}
+}
+
+func WithRecordStorageDir(dir string) Option {
+	return func(sc *ServerConfig) {
+		sc.RecordStorageDir = dir
+	}
+}
+
+func WithWebRTCPortMin(port uint16) Option {
+	return func(sc *ServerConfig) {
+		sc.WebRTCPortMin = port
+	}
+}
+
+func WithWebRTCPortMax(port uint16) Option {
+	return func(sc *ServerConfig) {
+		sc.WebRTCPortMax = port
+	}
+}
+
+func WithWebRTCPortRange(min, max uint16) Option {
+	return func(sc *ServerConfig) {
+		sc.WebRTCPortMin = min
+		sc.WebRTCPortMax = max
+	}
+}
+
+func WithDisableAudio(disable bool) Option {
+	return func(sc *ServerConfig) {
+		sc.DisableAudio = disable
+	}
+}
+
+func NewServerConfig(opts ...Option) ServerConfig {
+	config := DefaultServerConfig()
+	for _, opt := range opts {
+		opt(&config)
+	}
+	return config
+}
+
 // RawCodec represents the JSON/YAML structure for codec configuration before conversion
 // to WebRTC types. This intermediate representation allows for custom JSON/YAML unmarshaling.
 type RawCodec struct {
@@ -102,6 +239,39 @@ type Codec struct {
 
 	// Type indicates whether this is a video or audio codec
 	Type webrtc.RTPCodecType `json:"type"`
+}
+
+func DefaultCodecs() []Codec {
+	return []Codec{
+		{
+			Params: webrtc.RTPCodecParameters{
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType:  "video/VP8",
+					ClockRate: 90000,
+					Channels:  0,
+					RTCPFeedback: []webrtc.RTCPFeedback{
+						{Type: "nack"},
+						{Type: "nack", Parameter: "pli"},
+						{Type: "ccm", Parameter: "fir"},
+						{Type: "goog-remb"},
+					},
+				},
+				PayloadType: 96,
+			},
+			Type: webrtc.RTPCodecTypeVideo,
+		},
+		{
+			Params: webrtc.RTPCodecParameters{
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType:  "audio/opus",
+					ClockRate: 48000,
+					Channels:  2,
+				},
+				PayloadType: 111,
+			},
+			Type: webrtc.RTPCodecTypeAudio,
+		},
+	}
 }
 
 // RawServerConfig is the intermediate structure used when parsing the JSON/YAML configuration file.
@@ -161,7 +331,6 @@ type RawServerConfig struct {
 func LoadServerConfig() (ServerConfig, error) {
 	var rawConfig RawServerConfig
 
-	// Try YAML first, then JSON for backward compatibility
 	configFile, err := os.Open("conf/config.yaml")
 	isYAML := true
 
@@ -169,7 +338,7 @@ func LoadServerConfig() (ServerConfig, error) {
 		configFile, err = os.Open("conf/config.json")
 		isYAML = false
 		if err != nil {
-			return ServerConfig{}, fmt.Errorf("can not open config file (tried config.yaml and config.json), error - %w", err)
+			return DefaultServerConfig(), nil
 		}
 	}
 
@@ -187,55 +356,71 @@ func LoadServerConfig() (ServerConfig, error) {
 		}
 	}
 
-	if rawConfig.ServerPort == 0 {
-		rawConfig.ServerPort = 8000
+	opts := buildOptionsFromRawConfig(rawConfig)
+
+	return NewServerConfig(opts...), nil
+}
+
+func buildOptionsFromRawConfig(raw RawServerConfig) []Option {
+	var opts []Option
+
+	if raw.PlayerCredential != nil {
+		opts = append(opts, WithPlayerCredential(raw.PlayerCredential))
 	}
 
-	adminsNetworks, err := parseAdminsNetworks(rawConfig.AdminsRawNetworks)
-
-	if err != nil {
-		return ServerConfig{}, fmt.Errorf("can not parse admins networks, error - %v", err)
+	if raw.Participants != nil {
+		opts = append(opts, WithParticipants(raw.Participants))
 	}
 
-	if rawConfig.PeerConnectionConfig.IceServers == nil {
-		rawConfig.PeerConnectionConfig.IceServers = []api.IceServer{}
-	}
-
-	if rawConfig.RecordTimeout <= 0 {
-		rawConfig.RecordTimeout = 180000
-	}
-	if rawConfig.RecordStorageDir != "" {
-		err := os.MkdirAll(rawConfig.RecordStorageDir, os.ModePerm)
-		if err != nil {
-			return ServerConfig{}, fmt.Errorf("can create record directory, error - %v", err)
+	if raw.AdminsRawNetworks != nil {
+		adminsNetworks, err := parseAdminsNetworks(raw.AdminsRawNetworks)
+		if err == nil {
+			opts = append(opts, WithAdminsRawNetworks(adminsNetworks))
 		}
 	}
 
-	// Validate WebRTC port range
-	if rawConfig.WebRTCPortMin > 0 && rawConfig.WebRTCPortMax > 0 {
-		if rawConfig.WebRTCPortMin >= rawConfig.WebRTCPortMax {
-			return ServerConfig{}, fmt.Errorf("webrtcPortMin (%d) must be less than webrtcPortMax (%d)",
-				rawConfig.WebRTCPortMin, rawConfig.WebRTCPortMax)
-		}
+	if raw.PeerConnectionConfig.IceServers != nil {
+		opts = append(opts, WithPeerConnectionConfig(raw.PeerConnectionConfig))
 	}
 
-	return ServerConfig{
-		PlayerCredential:     rawConfig.PlayerCredential,
-		Participants:         rawConfig.Participants,
-		AdminsRawNetworks:    adminsNetworks,
-		PeerConnectionConfig: rawConfig.PeerConnectionConfig,
-		PublicIP:             rawConfig.PublicIP,
-		GrabberPingInterval:  rawConfig.GrabberPingInterval,
-		ServerPort:           rawConfig.ServerPort,
-		ServerTLSCrtFile:     rawConfig.ServerTLSCrtFile,
-		ServerTLSKeyFile:     rawConfig.ServerTLSKeyFile,
-		Codecs:               parseCodecs(rawConfig.Codecs),
-		RecordTimeout:        rawConfig.RecordTimeout,
-		RecordStorageDir:     rawConfig.RecordStorageDir,
-		WebRTCPortMin:        rawConfig.WebRTCPortMin,
-		WebRTCPortMax:        rawConfig.WebRTCPortMax,
-		DisableAudio:         rawConfig.DisableAudio,
-	}, nil
+	if raw.PublicIP != "" {
+		opts = append(opts, WithPublicIP(raw.PublicIP))
+	}
+
+	if raw.GrabberPingInterval > 0 {
+		opts = append(opts, WithGrabberPingInterval(raw.GrabberPingInterval))
+	}
+
+	if raw.ServerPort > 0 {
+		opts = append(opts, WithServerPort(raw.ServerPort))
+	}
+
+	if raw.ServerTLSCrtFile != nil && raw.ServerTLSKeyFile != nil {
+		opts = append(opts, WithTLS(*raw.ServerTLSCrtFile, *raw.ServerTLSKeyFile))
+	}
+
+	if raw.Codecs != nil {
+		opts = append(opts, WithCodecs(parseCodecs(raw.Codecs)))
+	}
+
+	if raw.RecordTimeout > 0 {
+		opts = append(opts, WithRecordTimeout(raw.RecordTimeout))
+	}
+
+	if raw.RecordStorageDir != "" {
+		opts = append(opts, WithRecordStorageDir(raw.RecordStorageDir))
+		_ = os.MkdirAll(raw.RecordStorageDir, os.ModePerm)
+	}
+
+	if raw.WebRTCPortMin > 0 && raw.WebRTCPortMax > 0 {
+		opts = append(opts, WithWebRTCPortRange(raw.WebRTCPortMin, raw.WebRTCPortMax))
+	}
+
+	if raw.DisableAudio {
+		opts = append(opts, WithDisableAudio(true))
+	}
+
+	return opts
 }
 
 // parseCodecs converts raw codec configurations from JSON into WebRTC codec types.

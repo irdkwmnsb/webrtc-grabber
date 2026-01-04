@@ -328,7 +328,7 @@ func NewLocalSFU(config *config.ServerConfig) (*LocalSFU, error) {
 	interceptorRegistry.Add(internalPliFactory)
 
 	se := webrtc.SettingEngine{}
-	if len(config.PeerConnectionConfig.IceServers) == 0 {
+	if len(config.PeerConnectionConfig.IceServers) == 0 && len(config.PublicIP) > 0 {
 		se.SetNAT1To1IPs([]string{
 			config.PublicIP,
 		}, webrtc.ICECandidateTypeHost)

@@ -43,6 +43,12 @@ type PeerConnectionConfig struct {
 	IceServers []IceServer `json:"iceServers" yaml:"iceServers"`
 }
 
+func DefaultPeerConnectionConfig() PeerConnectionConfig {
+	return PeerConnectionConfig{
+		IceServers: []IceServer{},
+	}
+}
+
 func (c PeerConnectionConfig) WebrtcConfiguration() webrtc.Configuration {
 	var conf webrtc.Configuration
 	for _, server := range c.IceServers {
