@@ -8,19 +8,16 @@ import (
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 )
 
-// WebSocketCommandSender implements domain.GrabberCommandSender using WebSocket connections.
 type WebSocketCommandSender struct {
 	grabberSockets *sockets.SocketPool
 }
 
-// NewWebSocketCommandSender creates a new WebSocket-based command sender.
 func NewWebSocketCommandSender(grabberSockets *sockets.SocketPool) *WebSocketCommandSender {
 	return &WebSocketCommandSender{
 		grabberSockets: grabberSockets,
 	}
 }
 
-// SendStartRecording sends a command to start recording.
 func (w *WebSocketCommandSender) SendStartRecording(grabberID string, recordID string, timeoutMsec uint) error {
 	socket := w.grabberSockets.GetSocket(sockets.SocketID(grabberID))
 	if socket == nil {
@@ -40,7 +37,6 @@ func (w *WebSocketCommandSender) SendStartRecording(grabberID string, recordID s
 	return nil
 }
 
-// SendStopRecording sends a command to stop recording.
 func (w *WebSocketCommandSender) SendStopRecording(grabberID string, recordID string) error {
 	socket := w.grabberSockets.GetSocket(sockets.SocketID(grabberID))
 	if socket == nil {
@@ -57,7 +53,6 @@ func (w *WebSocketCommandSender) SendStopRecording(grabberID string, recordID st
 	return nil
 }
 
-// SendUploadRecording sends a command to upload a recording.
 func (w *WebSocketCommandSender) SendUploadRecording(grabberID string, recordID string) error {
 	socket := w.grabberSockets.GetSocket(sockets.SocketID(grabberID))
 	if socket == nil {
@@ -74,7 +69,6 @@ func (w *WebSocketCommandSender) SendUploadRecording(grabberID string, recordID 
 	return nil
 }
 
-// SendDisconnectPlayers sends a command to disconnect all players.
 func (w *WebSocketCommandSender) SendDisconnectPlayers(grabberID string) error {
 	socket := w.grabberSockets.GetSocket(sockets.SocketID(grabberID))
 	if socket == nil {
