@@ -18,7 +18,7 @@ const (
 	packetQueueSize = 100
 )
 
-var bufferPool = sync.Pool {
+var bufferPool = sync.Pool{
 	New: func() any {
 		return make([]byte, rtpBufferSize)
 	},

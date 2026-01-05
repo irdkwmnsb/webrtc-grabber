@@ -3,8 +3,7 @@ package signalling
 import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/basicauth"
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/domain"
 )
 
 func (s *Server) setupAdminApi() {
@@ -22,27 +21,18 @@ func (s *Server) setupAdminApi() {
 				return c.Status(fiber.StatusBadRequest).SendString("Bad Request")
 			}
 
-			var socket sockets.Socket = nil
-			if peer, ok := s.storage.getPeerByName(req.PeerName); ok {
-				socket = s.grabberSockets.GetSocket(peer.SocketId)
-			}
-			if socket == nil {
-				return c.Status(fiber.StatusNotFound).SendString("Peer not found")
-			}
-
-			recordTimeout := s.config.Record.Timeout
+			timeout := uint(0)
 			if req.Timeout != nil {
-				recordTimeout = min(*req.Timeout, recordTimeout)
+				timeout = *req.Timeout
 			}
 
-			err := socket.WriteJSON(api.GrabberMessage{
-				Event: api.GrabberMessageEventRecordStart,
-				RecordStart: &api.RecordStartMessage{
-					RecordId:    req.RecordId,
-					TimeoutMsec: recordTimeout,
-				}})
+			err := s.recordingService.StartRecording(domain.StartRecordingCommand{
+				GrabberName: req.PeerName,
+				RecordID:    req.RecordId,
+				Timeout:     timeout,
+			})
 			if err != nil {
-				return c.Status(fiber.StatusInternalServerError).SendString("Failed to send start recoding request")
+				return c.Status(fiber.StatusInternalServerError).SendString("Failed to start recording: " + err.Error())
 			}
 			return c.Status(fiber.StatusOK).SendString("Ok")
 		})
@@ -53,19 +43,12 @@ func (s *Server) setupAdminApi() {
 				return c.Status(fiber.StatusBadRequest).SendString("Bad Request")
 			}
 
-			var socket sockets.Socket = nil
-			if peer, ok := s.storage.getPeerByName(req.PeerName); ok {
-				socket = s.grabberSockets.GetSocket(peer.SocketId)
-			}
-			if socket == nil {
-				return c.Status(fiber.StatusNotFound).SendString("Peer not found")
-			}
-
-			err := socket.WriteJSON(api.GrabberMessage{
-				Event:      api.GrabberMessageEventRecordStop,
-				RecordStop: &api.RecordStopMessage{RecordId: req.RecordId}})
+			err := s.recordingService.StopRecording(domain.StopRecordingCommand{
+				GrabberName: req.PeerName,
+				RecordID:    req.RecordId,
+			})
 			if err != nil {
-				return c.Status(fiber.StatusInternalServerError).SendString("Failed to send stop recoding request")
+				return c.Status(fiber.StatusInternalServerError).SendString("Failed to stop recording: " + err.Error())
 			}
 			return c.Status(fiber.StatusOK).SendString("Ok")
 		})
@@ -76,19 +59,12 @@ func (s *Server) setupAdminApi() {
 				return c.Status(fiber.StatusBadRequest).SendString("Bad Request")
 			}
 
-			var socket sockets.Socket = nil
-			if peer, ok := s.storage.getPeerByName(req.PeerName); ok {
-				socket = s.grabberSockets.GetSocket(peer.SocketId)
-			}
-			if socket == nil {
-				return c.Status(fiber.StatusNotFound).SendString("Peer not found")
-			}
-
-			err := socket.WriteJSON(api.GrabberMessage{
-				Event:        api.GrabberMessageEventRecordUpload,
-				RecordUpload: &api.RecordUploadMessage{RecordId: req.RecordId}})
+			err := s.recordingService.UploadRecording(domain.UploadRecordingCommand{
+				GrabberName: req.PeerName,
+				RecordID:    req.RecordId,
+			})
 			if err != nil {
-				return c.Status(fiber.StatusInternalServerError).SendString("Failed to send stop recoding request")
+				return c.Status(fiber.StatusInternalServerError).SendString("Failed to upload recording: " + err.Error())
 			}
 			return c.Status(fiber.StatusOK).SendString("Ok")
 		})
@@ -96,17 +72,11 @@ func (s *Server) setupAdminApi() {
 		router.Post("/players_disconnect/:peerName", func(c *fiber.Ctx) error {
 			peerName := c.Params("peerName")
 
-			var socket sockets.Socket = nil
-			if peer, ok := s.storage.getPeerByName(peerName); ok {
-				socket = s.grabberSockets.GetSocket(peer.SocketId)
-			}
-			if socket == nil {
-				return c.Status(fiber.StatusNotFound).SendString("Peer not found")
-			}
-
-			err := socket.WriteJSON(api.GrabberMessage{Event: api.GrabberMessageEventPlayersDisconnect})
+			err := s.recordingService.DisconnectPlayers(domain.DisconnectPlayersCommand{
+				GrabberName: peerName,
+			})
 			if err != nil {
-				return c.Status(fiber.StatusInternalServerError).SendString("Failed to send disconnect players request")
+				return c.Status(fiber.StatusInternalServerError).SendString("Failed to disconnect players: " + err.Error())
 			}
 			return c.Status(fiber.StatusOK).SendString("Ok")
 		})
