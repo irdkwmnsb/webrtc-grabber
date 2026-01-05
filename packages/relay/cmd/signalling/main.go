@@ -1,33 +1,51 @@
 package main
 
 import (
-	"log"
+	"log/slog"
+	"os"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/pprof"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/signalling"
+	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
 )
 
 func main() {
-	config, err := config.LoadServerConfig()
+	slog.SetDefault(slog.New(
+		tint.NewHandler(os.Stderr, &tint.Options{
+			Level:      slog.LevelDebug,
+			TimeFormat: time.Kitchen,
+		}),
+	))
+
+	cfgManager, err := config.NewManager("conf")
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
 	}
+
+	cfg := cfgManager.Get()
+
 	app := fiber.New(fiber.Config{
 		BodyLimit: 50 * 1024 * 1024,
 	})
 
-	server, err := signalling.NewServer(&config, app)
-
+	server, err := signalling.NewServer(&cfg, app)
 	if err != nil {
-		log.Fatalf("can not start signalling server, error - %v", err)
+		slog.Error("can not start signalling server", "error", err)
+		os.Exit(1)
 	}
 
 	defer server.Close()
+
+	cfgManager.SetUpdateCallback(func(newCfg *config.AppConfig) {
+		server.UpdateConfig(newCfg)
+	})
 
 	server.SetupWebSocketsAndApi()
 	app.Use(pprof.New())
@@ -42,10 +60,18 @@ func main() {
 	app.Static("/player", "./asset/player.html")
 	app.Static("/capture", "./asset/capture.html")
 
-	if config.ServerTLSCrtFile != nil && config.ServerTLSKeyFile != nil {
-		log.Printf("Running TLS http server...")
-		log.Fatal(app.ListenTLS(":"+strconv.Itoa(config.ServerPort), *config.ServerTLSCrtFile, *config.ServerTLSKeyFile))
+	slog.Info("starting server", "port", cfg.Server.Port)
+
+	if cfg.Security.TLSCrtFile != nil && cfg.Security.TLSKeyFile != nil {
+		slog.Info("running TLS http server")
+		if err := app.ListenTLS(":"+strconv.Itoa(cfg.Server.Port), *cfg.Security.TLSCrtFile, *cfg.Security.TLSKeyFile); err != nil {
+			slog.Error("server failed", "error", err)
+			os.Exit(1)
+		}
 	} else {
-		log.Fatal(app.Listen(":" + strconv.Itoa(config.ServerPort)))
+		if err := app.Listen(":" + strconv.Itoa(cfg.Server.Port)); err != nil {
+			slog.Error("server failed", "error", err)
+			os.Exit(1)
+		}
 	}
 }

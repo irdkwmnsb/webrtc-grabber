@@ -3,7 +3,7 @@ package player_client
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/fasthttp/websocket"
@@ -62,7 +62,7 @@ func (g *grabberPlayerClient) ConnectToPeer(ctx_ context.Context, cfg Connection
 		config:  cfg,
 	}
 
-	log.Printf("connecting to %s", g.getWebSocketClientUrl())
+	slog.Debug("connecting to signalling server", "url", g.getWebSocketClientUrl())
 
 	_ws, _, err := websocket.DefaultDialer.DialContext(ctx, g.getWebSocketClientUrl(), nil)
 	ws := sockets.NewFastHttpSocket(_ws)

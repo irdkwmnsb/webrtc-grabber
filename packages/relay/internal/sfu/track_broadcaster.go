@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 
@@ -77,9 +77,9 @@ func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, publisherS
 		n, _, err := remoteTrack.Read(buf)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				log.Printf("Publisher %s closed track", publisherSocketID)
+				slog.Debug("publisher closed track", "publisherSocketID", publisherSocketID)
 			} else {
-				log.Printf("Error reading from publisher %s: %v", publisherSocketID, err)
+				slog.Error("error reading from publisher", "publisherSocketID", publisherSocketID, "error", err)
 			}
 			return
 		}
@@ -105,7 +105,7 @@ func (tb *TrackBroadcaster) writeLoop() {
 				if errors.Is(err, io.ErrClosedPipe) {
 					return
 				}
-				log.Printf("Error writing to local track: %v", err)
+				slog.Error("error writing to local track", "error", err)
 			} else {
 				metrics.SFUPacketsSent.Inc()
 				metrics.SFUBytesSent.Add(float64(len(pkt)))

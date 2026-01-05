@@ -1,16 +1,17 @@
 package signalling
 
 import (
-	"github.com/gofiber/fiber/v2"
-	"log"
+	"log/slog"
 	"path"
 	"strings"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 func (s *Server) setupAgentApi() {
 	s.app.Route("/api/agent", func(router fiber.Router) {
 		router.Post("/:peerName/record_upload", func(c *fiber.Ctx) error {
-			if s.config.RecordStorageDir == "" {
+			if s.config.Record.StorageDir == "" {
 				return c.Status(fiber.StatusMethodNotAllowed).SendString("Record storage is not enabled")
 			}
 
@@ -24,9 +25,9 @@ func (s *Server) setupAgentApi() {
 				return c.Status(fiber.StatusBadRequest).SendString("File has incorrect extension")
 			}
 
-			log.Printf("Store agent record file %s (%dKB)", file.Filename, file.Size/1024)
+			slog.Info("store agent record file", "filename", file.Filename, "sizeKB", file.Size/1024)
 
-			destination := path.Join(s.config.RecordStorageDir, peerName+"_"+file.Filename)
+			destination := path.Join(s.config.Record.StorageDir, peerName+"_"+file.Filename)
 			if err := c.SaveFile(file, destination); err != nil {
 				return c.Status(fiber.StatusBadRequest).SendString("Failed to upload file")
 			}

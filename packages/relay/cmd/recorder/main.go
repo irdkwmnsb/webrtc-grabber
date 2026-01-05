@@ -2,22 +2,31 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/recorder"
+	"github.com/lmittmann/tint"
 )
 
 func main() {
+	slog.SetDefault(slog.New(
+		tint.NewHandler(os.Stderr, &tint.Options{
+			Level:      slog.LevelDebug,
+			TimeFormat: time.Kitchen,
+		}),
+	))
+
 	config, err := recorder.LoadRecorderConfig()
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
 	}
 
 	if err = os.MkdirAll(config.RecordingsDirectory, os.ModePerm); err != nil {
-		log.Printf("failed to create output directory %s", err)
+		slog.Warn("failed to create output directory", "error", err)
 	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -33,6 +42,8 @@ func main() {
 	})
 	app.Static("/record", "./asset/record.html")
 
-	log.Fatal(app.Listen(":8001"))
-
+	if err := app.Listen(":8001"); err != nil {
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
+	}
 }

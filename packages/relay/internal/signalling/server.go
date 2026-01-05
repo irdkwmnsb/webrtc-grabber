@@ -2,7 +2,7 @@ package signalling
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/netip"
 	"runtime"
 	"slices"
@@ -55,7 +55,7 @@ type Server struct {
 	app *fiber.App
 
 	// config holds server configuration including auth, codecs, and network settings
-	config *config.ServerConfig
+	config *config.AppConfig
 
 	// storage tracks active peers and their health status
 	storage *Storage
@@ -103,22 +103,22 @@ type Server struct {
 //	defer server.Close()
 //	server.SetupWebSockets()
 //	app.Listen(":8080")
-func NewServer(config *config.ServerConfig, app *fiber.App) (*Server, error) {
+func NewServer(cfg *config.AppConfig, app *fiber.App) (*Server, error) {
 
-	sfu, err := sfu.NewLocalSFU(config)
+	sfu, err := sfu.NewLocalSFU(&cfg.WebRTC, cfg.Server.PublicIP)
 	if err != nil {
 		return nil, err
 	}
 
 	server := Server{
-		config:         config,
+		config:         cfg,
 		app:            app,
 		playersSockets: sockets.NewSocketPool(),
 		grabberSockets: sockets.NewSocketPool(),
 		storage:        NewStorage(),
 		sfu:            sfu,
 	}
-	server.storage.setParticipants(config.Participants)
+	server.storage.setParticipants(cfg.Security.Participants)
 	server.oldPeersCleaner = utils.SetIntervalTimer(time.Minute, server.storage.deleteOldPeers)
 
 	go func() {
@@ -149,6 +149,17 @@ func (s *Server) Close() {
 	s.sfu.Close()
 }
 
+// UpdateConfig updates the server configuration with new values.
+// Only certain parameters can be updated at runtime:
+// - Security settings (credentials, participants, admin networks)
+// - Server settings (ping interval)
+// WebRTC settings and port cannot be changed without restart.
+func (s *Server) UpdateConfig(cfg *config.AppConfig) {
+	s.config = cfg
+	s.storage.setParticipants(cfg.Security.Participants)
+	slog.Info("server configuration updated")
+}
+
 // CheckPlayerCredential validates player authentication credentials.
 // Returns true if authentication is disabled (no credential configured)
 // or if the provided credential matches the configured credential.
@@ -161,7 +172,7 @@ func (s *Server) Close() {
 // This method is used during the player authentication flow to validate
 // credentials before allowing access to admin or play endpoints.
 func (s *Server) CheckPlayerCredential(credentials string) bool {
-	return s.config.PlayerCredential == nil || *s.config.PlayerCredential == credentials
+	return s.config.Security.PlayerCredential == nil || *s.config.Security.PlayerCredential == credentials
 }
 
 // SetupWebSockets configures all WebSocket endpoints on the Fiber application.
@@ -212,7 +223,7 @@ func (s *Server) isAdminIpAddr(addrPort string) (bool, error) {
 		return false, fmt.Errorf("can not parse admin ipaddr, error - %v", err)
 	}
 
-	for _, n := range s.config.AdminsRawNetworks {
+	for _, n := range s.config.Security.AdminsRawNetworks {
 		if n.Contains(ip.Addr()) {
 			return true, nil
 		}
@@ -233,7 +244,7 @@ func (s *Server) setupPlayerSockets() {
 	s.app.Get("/ws/player/admin", websocket.New(func(c *websocket.Conn) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("panic in /ws/player/admin: %v", err)
+				slog.Error("panic in /ws/player/admin", "error", err)
 
 				return
 			}
@@ -249,7 +260,7 @@ func (s *Server) setupPlayerSockets() {
 	s.app.Get("/ws/player/play", websocket.New(func(c *websocket.Conn) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("panic in /ws/player/play: %v", err)
+				slog.Error("panic in /ws/player/play", "error", err)
 
 				return
 			}
@@ -291,24 +302,24 @@ func (s *Server) checkPlayerAdmissions(c *websocket.Conn) bool {
 	var message api.PlayerMessage
 	ipAddr := c.NetConn().RemoteAddr().String()
 	socketID := sockets.SocketID(ipAddr)
-	log.Printf("trying to connect %s", socketID)
+	slog.Debug("trying to connect", "socketID", socketID)
 
 	isAdminIpAddr, err := s.isAdminIpAddr(ipAddr)
 
 	if err != nil {
-		log.Printf("can not parse ipaddr %s, error - %v", ipAddr, err)
+		slog.Error("can not parse ipaddr", "ipAddr", ipAddr, "error", err)
 		return false
 	}
 
 	if !isAdminIpAddr {
-		log.Printf("blocking access to the admin panel for %s", ipAddr)
+		slog.Warn("blocking access to the admin panel", "ipAddr", ipAddr)
 
 		message.Event = api.PlayerMessageEventAuthFailed
 		accessMessage := "Forbidden. IP address black listed"
 		message.AccessMessage = &accessMessage
 
 		if err = c.WriteJSON(&message); err != nil {
-			log.Printf("can not send message %v, error - %v", message, err)
+			slog.Error("can not send message", "message", message, "error", err)
 		}
 
 		return false
@@ -318,11 +329,11 @@ func (s *Server) checkPlayerAdmissions(c *websocket.Conn) bool {
 	if err := c.WriteJSON(&message); err != nil {
 		return false
 	}
-	log.Println("Requested auth")
+	slog.Debug("requested auth")
 
 	// check authorisation
 	if err := c.ReadJSON(&message); err != nil {
-		log.Printf("disconnected %s", socketID)
+		slog.Debug("disconnected", "socketID", socketID)
 		return false
 	}
 
@@ -336,15 +347,15 @@ func (s *Server) checkPlayerAdmissions(c *websocket.Conn) bool {
 			AccessMessage: &accessMessage,
 		})
 
-		log.Printf("failed to authorize %s", socketID)
+		slog.Warn("failed to authorize", "socketID", socketID)
 		return false
 	}
 
 	if err := c.WriteJSON(api.PlayerMessage{
 		Event:    api.PlayerMessageEventInitPeer,
-		InitPeer: &api.PcConfigMessage{PcConfig: s.config.PeerConnectionConfig},
+		InitPeer: &api.PcConfigMessage{PcConfig: s.config.WebRTC.PeerConnectionConfig},
 	}); err != nil {
-		log.Printf("failed to send init_peer%s", socketID)
+		slog.Error("failed to send init_peer", "socketID", socketID)
 	}
 	return true
 }
@@ -373,7 +384,7 @@ func (s *Server) checkPlayerAdmissions(c *websocket.Conn) bool {
 func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.playersSockets.AddSocket(c)
-	log.Printf("authorized %s", socketID)
+	slog.Info("authorized", "socketID", socketID)
 
 	metrics.ActivePlayers.Inc()
 	metrics.PlayersConnectedTotal.Inc()
@@ -400,7 +411,7 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 
 	for {
 		if err := newC.ReadJSON(&message); err != nil {
-			log.Printf("disconnected %s caused by %s", socketID, err.Error())
+			slog.Debug("disconnected", "socketID", socketID, "error", err.Error())
 			s.playersSockets.CloseSocket(socketID)
 			timer.Stop()
 			break
@@ -411,7 +422,7 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 			continue
 		}
 		if err := newC.WriteJSON(answer); err != nil {
-			log.Printf("failed to send message to %s: %v", socketID, answer)
+			slog.Error("failed to send message", "socketID", socketID, "answer", answer)
 			return
 		}
 	}
@@ -451,7 +462,7 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	s.playersSockets.AddSocket(c)
 	newC := s.playersSockets.AddSocket(c)
-	log.Printf("authorized %s", socketID)
+	slog.Info("authorized", "socketID", socketID)
 
 	metrics.ActivePlayers.Inc()
 	metrics.PlayersConnectedTotal.Inc()
@@ -469,7 +480,7 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	go func() { // rewrite this
 		for msg := range messages {
 			if err := newC.WriteJSON(msg); err != nil {
-				log.Printf("failed to send message to %s: %v", socketID, msg)
+				slog.Error("failed to send message", "socketID", socketID, "msg", msg)
 				return
 			}
 		}
@@ -501,7 +512,7 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	// Main read loop
 	for {
 		if err := newC.ReadJSON(&message); err != nil {
-			log.Printf("disconnected %s caused by %s", socketID, err.Error())
+			slog.Debug("disconnected", "socketID", socketID, "error", err.Error())
 			s.playersSockets.CloseSocket(socketID)
 			break
 		}
@@ -541,10 +552,9 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 // so it returns nil for offers. Other message types may return responses.
 func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 	m api.PlayerMessage) *api.PlayerMessage {
-	log.Printf("EVENT: %v, STREAM TYPE: %v", m.Event, m.Offer.StreamType)
+	slog.Debug("player message", "event", m.Event, "streamType", m.Offer.StreamType)
 	switch m.Event {
 	case api.PlayerMessageEventPong:
-		// log.Printf("Received pong from player %s", id)
 		return nil
 	case api.PlayerMessageEventOffer:
 		if m.Offer == nil {
@@ -555,18 +565,17 @@ func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 			grabberSocketID = sockets.SocketID(*m.Offer.PeerId)
 		} else if m.Offer.PeerName != nil {
 			if peer, ok := s.storage.getPeerByName(*m.Offer.PeerName); ok {
-				log.Println(m.Offer.StreamType)
+				slog.Debug("stream type", "streamType", m.Offer.StreamType)
 				if !slices.Contains(peer.StreamTypes, api.StreamType(m.Offer.StreamType)) {
 					_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
-					log.Printf("no such stream type %v in grabber with peerName %v",
-						m.Offer.StreamType, *m.Offer.PeerName)
+					slog.Warn("no such stream type in grabber", "streamType", m.Offer.StreamType, "peerName", *m.Offer.PeerName)
 					return nil
 				}
 				grabberSocketID = peer.SocketId
 			}
 		} else {
 			_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
-			log.Printf("offer missing PeerId or PeerName")
+			slog.Warn("offer missing PeerId or PeerName")
 			return nil
 		}
 
@@ -607,7 +616,7 @@ func (s *Server) setupGrabberSockets() {
 	s.app.Get("/ws/peers/:name", websocket.New(func(c *websocket.Conn) {
 		socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 		peerName := c.Params("name")
-		log.Printf("trying to connect %s", socketID)
+		slog.Debug("grabber trying to connect", "socketID", socketID)
 
 		s.storage.addPeer(peerName, socketID)
 
@@ -659,18 +668,18 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 	if err := newC.WriteJSON(api.GrabberMessage{
 		Event: api.GrabberMessageEventInitPeer,
 		InitPeer: &api.GrabberInitPeerMessage{
-			PcConfigMessage: api.PcConfigMessage{PcConfig: s.config.PeerConnectionConfig},
-			PingInterval:    s.config.GrabberPingInterval,
+			PcConfigMessage: api.PcConfigMessage{PcConfig: s.config.WebRTC.PeerConnectionConfig},
+			PingInterval:    s.config.Server.GrabberPingInterval,
 		},
 	}); err != nil {
-		log.Printf("failed to send init_peer for %s: %v", socketID, err)
+		slog.Error("failed to send init_peer", "socketID", socketID, "error", err)
 		return
 	}
 
 	var message api.GrabberMessage
 	for {
 		if err := newC.ReadJSON(&message); err != nil {
-			log.Printf("disconnected %s caused by %s", socketID, err.Error())
+			slog.Debug("grabber disconnected", "socketID", socketID, "error", err.Error())
 			s.grabberSockets.CloseSocket(socketID)
 			s.sfu.DeletePublisher(socketID)
 			break
@@ -681,7 +690,7 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 			continue
 		}
 		if err := newC.WriteJSON(answer); err != nil {
-			log.Printf("failed to send answer %v to %s", answer, socketID)
+			slog.Error("failed to send answer", "answer", answer, "socketID", socketID)
 		}
 	}
 }
@@ -733,7 +742,7 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 
 	case api.GrabberMessageEventGrabberIce:
 		if m.Ice == nil || m.Ice.PeerId == nil {
-			log.Printf("invalid IceMessage: missing data")
+			slog.Warn("invalid IceMessage: missing data")
 			return nil
 		}
 		grabberKey := *m.Ice.PeerId

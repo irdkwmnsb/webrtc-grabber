@@ -2,7 +2,7 @@ package recorder
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -35,7 +35,7 @@ func (r *Server) SetupRouting(rootCnt context.Context) {
 		if err != nil {
 			return err
 		}
-		log.Println(data)
+		slog.Debug("start recording request", "data", data)
 		var duration time.Duration
 		if data.Duration != nil {
 			duration = time.Duration(*data.Duration) * time.Second

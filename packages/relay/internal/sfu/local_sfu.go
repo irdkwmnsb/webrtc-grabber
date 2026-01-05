@@ -85,7 +85,7 @@ package sfu
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -265,8 +265,8 @@ type LocalSFU struct {
 	// subscribers maps subscriber socket IDs to Subscriber instances
 	subscribers *utils.SyncMapWrapper[string, *Subscriber]
 
-	// config holds server configuration including codecs and connection params
-	config *config.ServerConfig
+	// config holds WebRTC configuration including codecs and connection params
+	config *config.WebRTCConfig
 
 	// api is the WebRTC API instance with configured media engine
 	api *webrtc.API
@@ -304,11 +304,11 @@ func getPublisherKey(publisherSocketID sockets.SocketID, streamType string) stri
 //
 // The returned PeerManager must be closed with Close() before application shutdown
 // to properly clean up all resources and connections.
-func NewLocalSFU(config *config.ServerConfig) (*LocalSFU, error) {
+func NewLocalSFU(cfg *config.WebRTCConfig, publicIP string) (*LocalSFU, error) {
 	debug.SetGCPercent(20) // SPECIFIC THING
 
 	mediaEngine := &webrtc.MediaEngine{}
-	for _, codec := range config.Codecs {
+	for _, codec := range cfg.Codecs {
 		if err := mediaEngine.RegisterCodec(codec.Params, codec.Type); err != nil {
 			return nil, fmt.Errorf("failed to register codec: %w", err)
 		}
@@ -328,14 +328,14 @@ func NewLocalSFU(config *config.ServerConfig) (*LocalSFU, error) {
 	interceptorRegistry.Add(internalPliFactory)
 
 	se := webrtc.SettingEngine{}
-	if len(config.PeerConnectionConfig.IceServers) == 0 && len(config.PublicIP) > 0 {
+	if len(cfg.PeerConnectionConfig.IceServers) == 0 && len(publicIP) > 0 {
 		se.SetNAT1To1IPs([]string{
-			config.PublicIP,
+			publicIP,
 		}, webrtc.ICECandidateTypeHost)
 	}
 
-	if config.WebRTCPortMin > 0 && config.WebRTCPortMax > 0 {
-		err = se.SetEphemeralUDPPortRange(config.WebRTCPortMin, config.WebRTCPortMax)
+	if cfg.PortMin > 0 && cfg.PortMax > 0 {
+		err = se.SetEphemeralUDPPortRange(cfg.PortMin, cfg.PortMax)
 		if err != nil {
 			return nil, fmt.Errorf("failed to set WebRTC port range: %w", err)
 		}
@@ -351,7 +351,7 @@ func NewLocalSFU(config *config.ServerConfig) (*LocalSFU, error) {
 
 	pm := &LocalSFU{
 		api:         webrtcApi,
-		config:      config,
+		config:      cfg,
 		ctx:         ctx,
 		cancel:      cancel,
 		publishers:  utils.NewSyncMapWrapper[string, *Publisher](),
@@ -437,8 +437,7 @@ func (pm *LocalSFU) DeleteSubscriber(id sockets.SocketID) {
 	}
 
 	remainingCount := publisher.RemoveSubscriber(subscriber.pc)
-	log.Printf("Removed subscriber %s from publisher %s. Remaining subscribers: %d",
-		id, subscriber.publisherKey, remainingCount)
+	slog.Debug("removed subscriber from publisher", "subscriberID", id, "publisherKey", subscriber.publisherKey, "remaining", remainingCount)
 
 	if remainingCount == 0 {
 		pm.cleanupPublisher(subscriber.publisherKey)
@@ -461,7 +460,7 @@ func (pm *LocalSFU) cleanupPublisher(publisherKey string) {
 		return
 	}
 
-	log.Printf("Cleaning up publisher %s", publisherKey)
+	slog.Debug("cleaning up publisher", "publisherKey", publisherKey)
 	publisher.Close()
 }
 
@@ -494,26 +493,26 @@ func (pm *LocalSFU) AddSubscriber(id sockets.SocketID, ctx *NewSubscriberContext
 	publisherKey := getPublisherKey(ctx.publisherSocketID, ctx.streamType)
 
 	if err := pm.validatePublisher(publisherKey, ctx); err != nil {
-		log.Printf("Publisher validation failed: %v", err)
+		slog.Warn("publisher validation failed", "error", err)
 		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
 	}
 
 	subscriberPC, err := pm.createSubscriberPeerConnection(id, ctx.streamType)
 	if err != nil {
-		log.Printf("Failed to create subscriber peer connection: %v", err)
+		slog.Error("failed to create subscriber peer connection", "error", err)
 		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
 	}
 
 	subscriber := pm.createSubscriber(subscriberPC, publisherKey, id)
 	if err := pm.addTracksToSubscriber(subscriber, publisherKey, id); err != nil {
-		log.Printf("Failed to add tracks to subscriber: %v", err)
+		slog.Error("failed to add tracks to subscriber", "error", err)
 		pm.DeleteSubscriber(id)
 		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
 	}
 
 	answer, err := pm.completeSignaling(subscriberPC, ctx.offer, id, ctx.streamType, ctx.c, publisherKey)
 	if err != nil {
-		log.Printf("Failed to complete signaling: %v", err)
+		slog.Error("failed to complete signaling", "error", err)
 		pm.DeleteSubscriber(id)
 		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
 	}
@@ -568,9 +567,9 @@ func (pm *LocalSFU) setupICEStateMonitoring(pc *webrtc.PeerConnection, id socket
 	subscriberPeerID, streamType string) {
 
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		log.Printf("ICE connection state for subscriber %s stream %s: %s", id, streamType, state.String())
+		slog.Debug("ICE connection state for subscriber", "subscriberID", id, "streamType", streamType, "state", state.String())
 		if state == webrtc.ICEConnectionStateDisconnected || state == webrtc.ICEConnectionStateFailed {
-			log.Printf("Player %s (%s) disconnected or failed, cleaning up", id, subscriberPeerID)
+			slog.Debug("player disconnected or failed, cleaning up", "playerID", id, "peerID", subscriberPeerID)
 			pm.DeleteSubscriber(id)
 		}
 	})
@@ -594,7 +593,7 @@ func (pm *LocalSFU) addTracksToSubscriber(subscriber *Subscriber, publisherKey s
 	publisher.AddSubscriber(subscriber.pc)
 
 	trackCount := publisher.BroadcasterCount()
-	log.Printf("Adding %d tracks to subscriber %s", trackCount, id)
+	slog.Debug("adding tracks to subscriber", "trackCount", trackCount, "subscriberID", id)
 
 	tracksAdded := 0
 	for _, broadcaster := range publisher.GetBroadcasters() {
@@ -646,7 +645,7 @@ func (pm *LocalSFU) processRTCPFeedback(
 		for _, pkt := range packets {
 			switch pkt.(type) {
 			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
-				log.Printf("Relaying PLI from %s to publisher for SSRC %d", subscriberID, remoteSSRC)
+				slog.Debug("relaying PLI to publisher", "subscriberID", subscriberID, "ssrc", remoteSSRC)
 				if err := publisherPC.WriteRTCP([]rtcp.Packet{
 					&rtcp.PictureLossIndication{MediaSSRC: remoteSSRC},
 				}); err != nil {
@@ -724,13 +723,13 @@ func (pm *LocalSFU) ensureGrabberConnection(publisherKey string, publisherSocket
 	publisher, loaded := pm.publishers.LoadOrStore(publisherKey, NewPublisher())
 	if loaded {
 		if atomic.LoadInt32(&publisher.setupInProgress) > 0 {
-			log.Printf("Setup in progress for %s, waiting...", publisherKey)
+			slog.Debug("setup in progress, waiting", "publisherKey", publisherKey)
 			select {
 			case <-publisher.setupChan:
-				log.Printf("Setup completed for %s", publisherKey)
+				slog.Debug("setup completed", "publisherKey", publisherKey)
 				return true
 			case <-time.After(PublisherWaitingTime):
-				log.Printf("Timeout waiting for setup of %s", publisherKey)
+				slog.Warn("timeout waiting for setup", "publisherKey", publisherKey)
 				return false
 			}
 		}
@@ -750,10 +749,10 @@ func (pm *LocalSFU) ensureGrabberConnection(publisherKey string, publisherSocket
 
 	select {
 	case <-publisher.setupChan:
-		log.Printf("Setup completed for %s", publisherKey)
+		slog.Debug("setup completed", "publisherKey", publisherKey)
 		return true
 	case <-time.After(PublisherWaitingTime):
-		log.Printf("Timeout during setup of %s", publisherKey)
+		slog.Warn("timeout during setup", "publisherKey", publisherKey)
 		pm.cleanupPublisher(publisherKey)
 		return false
 	}
@@ -772,12 +771,12 @@ func (pm *LocalSFU) ensureGrabberConnection(publisherKey string, publisherSocket
 func (pm *LocalSFU) SubscriberICE(id sockets.SocketID, candidate webrtc.ICECandidateInit) {
 	subscriber, ok := pm.subscribers.Load(string(id))
 	if !ok {
-		log.Printf("no subscriber peer connections for %v", id)
+		slog.Warn("no subscriber peer connections", "subscriberID", id)
 		return
 	}
 
 	if err := subscriber.pc.AddICECandidate(candidate); err != nil {
-		log.Printf("failed to add ICE candidate to subscriber %v peer connection: %v", id, err)
+		slog.Error("failed to add ICE candidate to subscriber peer connection", "subscriberID", id, "error", err)
 	}
 }
 
@@ -824,17 +823,17 @@ func (pm *LocalSFU) DeletePublisher(id sockets.SocketID) {
 func (pm *LocalSFU) OfferAnswerPublisher(publisherKey string, answer webrtc.SessionDescription) {
 	publisher, ok := pm.publishers.Load(publisherKey)
 	if !ok {
-		log.Printf("no peer connection for publisher %s", publisherKey)
+		slog.Warn("no peer connection for publisher", "publisherKey", publisherKey)
 		return
 	}
 
 	if publisher.pc == nil {
-		log.Printf("Publisher %s has no peer connection", publisherKey)
+		slog.Warn("publisher has no peer connection", "publisherKey", publisherKey)
 		return
 	}
 
 	if err := publisher.pc.SetRemoteDescription(answer); err != nil {
-		log.Printf("failed to set remote description for publisher %s: %v", publisherKey, err)
+		slog.Error("failed to set remote description for publisher", "publisherKey", publisherKey, "error", err)
 	}
 }
 
@@ -851,17 +850,17 @@ func (pm *LocalSFU) OfferAnswerPublisher(publisherKey string, answer webrtc.Sess
 func (pm *LocalSFU) AddICECandidatePublisher(publisherKey string, candidate webrtc.ICECandidateInit) {
 	publisher, ok := pm.publishers.Load(publisherKey)
 	if !ok {
-		log.Printf("no peer connection for publisher %s", publisherKey)
+		slog.Warn("no peer connection for publisher", "publisherKey", publisherKey)
 		return
 	}
 
 	if publisher.pc == nil {
-		log.Printf("Publisher %s has no peer connection", publisherKey)
+		slog.Warn("publisher has no peer connection", "publisherKey", publisherKey)
 		return
 	}
 
 	if err := publisher.pc.AddICECandidate(candidate); err != nil {
-		log.Printf("failed to add ICE candidate to publisher %s: %v", publisherKey, err)
+		slog.Error("failed to add ICE candidate to publisher", "publisherKey", publisherKey, "error", err)
 	}
 }
 
@@ -897,11 +896,11 @@ func (pm *LocalSFU) AddICECandidatePublisher(publisherKey string, candidate webr
 func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketID, publisher *Publisher,
 	streamType string, publisherConn sockets.Socket) {
 	publisherKey := getPublisherKey(publisherSocketID, streamType)
-	log.Printf("Setting up publisher peer connection for %s, streamType=%s", publisherSocketID, streamType)
+	slog.Info("setting up publisher peer connection", "publisherSocketID", publisherSocketID, "streamType", streamType)
 
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("CRITICAL PANIC in setupGrabberPeerConnection: %v\nstack: %s", r, debug.Stack())
+			slog.Error("CRITICAL PANIC in setupGrabberPeerConnection", "panic", r, "stack", string(debug.Stack()))
 			atomic.StoreInt32(&publisher.setupInProgress, 0)
 			pm.cleanupPublisher(publisherKey)
 		}
@@ -915,7 +914,7 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 	config := pm.config.PeerConnectionConfig.WebrtcConfiguration()
 	pc, err := pm.api.NewPeerConnection(config)
 	if err != nil {
-		log.Printf("failed to create publisher peer connection %s: %v", publisherSocketID, err)
+		slog.Error("failed to create publisher peer connection", "publisherSocketID", publisherSocketID, "error", err)
 		pm.cleanupPublisher(publisherKey)
 		return
 	}
@@ -926,7 +925,7 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 		Direction: webrtc.RTPTransceiverDirectionRecvonly,
 	})
 	if err != nil {
-		log.Printf("failed to add video transceiver for publisher %s: %v", publisherSocketID, err)
+		slog.Error("failed to add video transceiver for publisher", "publisherSocketID", publisherSocketID, "error", err)
 		pm.cleanupPublisher(publisherKey)
 		return
 	}
@@ -936,7 +935,7 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 			Direction: webrtc.RTPTransceiverDirectionRecvonly,
 		})
 		if err != nil {
-			log.Printf("failed to add audio transceiver for publisher %s: %v", publisherSocketID, err)
+			slog.Error("failed to add audio transceiver for publisher", "publisherSocketID", publisherSocketID, "error", err)
 			pm.cleanupPublisher(publisherKey)
 			return
 		}
@@ -947,30 +946,29 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 	defer trackTimeout.Stop()
 
 	pc.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		log.Printf("Track received: ID=%s, Kind=%s, Codec=%s, PayloadType=%d",
-			remoteTrack.ID(), remoteTrack.Kind(), remoteTrack.Codec().MimeType, remoteTrack.Codec().PayloadType)
+		slog.Info("track received", "trackID", remoteTrack.ID(), "kind", remoteTrack.Kind(), "codec", remoteTrack.Codec().MimeType, "payloadType", remoteTrack.Codec().PayloadType)
 
 		if pm.config.DisableAudio && remoteTrack.Kind() == webrtc.RTPCodecTypeAudio {
-			log.Print("Track is audio, but DisableAudio enabled, skipping track...")
+			slog.Debug("track is audio but DisableAudio enabled, skipping track")
 			return
 		}
 
 		broadcaster, err := NewTrackBroadcaster(remoteTrack, publisherSocketID)
 		if err != nil {
-			log.Printf("Failed to create broadcaster for publisher %s: %v", publisherSocketID, err)
+			slog.Error("failed to create broadcaster for publisher", "publisherSocketID", publisherSocketID, "error", err)
 			return
 		}
 
 		publisher.AddBroadcaster(broadcaster)
 
 		subscribers := publisher.GetSubscribers()
-		log.Printf("Adding new track to %d existing subscribers for %s", len(subscribers), publisherSocketID)
+		slog.Debug("adding new track to existing subscribers", "subscribersCount", len(subscribers), "publisherSocketID", publisherSocketID)
 
 		for _, subscriberPC := range subscribers {
 			localTrack := broadcaster.GetLocalTrack()
 			rtpSender, err := subscriberPC.AddTrack(localTrack)
 			if err != nil {
-				log.Printf("Failed to add track to existing subscriber: %v", err)
+				slog.Error("failed to add track to existing subscriber", "error", err)
 				continue
 			}
 
@@ -1004,28 +1002,28 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 					Candidate: candidate.ToJSON(),
 				},
 			}); err != nil {
-				log.Printf("failed to send ICE candidate to publisher %s: %v", publisherSocketID, err)
+				slog.Error("failed to send ICE candidate to publisher", "publisherSocketID", publisherSocketID, "error", err)
 			}
 		}
 	})
 
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		log.Printf("ICE connection state for publisher %s: %s", publisherSocketID, state.String())
+		slog.Debug("ICE connection state for publisher", "publisherSocketID", publisherSocketID, "state", state.String())
 		if state == webrtc.ICEConnectionStateClosed || state == webrtc.ICEConnectionStateFailed {
-			log.Printf("Grabber %s disconnected or failed, cleaning up", publisherKey)
+			slog.Warn("grabber disconnected or failed, cleaning up", "publisherKey", publisherKey)
 			pm.cleanupPublisher(publisherKey)
 		}
 	})
 
 	offer, err := pc.CreateOffer(nil)
 	if err != nil {
-		log.Printf("failed to create offer for publisher %s: %v", publisherSocketID, err)
+		slog.Error("failed to create offer for publisher", "publisherSocketID", publisherSocketID, "error", err)
 		pm.cleanupPublisher(publisherKey)
 		return
 	}
 
 	if err := pc.SetLocalDescription(offer); err != nil {
-		log.Printf("failed to set local description for publisher %s: %v", publisherSocketID, err)
+		slog.Error("failed to set local description for publisher", "publisherSocketID", publisherSocketID, "error", err)
 		pm.cleanupPublisher(publisherKey)
 		return
 	}
@@ -1038,16 +1036,16 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 			StreamType: streamType,
 		},
 	}); err != nil {
-		log.Printf("failed to send offer to publisher %s: %v", publisherSocketID, err)
+		slog.Error("failed to send offer to publisher", "publisherSocketID", publisherSocketID, "error", err)
 		pm.cleanupPublisher(publisherKey)
 		return
 	}
 
 	<-trackTimeout.C
 	if !firstTrackReceived {
-		log.Printf("Timeout waiting for first track from publisher %s", publisherSocketID)
+		slog.Warn("timeout waiting for first track from publisher", "publisherSocketID", publisherSocketID)
 		pm.cleanupPublisher(publisherKey)
 		return
 	}
-	log.Printf("Track setup completed for grabber %s with %d tracks", publisherSocketID, publisher.BroadcasterCount())
+	slog.Info("track setup completed for grabber", "publisherSocketID", publisherSocketID, "trackCount", publisher.BroadcasterCount())
 }

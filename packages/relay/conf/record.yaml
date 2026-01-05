@@ -1,0 +1,5 @@
+# Record configuration
+# All fields are optional - defaults will be used if not specified
+
+# timeout: 180000
+# storageDirectory: "./records"
