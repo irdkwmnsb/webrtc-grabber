@@ -53,7 +53,7 @@ groups:
           description: "Peer connection failure rate is {{ $value }} failures/sec. Reason: {{ $labels.reason }}"
 
       - alert: PeerConnectionsStuckConnecting
-        expr: webrtc_grabber_active_peer_connections > 0 and rate(webrtc_grabber_peer_connections_created_total[5m]) == 0
+        expr: sum(webrtc_grabber_active_peer_connections) > 0 and sum(rate(webrtc_grabber_peer_connections_created_total[5m])) == 0
         for: 10m
         labels:
           severity: warning
@@ -72,18 +72,28 @@ groups:
           summary: "No active media tracks despite active agents"
           description: "There are active agents but no media tracks are being streamed."
 
-      - alert: HighPacketLossRate
-        expr: rate(webrtc_grabber_sfu_packets_lost_total[5m]) / rate(webrtc_grabber_sfu_packets_received_total[5m]) > 0.05
+      - alert: HighNACKRate
+        expr: rate(webrtc_grabber_nack_requests_total[5m]) > 100
         for: 5m
         labels:
           severity: warning
           component: sfu
         annotations:
-          summary: "High packet loss rate in SFU"
-          description: "SFU packet loss rate is {{ $value | humanizePercentage }}."
+          summary: "High NACK request rate (packet loss)"
+          description: "NACK request rate is {{ $value }} requests/sec. This indicates packet loss."
+
+      - alert: HighPLIRate
+        expr: rate(webrtc_grabber_pli_requests_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: sfu
+        annotations:
+          summary: "High PLI request rate (video quality issues)"
+          description: "PLI request rate is {{ $value }} requests/sec. This indicates video quality degradation."
 
       - alert: HighGoroutineCount
-        expr: webrtc_grabber_goroutines > 1000
+        expr: go_goroutines > 1000
         for: 5m
         labels:
           severity: warning
@@ -93,7 +103,7 @@ groups:
           description: "Goroutine count is {{ $value }}. Possible goroutine leak."
 
       - alert: VeryHighGoroutineCount
-        expr: webrtc_grabber_goroutines > 5000
+        expr: go_goroutines > 5000
         for: 2m
         labels:
           severity: critical
@@ -101,6 +111,26 @@ groups:
         annotations:
           summary: "Very high number of goroutines"
           description: "Goroutine count is {{ $value }}. Critical goroutine leak detected."
+
+      - alert: HighCPUUsage
+        expr: rate(webrtc_grabber_process_cpu_seconds_total[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High CPU usage"
+          description: "Process CPU usage is {{ $value | humanizePercentage }}."
+
+      - alert: HighMemoryUsage
+        expr: webrtc_grabber_process_resident_memory_bytes > 1073741824
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage"
+          description: "Process is using {{ $value | humanize1024 }}B of memory."
 
       - alert: HighRelayICECandidateUsage
         expr: rate(webrtc_grabber_ice_candidates_total{type="relay"}[5m]) / (rate(webrtc_grabber_ice_candidates_total[5m]) + 0.001) > 0.8

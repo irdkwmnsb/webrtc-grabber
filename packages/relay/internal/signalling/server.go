@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
-	"runtime"
 	"slices"
 	"time"
 
@@ -121,13 +120,8 @@ func NewServer(cfg *config.AppConfig, app *fiber.App) (*Server, error) {
 	server.storage.setParticipants(cfg.Security.Participants)
 	server.oldPeersCleaner = utils.SetIntervalTimer(time.Minute, server.storage.deleteOldPeers)
 
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			metrics.GoRoutines.Set(float64(runtime.NumGoroutine()))
-		}
-	}()
+	// Record server start time
+	metrics.StartTime.Set(float64(time.Now().Unix()))
 
 	return &server, nil
 }
@@ -157,6 +151,7 @@ func (s *Server) Close() {
 func (s *Server) UpdateConfig(cfg *config.AppConfig) {
 	s.config = cfg
 	s.storage.setParticipants(cfg.Security.Participants)
+	metrics.ConfigReloads.Inc()
 	slog.Info("server configuration updated")
 }
 
@@ -416,6 +411,7 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 			timer.Stop()
 			break
 		}
+		metrics.WebSocketMessagesTotal.WithLabelValues("player_admin", "in").Inc()
 
 		answer := s.processPlayerMessage(newC, socketID, message)
 		if answer == nil {
@@ -516,11 +512,13 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 			s.playersSockets.CloseSocket(socketID)
 			break
 		}
+		metrics.WebSocketMessagesTotal.WithLabelValues("player_play", "in").Inc()
 
 		answer := s.processPlayerMessage(newC, socketID, message)
 		if answer == nil {
 			continue
 		}
+		metrics.WebSocketMessagesTotal.WithLabelValues("player_play", "out").Inc()
 		messages <- answer
 	}
 }
@@ -553,6 +551,7 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 	m api.PlayerMessage) *api.PlayerMessage {
 	slog.Debug("player message", "event", m.Event, "streamType", m.Offer.StreamType)
+	metrics.SignallingMessagesTotal.WithLabelValues(string(m.Event), "in").Inc()
 	switch m.Event {
 	case api.PlayerMessageEventPong:
 		return nil
@@ -684,11 +683,13 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 			s.sfu.DeletePublisher(socketID)
 			break
 		}
+		metrics.WebSocketMessagesTotal.WithLabelValues("grabber", "in").Inc()
 
 		answer := s.processGrabberMessage(socketID, message)
 		if answer == nil {
 			continue
 		}
+		metrics.WebSocketMessagesTotal.WithLabelValues("grabber", "out").Inc()
 		if err := newC.WriteJSON(answer); err != nil {
 			slog.Error("failed to send answer", "answer", answer, "socketID", socketID)
 		}
@@ -727,6 +728,7 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 // Currently, no messages require responses (all are one-way notifications),
 // so this method always returns nil.
 func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage) *api.GrabberMessage {
+	metrics.SignallingMessagesTotal.WithLabelValues(string(m.Event), "in").Inc()
 	switch m.Event {
 	case api.GrabberMessageEventPing:
 		if m.Ping == nil {

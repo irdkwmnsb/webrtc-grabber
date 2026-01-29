@@ -11,6 +11,8 @@ import (
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/signalling"
 	"github.com/lmittmann/tint"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
 )
@@ -49,6 +51,11 @@ func main() {
 
 	server.SetupWebSocketsAndApi()
 	app.Use(pprof.New())
+
+	prometheus.Unregister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+		Namespace: "webrtc_grabber",
+	}))
 
 	promHandler := promhttp.Handler()
 	app.Get("/metrics", func(c *fiber.Ctx) error {

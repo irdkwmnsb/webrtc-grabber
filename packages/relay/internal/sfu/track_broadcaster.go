@@ -18,7 +18,7 @@ const (
 	packetQueueSize = 100
 )
 
-var bufferPool = sync.Pool {
+var bufferPool = sync.Pool{
 	New: func() any {
 		return make([]byte, rtpBufferSize)
 	},
@@ -58,6 +58,8 @@ func NewTrackBroadcaster(remoteTrack *webrtc.TrackRemote, publisherSocketID sock
 	go broadcaster.readLoop(remoteTrack, publisherSocketID)
 	go broadcaster.writeLoop()
 
+	metrics.ActiveBroadcasters.Inc()
+
 	return broadcaster, nil
 }
 
@@ -86,6 +88,8 @@ func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, publisherS
 
 		metrics.SFUPacketsReceived.Inc()
 		metrics.SFUBytesReceived.Add(float64(n))
+		metrics.RTPPacketsTotal.WithLabelValues("received").Inc()
+		metrics.RTPBytesTotal.WithLabelValues("received").Add(float64(n))
 
 		select {
 		case tb.packetChan <- buf[:n]:
@@ -109,6 +113,8 @@ func (tb *TrackBroadcaster) writeLoop() {
 			} else {
 				metrics.SFUPacketsSent.Inc()
 				metrics.SFUBytesSent.Add(float64(len(pkt)))
+				metrics.RTPPacketsTotal.WithLabelValues("forwarded").Inc()
+				metrics.RTPBytesTotal.WithLabelValues("forwarded").Add(float64(len(pkt)))
 			}
 		}
 	}
@@ -128,6 +134,7 @@ func (tb *TrackBroadcaster) GetLocalTrack() *webrtc.TrackLocalStaticRTP {
 
 func (tb *TrackBroadcaster) Stop() {
 	tb.cancel()
+	metrics.ActiveBroadcasters.Dec()
 }
 
 func (tb *TrackBroadcaster) GetSubscriberCount() int {

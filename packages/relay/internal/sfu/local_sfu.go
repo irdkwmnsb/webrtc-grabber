@@ -415,7 +415,7 @@ func (pm *LocalSFU) DeleteSubscriber(id sockets.SocketID) {
 
 	if subscriber.pc != nil {
 		_ = subscriber.pc.Close()
-		metrics.ActivePeerConnections.Dec()
+		metrics.ActivePeerConnections.WithLabelValues("subscriber").Dec()
 	}
 
 	publisher, ok := pm.publishers.Load(subscriber.publisherKey)
@@ -461,6 +461,9 @@ func (pm *LocalSFU) cleanupPublisher(publisherKey string) {
 	}
 
 	slog.Debug("cleaning up publisher", "publisherKey", publisherKey)
+	if publisher.pc != nil {
+		metrics.ActivePeerConnections.WithLabelValues("publisher").Dec()
+	}
 	publisher.Close()
 }
 
@@ -490,6 +493,7 @@ func (pm *LocalSFU) cleanupPublisher(publisherKey string) {
 // This method is thread-safe and can handle multiple concurrent subscribers
 // connecting to the same or different publishers.
 func (pm *LocalSFU) AddSubscriber(id sockets.SocketID, ctx *NewSubscriberContext) *api.PlayerMessage {
+	setupStartTime := time.Now()
 	publisherKey := getPublisherKey(ctx.publisherSocketID, ctx.streamType)
 
 	if err := pm.validatePublisher(publisherKey, ctx); err != nil {
@@ -515,6 +519,12 @@ func (pm *LocalSFU) AddSubscriber(id sockets.SocketID, ctx *NewSubscriberContext
 		slog.Error("failed to complete signaling", "error", err)
 		pm.DeleteSubscriber(id)
 		return &api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed}
+	}
+
+	// Record subscriber setup metrics
+	metrics.PeerConnectionSetupDuration.WithLabelValues("subscriber").Observe(time.Since(setupStartTime).Seconds())
+	if publisher, ok := pm.publishers.Load(publisherKey); ok {
+		metrics.SubscribersPerPublisher.Observe(float64(len(publisher.GetSubscribers())))
 	}
 
 	return &api.PlayerMessage{
@@ -553,8 +563,8 @@ func (pm *LocalSFU) createSubscriberPeerConnection(id sockets.SocketID, streamTy
 		return nil, fmt.Errorf("failed to create peer connection for %s: %w", id, err)
 	}
 
-	metrics.ActivePeerConnections.Inc()
-	metrics.PeerConnectionsCreatedTotal.Inc()
+	metrics.ActivePeerConnections.WithLabelValues("subscriber").Inc()
+	metrics.PeerConnectionsCreatedTotal.WithLabelValues("subscriber").Inc()
 
 	subscriberPeerID := fmt.Sprintf("%s_%s", id, streamType)
 	pm.setupICEStateMonitoring(subscriberPC, id, subscriberPeerID, streamType)
@@ -568,6 +578,7 @@ func (pm *LocalSFU) setupICEStateMonitoring(pc *webrtc.PeerConnection, id socket
 
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		slog.Debug("ICE connection state for subscriber", "subscriberID", id, "streamType", streamType, "state", state.String())
+		metrics.PeerConnectionStateChanges.WithLabelValues("subscriber", state.String()).Inc()
 		if state == webrtc.ICEConnectionStateDisconnected || state == webrtc.ICEConnectionStateFailed {
 			slog.Debug("player disconnected or failed, cleaning up", "playerID", id, "peerID", subscriberPeerID)
 			pm.DeleteSubscriber(id)
@@ -645,12 +656,15 @@ func (pm *LocalSFU) processRTCPFeedback(
 		for _, pkt := range packets {
 			switch pkt.(type) {
 			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
+				metrics.PLIRequestsTotal.Inc()
 				slog.Debug("relaying PLI to publisher", "subscriberID", subscriberID, "ssrc", remoteSSRC)
 				if err := publisherPC.WriteRTCP([]rtcp.Packet{
 					&rtcp.PictureLossIndication{MediaSSRC: remoteSSRC},
 				}); err != nil {
 					return
 				}
+			case *rtcp.TransportLayerNack:
+				metrics.NACKRequestsTotal.Inc()
 			}
 		}
 	}
@@ -684,6 +698,7 @@ func (pm *LocalSFU) completeSignaling(pc *webrtc.PeerConnection, offer *webrtc.S
 func (pm *LocalSFU) setupICECandidateHandler(pc *webrtc.PeerConnection, c sockets.Socket, publisherKey string) {
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate != nil {
+			metrics.ICECandidatesTotal.WithLabelValues(candidate.Typ.String()).Inc()
 			_ = c.WriteJSON(api.PlayerMessage{
 				Event: api.PlayerMessageEventGrabberIce,
 				Ice: &api.IceMessage{
@@ -895,6 +910,7 @@ func (pm *LocalSFU) AddICECandidatePublisher(publisherKey string, candidate webr
 // upon completion (success or failure) to wake up any waiting goroutines.
 func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketID, publisher *Publisher,
 	streamType string, publisherConn sockets.Socket) {
+	setupStartTime := time.Now()
 	publisherKey := getPublisherKey(publisherSocketID, streamType)
 	slog.Info("setting up publisher peer connection", "publisherSocketID", publisherSocketID, "streamType", streamType)
 
@@ -915,9 +931,13 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 	pc, err := pm.api.NewPeerConnection(config)
 	if err != nil {
 		slog.Error("failed to create publisher peer connection", "publisherSocketID", publisherSocketID, "error", err)
+		metrics.PeerConnectionFailuresTotal.WithLabelValues("publisher_creation_failed").Inc()
 		pm.cleanupPublisher(publisherKey)
 		return
 	}
+
+	metrics.ActivePeerConnections.WithLabelValues("publisher").Inc()
+	metrics.PeerConnectionsCreatedTotal.WithLabelValues("publisher").Inc()
 
 	publisher.pc = pc
 
@@ -995,6 +1015,7 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate != nil {
+			metrics.ICECandidatesTotal.WithLabelValues(candidate.Typ.String()).Inc()
 			if err := publisherConn.WriteJSON(api.GrabberMessage{
 				Event: api.GrabberMessageEventPlayerIce,
 				Ice: &api.IceMessage{
@@ -1009,6 +1030,7 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		slog.Debug("ICE connection state for publisher", "publisherSocketID", publisherSocketID, "state", state.String())
+		metrics.PeerConnectionStateChanges.WithLabelValues("publisher", state.String()).Inc()
 		if state == webrtc.ICEConnectionStateClosed || state == webrtc.ICEConnectionStateFailed {
 			slog.Warn("grabber disconnected or failed, cleaning up", "publisherKey", publisherKey)
 			pm.cleanupPublisher(publisherKey)
@@ -1047,5 +1069,11 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 		pm.cleanupPublisher(publisherKey)
 		return
 	}
-	slog.Info("track setup completed for grabber", "publisherSocketID", publisherSocketID, "trackCount", publisher.BroadcasterCount())
+
+	// Record setup metrics
+	trackCount := publisher.BroadcasterCount()
+	metrics.PeerConnectionSetupDuration.WithLabelValues("publisher").Observe(time.Since(setupStartTime).Seconds())
+	metrics.TracksPerPublisher.Observe(float64(trackCount))
+
+	slog.Info("track setup completed for grabber", "publisherSocketID", publisherSocketID, "trackCount", trackCount)
 }
