@@ -1,0 +1,26 @@
+# WebRTC configuration
+# All fields are optional - defaults will be used if not specified
+
+# portMin: 10000
+# portMax: 20000
+# disableAudio: false
+
+# peerConnectionConfig:
+#   iceServers:
+#     - urls: "stun:stun.l.google.com:19302"
+#     - urls: "turn:turn.example.com:3478"
+#       username: "user"
+#       credential: "pass"
+
+# codecs:
+#   - type: "video"
+#     params:
+#       mimeType: "video/VP8"
+#       clockRate: 90000
+#       payloadType: 96
+#   - type: "audio"
+#     params:
+#       mimeType: "audio/opus"
+#       clockRate: 48000
+#       channels: 2
+#       payloadType: 111

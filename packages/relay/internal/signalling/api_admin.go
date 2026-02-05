@@ -12,7 +12,7 @@ func (s *Server) setupAdminApi() {
 		router.Use(basicauth.New(basicauth.Config{
 			Realm: "Forbidden",
 			Authorizer: func(user, pass string) bool {
-				return s.config.PlayerCredential == nil || user == "admin" && pass == *s.config.PlayerCredential
+				return s.config.Security.PlayerCredential == nil || user == "admin" && pass == *s.config.Security.PlayerCredential
 			},
 		}))
 
@@ -30,7 +30,7 @@ func (s *Server) setupAdminApi() {
 				return c.Status(fiber.StatusNotFound).SendString("Peer not found")
 			}
 
-			recordTimeout := s.config.RecordTimeout
+			recordTimeout := s.config.Record.Timeout
 			if req.Timeout != nil {
 				recordTimeout = min(*req.Timeout, recordTimeout)
 			}

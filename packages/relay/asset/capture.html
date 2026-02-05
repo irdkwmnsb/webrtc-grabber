@@ -54,6 +54,15 @@
         #captureButton.active:hover {
             background: #1eb11c;
         }
+
+        #captureButton.recording {
+            border-color: #ff0000;
+            color: #ff0000;
+        }
+
+        #captureButton.recording:hover {
+            background: #ff0000;
+        }
     </style>
     <script src="/sockets.js"></script>
 </head>
@@ -67,27 +76,24 @@
 
 </html>
 <script>
-    const webcamConstraint = { aspectRatio: 16 / 9 };
-    const webcamAudioConstraint = true;
+    const webcamConstraint = { 
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        aspectRatio: 16 / 9,
+        frameRate: { ideal: 30, max: 30 }
+    };
     const desktopConstraint = {
         video: {
-            displaySurface: "window"
+            displaySurface: "window",
+            frameRate: { ideal: 30, max: 30 }
         }
     };
-
-    const requireAuth = () => {
-        if (localStorage.getItem("adminCredentials")) {
-            return localStorage.getItem("adminCredentials");
-        }
-        const credentialInput = prompt("Admin credentials");
-        localStorage.setItem("adminCredentials", credentialInput);
-        return credentialInput;
-    }
 
     class GrabberCaptureClient {
         constructor(peerName) {
             this.peerName = peerName;
             this.target = new EventTarget();
+            this.signallingUrl = window.location.origin;
 
             const socketPath = "/ws/peers/" + peerName;
 
@@ -105,14 +111,36 @@
             const player_ice_handle = async function ({ ice: { peerId, candidate } }) {
                 this.target.dispatchEvent(new CustomEvent('player_ice', { detail: { peerId, candidate } }));
             }
+            const record_start_handle = async function ({ recordStart: { recordId, timeout } }) {
+                this.target.dispatchEvent(new CustomEvent('record_start', { detail: { recordId, timeout } }));
+            }
+            const record_stop_handle = async function ({ recordStop: { recordId } }) {
+                this.target.dispatchEvent(new CustomEvent('record_stop', { detail: { recordId } }));
+            }
+            const record_upload_handle = async function ({ recordUpload: { recordId } }) {
+                this.target.dispatchEvent(new CustomEvent('record_upload', { detail: { recordId } }));
+            }
+            const players_disconnect_handle = async function ({ event }) {
+                this.target.dispatchEvent(new CustomEvent("players_disconnect", { detail: {} }));
+            }
 
             this.socket.on("init_peer", init_peer_handle.bind(this));
             this.socket.on("offer", offer_handle.bind(this));
             this.socket.on("player_ice", player_ice_handle.bind(this));
+            this.socket.on("record_start", record_start_handle.bind(this));
+            this.socket.on("record_stop", record_stop_handle.bind(this));
+            this.socket.on("record_upload", record_upload_handle.bind(this));
+            this.socket.on("players_disconnect", players_disconnect_handle.bind(this));
         }
 
-        send_ping(connectionsCount, streamTypes) {
-            this.socket.emit("ping", { ping: { connectionsCount: connectionsCount, streamTypes: streamTypes } });
+        send_ping(connectionsCount, streamTypes, currentRecordId) {
+            this.socket.emit("ping", { 
+                ping: { 
+                    connectionsCount: connectionsCount, 
+                    streamTypes: streamTypes,
+                    currentRecordId: currentRecordId
+                } 
+            });
         }
 
         send_offer_answer(playerId, answer) {
@@ -122,6 +150,201 @@
         send_grabber_ice(peerId, candidate) {
             this.socket.emit("grabber_ice", { ice: { peerId, candidate } });
         }
+
+        async record_upload(fileName, fileBlob) {
+            const formData = new FormData();
+            formData.append('file', fileBlob, fileName);
+            
+            const url = `${this.signallingUrl}/api/agent/${this.peerName}/record_upload`;
+            return fetch(url, {
+                method: "POST",
+                body: formData,
+            });
+        }
+    }
+
+    class RecordingManager {
+        constructor() {
+            this.activeRecording = {
+                recorders: [],
+                recordId: null,
+                recordedChunks: new Map(),
+                startTime: null,
+            };
+            this.recordingDuration = 0;
+        }
+
+        getSupportedMimeType(hasAudio) {
+            const types = hasAudio 
+                ? ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm']
+                : ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm'];
+            
+            for (const type of types) {
+                if (MediaRecorder.isTypeSupported(type)) {
+                    console.log(`Using mime type: ${type}`);
+                    return type;
+                }
+            }
+            
+            console.warn('No supported mime type found, using default');
+            return '';
+        }
+
+        async startRecording(recordId, timeout, streams) {
+            this.stopRecording(this.activeRecording.recordId);
+            
+            this.activeRecording.recordId = recordId;
+            this.activeRecording.recorders = [];
+            this.activeRecording.recordedChunks.clear();
+            this.activeRecording.startTime = Date.now();
+
+            for (const [streamKey, stream] of Object.entries(streams)) {
+                let recordStream = stream;
+
+                const chunks = [];
+                this.activeRecording.recordedChunks.set(streamKey, chunks);
+
+                const mimeType = this.getSupportedMimeType(recordStream.getAudioTracks().length > 0);
+                console.log(`Creating recorder for ${streamKey} with mime type: ${mimeType}`);
+                
+                const options = {};
+                if (mimeType) {
+                    options.mimeType = mimeType;
+                }
+                
+                let mediaRecorder;
+                try {
+                    mediaRecorder = new MediaRecorder(recordStream, options);
+                } catch (e) {
+                    console.error(`Failed to create MediaRecorder for ${streamKey}:`, e);
+                    try {
+                        mediaRecorder = new MediaRecorder(recordStream);
+                        console.log(`Created MediaRecorder for ${streamKey} with default options`);
+                    } catch (e2) {
+                        console.error(`Failed to create MediaRecorder for ${streamKey} with defaults:`, e2);
+                        continue;
+                    }
+                }
+
+                mediaRecorder.addEventListener('dataavailable', event => {
+                    if (event.data && event.data.size > 0) {
+                        chunks.push(event.data);
+                        console.log(`Chunk received for ${streamKey}: ${event.data.size} bytes (total: ${chunks.length})`);
+                    }
+                });
+
+                mediaRecorder.addEventListener('stop', () => {
+                    const totalSize = chunks.reduce((sum, chunk) => sum + chunk.size, 0);
+                    console.log(`Recording stopped for ${streamKey}, chunks: ${chunks.length}, size: ${totalSize} bytes`);
+                });
+
+                mediaRecorder.addEventListener('error', (event) => {
+                    console.error(`MediaRecorder error for ${streamKey}:`, event.error);
+                });
+
+                const videoTracks = recordStream.getVideoTracks();
+                const audioTracks = recordStream.getAudioTracks();
+                console.log(`${streamKey} - video: ${videoTracks.length}, audio: ${audioTracks.length}`);
+
+                try {
+                    mediaRecorder.start(1000);
+                    this.activeRecording.recorders.push(mediaRecorder);
+                    console.log(`Started recording ${recordId} [${streamKey}]`);
+                } catch (e) {
+                    console.error(`Failed to start recording for ${streamKey}:`, e);
+                }
+            }
+
+            if (this.activeRecording.recorders.length === 0) {
+                console.error('No recorders started!');
+                this.activeRecording.recordId = null;
+                this.activeRecording.startTime = null;
+                return;
+            }
+
+            console.log(`Successfully started ${this.activeRecording.recorders.length} recorder(s)`);
+
+            setTimeout(() => {
+                console.log(`Timeout reached (${timeout}ms), stopping recording ${recordId}`);
+                this.stopRecording(recordId);
+            }, timeout);
+        }
+
+        stopRecording(recordId) {
+            if (this.activeRecording.recordId === null || 
+                this.activeRecording.recordId !== recordId) {
+                return;
+            }
+
+            if (this.activeRecording.startTime) {
+                this.recordingDuration = Date.now() - this.activeRecording.startTime;
+                console.log(`Recording duration: ${this.recordingDuration}ms (${(this.recordingDuration / 1000).toFixed(2)}s)`);
+            }
+
+            console.log(`Stopping ${this.activeRecording.recorders.length} recorders for ${recordId}`);
+            
+            this.activeRecording.recorders.forEach((r, index) => {
+                try {
+                    if (r.state !== 'inactive') {
+                        r.stop();
+                    }
+                } catch (e) {
+                    console.error(`Error stopping recorder ${index}:`, e);
+                }
+            });
+            
+            this.activeRecording.recorders = [];
+            this.activeRecording.recordId = null;
+            this.activeRecording.startTime = null;
+        }
+
+        async uploadRecordings(recordId, client) {
+    console.log('Waiting for final chunks...');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    const chunksMap = new Map(this.activeRecording.recordedChunks);
+    
+    if (!chunksMap.size) {
+        console.warn('No recordings to upload');
+        return;
+    }
+
+    console.log(`Uploading recordings for ${recordId} (duration: ${this.recordingDuration}ms):`, 
+        Array.from(chunksMap.entries()).map(([k, v]) => `${k}: ${v.length} chunks`));
+
+    for (const [streamKey, chunks] of chunksMap.entries()) {
+        if (chunks.length === 0) {
+            console.warn(`No chunks for ${streamKey}, skipping upload`);
+            continue;
+        }
+
+        let blob = new Blob(chunks, { type: 'video/webm' });
+        
+        if (typeof ysFixWebmDuration !== 'undefined' && this.recordingDuration > 0) {
+            try {
+                console.log(`Fixing WebM duration for ${streamKey}: ${this.recordingDuration}ms`);
+                blob = await ysFixWebmDuration(blob, this.recordingDuration, { logger: false });
+                console.log(`✓ Fixed WebM duration successfully`);
+            } catch (e) {
+                console.warn(`Failed to fix WebM duration: ${e}`);
+            }
+        }
+        
+        const fileName = `${recordId}_${streamKey}.webm`;
+        
+        console.log(`Uploading ${fileName}: ${chunks.length} chunks, ${blob.size} bytes, duration: ${this.recordingDuration}ms`);
+        
+        try {
+            const response = await client.record_upload(fileName, blob);
+            const text = await response.text();
+            console.log(`Upload ${fileName} response: ${text}`);
+        } catch (e) {
+            console.error(`Failed to upload ${fileName}: ${e}`);
+        }
+    }
+    
+    this.activeRecording.recordedChunks.clear();
+}
     }
 
     const extractArguments = () => {
@@ -154,8 +377,9 @@
 
         const webcamStream = await navigator.mediaDevices.getUserMedia({
             video: webcamConstraint,
-            audio: webcamAudioConstraint,
+            audio: true,
         }).catch(() => undefined);
+        
         if (webcamStream) {
             detectedStreams["webcam"] = webcamStream;
         }
@@ -182,6 +406,8 @@
             captureButton.innerText = "connecting ...";
         } else if (newState === "active") {
             captureButton.innerText = "OK";
+        } else if (newState === "recording") {
+            captureButton.innerText = "Recording";
         }
     }
 
@@ -191,11 +417,13 @@
 
         const streams = await detectStreams();
         const pcs = new Map();
+        const recordingManager = new RecordingManager();
         let peerConnectionConfig = undefined;
         let pingTimerId = undefined;
 
         updateState("connecting");
         const client = new GrabberCaptureClient(connectionArgs.peerName);
+        
         client.target.addEventListener("init_peer", async ({ detail: { pcConfig, pingInterval } }) => {
             peerConnectionConfig = pcConfig;
             pingInterval = pingInterval ?? 3000;
@@ -203,8 +431,7 @@
                 clearInterval(pingTimerId);
             }
             pingTimerId = setInterval(() => {
-                console.log("ping");
-                client.send_ping(pcs.size, Object.keys(streams));
+                client.send_ping(pcs.size, Object.keys(streams), recordingManager.activeRecording.recordId);
             }, pingInterval);
             console.log(`init peer (pingInterval = ${pingInterval})`);
             updateState("active");
@@ -219,17 +446,15 @@
             const stream = streams[streamType];
             if (stream) {
                 stream.getTracks().forEach(track => {
-                    console.log("added track: ", track);
                     pc.addTrack(track, stream);
                 });
             } else {
-                console.warn(`No surch ${streamType} as captured stream`);
+                console.warn(`No such ${streamType} as captured stream`);
             }
 
             pc.addEventListener("icecandidate", (event) => {
-                console.log(`send ice for player ${playerId}`);
                 client.send_grabber_ice(playerId, event.candidate);
-            })
+            });
 
             pc.addEventListener('connectionstatechange', ({ target: connection }) => {
                 console.log(`change player ${playerId} connection state ${connection.connectionState}`);
@@ -245,14 +470,45 @@
             await pc.setLocalDescription(answer);
 
             client.send_offer_answer(playerId, answer);
-            console.log(`send offer_answer for ${playerId}`);
         });
 
         client.target.addEventListener('player_ice', async ({ detail: { peerId, candidate } }) => {
             pcs.get(peerId).addIceCandidate(candidate)
                 .then(() => console.log(`add player_ice from ${peerId}`));
         });
+
+        client.target.addEventListener('record_start', async ({ detail: { recordId, timeout } }) => {
+            console.log(`Start recording: ${recordId}, timeout: ${timeout}ms`);
+            updateState("recording");
+            await recordingManager.startRecording(recordId, timeout, streams);
+        });
+
+        client.target.addEventListener('record_stop', async ({ detail: { recordId } }) => {
+            console.log(`Stop recording: ${recordId}`);
+            recordingManager.stopRecording(recordId);
+            updateState("active");
+        });
+
+        client.target.addEventListener('record_upload', async ({ detail: { recordId } }) => {
+            console.log(`Upload recording: ${recordId}`);
+            await recordingManager.uploadRecordings(recordId, client);
+        });
+
+        client.target.addEventListener('players_disconnect', async () => {
+            console.log("Players disconnected");
+            pcs.forEach((connection, playerId) => {
+                try {
+                    connection.close();
+                } catch (e) {
+                    console.error(`Failed to close connection for ${playerId}`);
+                }
+            });
+            pcs.clear();
+            recordingManager.stopRecording(recordingManager.activeRecording.recordId);
+        });
     };
 
     document.getElementById("captureButton").addEventListener("click", capture);
 </script>
+
+<script src="https://cdn.jsdelivr.net/npm/fix-webm-duration@1.0.5/fix-webm-duration.min.js"></script>

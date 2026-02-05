@@ -17,9 +17,9 @@ func NewSocketPool() *SocketPool {
 	}
 }
 
-func (p *SocketPool) AddSocket(conn *websocket.Conn) {
+func (p *SocketPool) AddSocket(conn *websocket.Conn) Socket {
 	id := SocketID(conn.NetConn().RemoteAddr().String())
-	soc := &socketImpl{ws: conn}
+	soc := NewSocket(conn)
 
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
@@ -27,7 +27,7 @@ func (p *SocketPool) AddSocket(conn *websocket.Conn) {
 		_ = oldConn.Close()
 	}
 	p.sockets[id] = soc
-	// Should I init new connection
+	return soc
 }
 
 func (p *SocketPool) GetSocket(id SocketID) Socket {

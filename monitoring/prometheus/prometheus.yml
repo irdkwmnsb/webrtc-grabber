@@ -17,7 +17,7 @@ rule_files:
 scrape_configs:
   - job_name: 'signalling-server'
     static_configs:
-      - targets: ['192.168.0.8:13478']
+      - targets: ['host.docker.internal:13478']
         labels:
           service: 'signalling'
           component: 'webrtc'

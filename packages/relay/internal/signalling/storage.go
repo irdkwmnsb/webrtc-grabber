@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 )
 
@@ -58,6 +59,7 @@ func (s *Storage) addPeer(name string, socketId sockets.SocketID) *Storage {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.peers[newPeer.SocketId] = newPeer
+	metrics.StoredPeers.Set(float64(len(s.peers)))
 	return s
 }
 
@@ -99,6 +101,7 @@ func (s *Storage) deletePeer(streamId sockets.SocketID) {
 	defer s.mutex.Unlock()
 
 	delete(s.peers, streamId)
+	metrics.StoredPeers.Set(float64(len(s.peers)))
 }
 
 // deleteOldPeers removes peers that haven't sent a ping in over 60 seconds.

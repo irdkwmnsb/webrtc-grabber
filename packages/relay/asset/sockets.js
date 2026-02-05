@@ -24,6 +24,13 @@ class GrabberSocket {
         }
         ws.onmessage = function ({data}) {
             const payload = JSON.parse(data);
+            if (payload.event === "ping") {
+                _this.emit("pong", {
+                    pong: {
+                        timestamp: payload.ping?.timestamp
+                    }
+                });
+            }
             _this.target.dispatchEvent(new CustomEvent(payload.event, {detail: payload}));
         }
         ws.onclose = function () {

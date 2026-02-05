@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -87,7 +87,7 @@ func (r *recorder) recordBackground(ctx context.Context, rec *recordingInfo) {
 			return
 		}
 
-		log.Printf("set ice config %v", ctx.PCConfig.WebrtcConfiguration())
+		slog.Debug("set ice config", "config", ctx.PCConfig.WebrtcConfiguration())
 		peerConnection, err = webrtc.NewPeerConnection(ctx.PCConfig.WebrtcConfiguration())
 		if err != nil {
 			return
@@ -105,16 +105,16 @@ func (r *recorder) recordBackground(ctx context.Context, rec *recordingInfo) {
 		err = peerConnection.SetLocalDescription(offer)
 
 		peerConnection.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
-			log.Printf("peer connection state has changed: %s\n", s.String())
+			slog.Debug("peer connection state has changed", "state", s.String())
 
 			if s == webrtc.PeerConnectionStateFailed {
 				rec.cancelFunc()
 			}
 		})
 		peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-			log.Printf("sending ice candidate ...")
+			slog.Debug("sending ice candidate")
 			if err := ctx.SendICECandidate(candidate); err != nil {
-				log.Printf("failded to send ice candidate info %v", err)
+				slog.Error("failed to send ice candidate info", "error", err)
 			}
 		})
 		peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
@@ -128,10 +128,10 @@ func (r *recorder) recordBackground(ctx context.Context, rec *recordingInfo) {
 			return errors.New("no active webrtc connection to accept offer answer")
 		}
 		if peerConnection.ConnectionState() != webrtc.PeerConnectionStateNew {
-			log.Println("peer connection already has offer answer")
+			slog.Debug("peer connection already has offer answer")
 			return nil
 		}
-		log.Printf("setting answer ...")
+		slog.Debug("setting answer")
 		err := peerConnection.SetRemoteDescription(answer)
 		return err
 	}
@@ -139,14 +139,14 @@ func (r *recorder) recordBackground(ctx context.Context, rec *recordingInfo) {
 		if peerConnection == nil {
 			return errors.New("no active webrtc connection to accept offer answer")
 		}
-		log.Println("setting ice ...")
+		slog.Debug("setting ice")
 
 		return peerConnection.AddICECandidate(ice)
 	}
 
 	err := client.ConnectToPeer(ctx, cfg)
 	if err != nil {
-		log.Println(err)
+		slog.Error("failed to connect to peer", "error", err)
 		return
 	}
 }
@@ -166,18 +166,18 @@ func (rec *recordingInfo) saveToDisk(outputDir string, codec webrtc.RTPCodecPara
 		outputFileName += ".mp4"
 		writer, err = ivfwriter.New(outputFileName)
 	default:
-		log.Printf("failed to record track with mime type %s", codec.MimeType)
+		slog.Warn("failed to record track with unsupported mime type", "mimeType", codec.MimeType)
 	}
 	if err != nil {
-		log.Printf("failed to create %s file %v", outputFileName, err)
+		slog.Error("failed to create file", "filename", outputFileName, "error", err)
 		return
 	}
 
-	log.Printf("Got %s track, recording to %s", codec.MimeType, outputFileName)
+	slog.Info("got track, recording", "mimeType", codec.MimeType, "outputFile", outputFileName)
 
 	defer func() {
 		if err := writer.Close(); err != nil {
-			log.Printf("failed to close record writer %v", err)
+			slog.Error("failed to close record writer", "error", err)
 		}
 	}()
 
@@ -186,7 +186,7 @@ func (rec *recordingInfo) saveToDisk(outputDir string, codec webrtc.RTPCodecPara
 		if errors.Is(err, io.EOF) {
 			return
 		} else if err != nil {
-			log.Printf("failed to read frame while recording: %v", err)
+			slog.Error("failed to read frame while recording", "error", err)
 		}
 		if err := writer.WriteRTP(rtpPacket); err != nil {
 			panic(err)
