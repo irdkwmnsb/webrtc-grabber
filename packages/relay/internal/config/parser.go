@@ -5,11 +5,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 	"github.com/pion/webrtc/v4"
+
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 )
 
 type RawServerConfig struct {
+	Host                *string `yaml:"host" json:"host"`
 	Port                *int    `yaml:"port" json:"port"`
 	PublicIP            *string `yaml:"publicIp" json:"publicIp"`
 	GrabberPingInterval *int    `yaml:"grabberPingInterval" json:"grabberPingInterval"`
@@ -17,6 +19,9 @@ type RawServerConfig struct {
 
 func (r RawServerConfig) ToDomain() ServerConfig {
 	var cfg ServerConfig
+	if r.Host != nil {
+		cfg.Host = *r.Host
+	}
 	if r.Port != nil {
 		cfg.Port = *r.Port
 	}

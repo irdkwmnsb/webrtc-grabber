@@ -3,8 +3,9 @@ package config
 import (
 	"net/netip"
 
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 	"github.com/pion/webrtc/v4"
+
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 )
 
 type AppConfig struct {
@@ -15,6 +16,7 @@ type AppConfig struct {
 }
 
 type ServerConfig struct {
+	Host                string `json:"host" yaml:"host"`
 	Port                int    `json:"port" yaml:"port"`
 	PublicIP            string `json:"publicIp" yaml:"publicIp"`
 	GrabberPingInterval int    `json:"grabberPingInterval" yaml:"grabberPingInterval"`
@@ -50,6 +52,7 @@ func DefaultAppConfig() AppConfig {
 	playerPassword := "live"
 	return AppConfig{
 		Server: ServerConfig{
+			Host:                "0.0.0.0",
 			Port:                13478,
 			PublicIP:            "",
 			GrabberPingInterval: 3000,
