@@ -1,4 +1,4 @@
-name: Docker Build
+name: Docker Build Relay
 
 on:
   push:
@@ -10,7 +10,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-go-turn
+  IMAGE_NAME: ${{ github.repository }}-relay
 
 jobs:
   docker_build:
@@ -47,7 +47,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./packages/go-turn
+          context: ./packages/relay
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
