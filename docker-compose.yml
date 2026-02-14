@@ -2,7 +2,7 @@ version: "3"
 
 services:
   relay:
-    image: ghcr.io/irdkwmnsb/webrtc-grabber-go-relay:latest
+    image: ghcr.io/irdkwmnsb/webrtc-grabber-relay:latest
     ports:
       - "13478:13478/tcp"
       - "10000-20000:10000-20000/udp"
