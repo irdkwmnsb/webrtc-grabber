@@ -1,17 +1,9 @@
 version: "3"
+
 services:
-  turn:
-    image: ghcr.io/irdkwmnsb/webrtc-grabber-go-turn:latest
-    ports:
-      - "3478:3478/tcp"
-      - "3478:3478/udp"
-      - "40000-40199:40000-40199/udp"
-    environment:
-      - PUBLIC_IP=0.0.0.0  # Replace with your public IP
-      - PUBLIC_IPv6=""     # Add a value if you have an IPv6 address
-      - PORT=3478
-      - USERS=admin=credential
-      - REALM=nef.turn
-      - UDP_PORT_FROM=40000
-      - UDP_PORT_TO=40199
+  relay:
+    image: ghcr.io/irdkwmnsb/webrtc-grabber-go-relay:latest
+    network_mode: "host"
+    volumes:
+      - ./conf:/app/conf:ro
     restart: unless-stopped
