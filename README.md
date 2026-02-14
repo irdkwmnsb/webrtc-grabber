@@ -180,65 +180,81 @@ The relay server is a high-performance Go application combining WebRTC signaling
 
 ### Configuration <a name="relay-config"></a>
 
-Relay server [`config.json`](packages/relay/conf/config.json):
+Relay server configuration lives in `packages/relay/conf/` as separate YAML files. All fields are optional; defaults are used when omitted.
 
-```json
-{
-  "participants": ["team-001", "team-002", "team-003"],
-  "adminsNetworks": ["127.0.0.1/32", "10.0.0.0/8", "192.168.0.0/16"],
-  "adminCredential": "your-secure-password",
-  "peerConnectionConfig": {
-    "iceServers": [
-      {
-        "urls": ["stun:stun.l.google.com:19302"],
-        "username": "",
-        "credential": ""
-      }
-    ]
-  },
-  "grabberPingInterval": 5,
-  "serverPort": 8000,
-  "serverTLSCrtFile": null,
-  "serverTLSKeyFile": null,
-  "codecs": [
-    {
-      "type": "video",
-      "params": {
-        "mimeType": "video/VP8",
-        "clockRate": 90000,
-        "payloadType": 96,
-        "channels": 0
-      }
-    },
-    {
-      "type": "audio",
-      "params": {
-        "mimeType": "audio/opus",
-        "clockRate": 48000,
-        "payloadType": 111,
-        "channels": 2
-      }
-    }
-  ],
-  "webcamTrackCount": 2
-}
+`server.yaml`:
+
+```yaml
+port: 13478
+publicIp: ""
+grabberPingInterval: 3000
+```
+
+`security.yaml`:
+
+```yaml
+adminCredential: "your-secure-password"
+participants:
+  - "team-001"
+  - "team-002"
+  - "team-003"
+adminsNetworks:
+  - "127.0.0.1/32"
+  - "10.0.0.0/8"
+  - "192.168.0.0/16"
+tlsCrtFile: null
+tlsKeyFile: null
+```
+
+`webrtc.yaml`:
+
+```yaml
+portMin: 10000
+portMax: 20000
+peerConnectionConfig:
+  iceServers:
+    - urls: "stun:stun.l.google.com:19302"
+codecs:
+  - type: "video"
+    params:
+      mimeType: "video/VP8"
+      clockRate: 90000
+      payloadType: 96
+  - type: "audio"
+    params:
+      mimeType: "audio/opus"
+      clockRate: 48000
+      channels: 2
+      payloadType: 111
+disableAudio: false
+```
+
+`record.yaml`:
+
+```yaml
+timeout: 180000
+storageDirectory: "./records"
 ```
 
 ### Configuration Parameters
 
-| Property               | Description                                                      | Type             | Default |
-| ---------------------- | ---------------------------------------------------------------- | ---------------- | ------- |
-| `participants`         | List of expected grabber names for monitoring                   | **string[]**     | `[]`    |
-| `adminsNetworks`       | CIDR ranges allowed to access admin/player endpoints            | **string[]**     | `[]`    |
-| `adminCredential`      | Password for admin authentication (null = no auth)              | **string\|null** | `null`  |
-| `peerConnectionConfig` | WebRTC peer connection configuration                            | **object**       | -       |
-| `iceServers`           | STUN/TURN servers for NAT traversal                            | **object[]**     | -       |
-| `grabberPingInterval`  | How often grabbers should ping (seconds)                        | **number**       | `5`     |
-| `serverPort`           | HTTP/WebSocket server port                                      | **number**       | `8000`  |
-| `serverTLSCrtFile`     | Path to TLS certificate for HTTPS/WSS (null = no TLS)          | **string\|null** | `null`  |
-| `serverTLSKeyFile`     | Path to TLS private key for HTTPS/WSS                          | **string\|null** | `null`  |
-| `codecs`               | Supported audio/video codecs (VP8, VP9, H264, Opus, etc.)      | **object[]**     | -       |
-| `webcamTrackCount`     | Expected number of tracks for webcam streams (video+audio)      | **number**       | `2`     |
+| Property               | Description                                                      | Type             | Default       |
+| ---------------------- | ---------------------------------------------------------------- | ---------------- | ------------- |
+| `port`                 | HTTP/WebSocket server port                                      | **number**       | `13478`       |
+| `publicIp`             | Public IP for signalling/ICE announcements                      | **string**       | `""`          |
+| `grabberPingInterval`  | How often grabbers should ping (milliseconds)                   | **number**       | `3000`        |
+| `adminCredential`      | Password for admin authentication (null = no auth)              | **string\|null** | `"live"`      |
+| `participants`         | List of expected grabber names for monitoring                   | **string[]**     | `[]`          |
+| `adminsNetworks`       | CIDR ranges allowed to access admin/player endpoints            | **string[]**     | `["0.0.0.0/0"]`|
+| `tlsCrtFile`           | Path to TLS certificate for HTTPS/WSS (null = no TLS)           | **string\|null** | `null`        |
+| `tlsKeyFile`           | Path to TLS private key for HTTPS/WSS                           | **string\|null** | `null`        |
+| `portMin`              | WebRTC UDP port range start                                     | **number**       | `10000`       |
+| `portMax`              | WebRTC UDP port range end                                       | **number**       | `20000`       |
+| `peerConnectionConfig` | WebRTC peer connection configuration                            | **object**       | -             |
+| `codecs`               | Supported audio/video codecs (VP8, VP9, H264, Opus, etc.)       | **object[]**     | -             |
+| `disableAudio`         | Disable audio publishing/subscription                           | **boolean**      | `false`       |
+| `timeout`              | Recording timeout (milliseconds)                                | **number**       | `180000`      |
+| `storageDirectory`     | Recording output directory                                      | **string**       | `"./records"` |
 
 ### Build sources <a name="relay-build"></a>
 
@@ -502,7 +518,7 @@ If you're using this in production or planning to, feel free to reach out - I'd 
 > **A:** End-to-end latency is typically 200-500ms in local networks, depending on network conditions and processing delays.
 
 > **Q:** How to test webrtc-grabber without Internet access?  
-> **A:** Run the relay server on a local machine accessible to both grabbers and viewers. If all devices are on the same network without NAT, no TURN server is needed. Access the admin dashboard at `http://<server-ip>:8000`.
+> **A:** Run the relay server on a local machine accessible to both grabbers and viewers. If all devices are on the same network without NAT, no TURN server is needed. Access the admin dashboard at `http://<server-ip>:13478`.
 
 **Performance**
 
@@ -533,7 +549,7 @@ If you're using this in production or planning to, feel free to reach out - I'd 
 > **A:** **Yes**. WebRTC uses DTLS-SRTP for end-to-end encryption of media streams.
 
 > **Q:** Can I use HTTPS/WSS instead of HTTP/WS?  
-> **A:** **Yes**. Configure `serverTLSCrtFile` and `serverTLSKeyFile` in the relay server config with paths to your SSL certificate and key.
+> **A:** **Yes**. Configure `tlsCrtFile` and `tlsKeyFile` in `packages/relay/conf/security.yaml` with paths to your SSL certificate and key.
 
 **Deployment**
 
@@ -546,7 +562,7 @@ If you're using this in production or planning to, feel free to reach out - I'd 
 > **Q:** What ports need to be open in the firewall?  
 > **A:** 
    - **For SFU server**: 
-     - TCP port 8000 (or configured `serverPort`) for WebSocket connections
+  - TCP port 13478 (or configured `port`) for WebSocket connections
      - UDP ports for WebRTC (typically ephemeral ports 49152-65535, or configure specific range in OS)
    - **For grabbers**: Outbound connections to SFU server
    - **For viewers**: Outbound connections to SFU server
@@ -592,7 +608,7 @@ If you're using this in production or planning to, feel free to reach out - I'd 
    4. Enable TURN as fallback if ICE connection fails
 
 > **Q:** How to check if the relay server is running?  
-> **A:** Access the admin dashboard at `http://<server-ip>:<serverPort>` (default: `http://localhost:8000`). You should see the authentication page if `adminCredential` is set, or the dashboard directly if not.
+> **A:** Access the admin dashboard at `http://<server-ip>:<port>` (default: `http://localhost:13478`). You should see the authentication page if `adminCredential` is set, or the dashboard directly if not.
 
 > **Q:** Grabbers not appearing in admin dashboard?  
 > **A:** Verify:

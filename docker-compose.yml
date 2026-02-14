@@ -3,7 +3,9 @@ version: "3"
 services:
   relay:
     image: ghcr.io/irdkwmnsb/webrtc-grabber-go-relay:latest
-    network_mode: "host"
+    ports:
+      - "13478:13478/tcp"
+      - "10000-20000:10000-20000/udp"
     volumes:
       - ./conf:/app/conf:ro
     restart: unless-stopped

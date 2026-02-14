@@ -1,0 +1,33 @@
+version: "3"
+
+services:
+  relay:
+    image: ghcr.io/irdkwmnsb/webrtc-grabber-go-relay:latest
+    ports:
+      - "13478:13478/tcp"
+      - "10000-20000:10000-20000/udp"
+    configs:
+      - source: relay_server_yaml
+        target: /app/conf/server.yaml
+      - source: relay_webrtc_yaml
+        target: /app/conf/webrtc.yaml
+      - source: relay_security_yaml
+        target: /app/conf/security.yaml
+      - source: relay_record_yaml
+        target: /app/conf/record.yaml
+    restart: unless-stopped
+
+configs:
+  relay_server_yaml:
+    content: |
+      port: 13478
+      publicIp: "203.0.113.10"
+      grabberPingInterval: 3000
+  relay_webrtc_yaml:
+    content: |
+      portMin: 10000
+      portMax: 20000
+  relay_security_yaml:
+    content: ""
+  relay_record_yaml:
+    content: ""
