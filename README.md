@@ -25,8 +25,9 @@ The main use case is streaming live screen video from contestants' screens on
    - [Build sources](#turn-build)
    - [Run](#turn-run)
 6. [Contributing & Support](#contributing--support)
-7. [FAQ](#faq)
-8. [License](#license)
+7. [Wayland](#wayland)
+8. [FAQ](#faq)
+9. [License](#license)
 
 ## WebRTC Protocol
 
@@ -495,6 +496,15 @@ This project is under active development. The relay server (Go/SFU implementatio
 
 If you're using this in production or planning to, feel free to reach out - I'd love to hear about your use case!
 
+## Wayland
+
+---
+
+If you're using Wayland and want to auto-select a monitor, you need to use a patched version of `xdg-desktop-portal-gnome`:
+https://gitlab.gnome.org/Mond1c/xdg-desktop-portal-gnome/-/tree/patch-wayland-icpc?ref_type=heads
+
+> **Note:** This patch is only compatible with GNOME 46.2 and has been tested on Ubuntu 24.04.
+
 
 ## FAQ
 
@@ -502,66 +512,66 @@ If you're using this in production or planning to, feel free to reach out - I'd 
 
 **General**
 
-> **Q:** Is VLC still required on participant computers?  
+> **Q:** Is VLC still required on participant computers?
 > **A:** **No**. The grabber application handles all media capture.
 
-> **Q:** Does the grabber start streaming immediately when launched?  
+> **Q:** Does the grabber start streaming immediately when launched?
 > **A:** **No**. It connects to the signaling server and sends periodic pings every 5 seconds (configurable), but only streams when a viewer requests it.
 
-> **Q:** What happens when the SFU server restarts?  
+> **Q:** What happens when the SFU server restarts?
 > **A:** Grabbers automatically reconnect and re-register. Active viewers need to reconnect and re-request streams.
 
-> **Q:** Can multiple viewers watch the same grabber simultaneously?  
+> **Q:** Can multiple viewers watch the same grabber simultaneously?
 > **A:** **Yes**. The SFU architecture efficiently distributes streams to unlimited viewers without additional load on the grabber.
 
-> **Q:** What's the typical latency?  
+> **Q:** What's the typical latency?
 > **A:** End-to-end latency is typically 200-500ms in local networks, depending on network conditions and processing delays.
 
-> **Q:** How to test webrtc-grabber without Internet access?  
+> **Q:** How to test webrtc-grabber without Internet access?
 > **A:** Run the relay server on a local machine accessible to both grabbers and viewers. If all devices are on the same network without NAT, no TURN server is needed. Access the admin dashboard at `http://<server-ip>:13478`.
 
 **Performance**
 
-> **Q:** How much bandwidth does each stream consume?  
+> **Q:** How much bandwidth does each stream consume?
 > **A:** Approximately 2-3 Mbps per grabber stream (depends on resolution and codec settings). With SFU, this bandwidth is only between grabber and SFU server, not multiplied by viewer count.
 
-> **Q:** How many concurrent streams can one SFU server handle?  
+> **Q:** How many concurrent streams can one SFU server handle?
 > **A:** With proper hardware (4+ CPU cores, 8GB+ RAM), one SFU instance can handle 50-100 grabbers with hundreds of viewers. Performance depends on:
    - CPU cores (for concurrent packet processing)
    - Network bandwidth (not computation-bound)
    - Memory (minimal, ~50MB per grabber)
 
-> **Q:** Does the SFU transcode video?  
+> **Q:** Does the SFU transcode video?
 > **A:** **No**. The SFU forwards RTP packets without transcoding, keeping CPU usage low and latency minimal.
 
-> **Q:** What network bandwidth is required for the SFU server?  
+> **Q:** What network bandwidth is required for the SFU server?
 > **A:** For N grabbers and M viewers: approximately N × 3 Mbps inbound + M × 3 Mbps outbound. Example: 5 grabbers, 10 viewers = ~15 Mbps in + ~30 Mbps out = 45 Mbps total.
 
 **Security**
 
-> **Q:** How is admin access secured?  
+> **Q:** How is admin access secured?
 > **A:** Two-layer security: IP-based whitelisting (`adminsNetworks` in config) and credential authentication (`adminCredential`).
 
-> **Q:** Are grabber endpoints secured?  
+> **Q:** Are grabber endpoints secured?
 > **A:** Grabber endpoints have no authentication by design - they should be on an isolated network accessible only to trusted devices.
 
-> **Q:** Is video encrypted?  
+> **Q:** Is video encrypted?
 > **A:** **Yes**. WebRTC uses DTLS-SRTP for end-to-end encryption of media streams.
 
-> **Q:** Can I use HTTPS/WSS instead of HTTP/WS?  
+> **Q:** Can I use HTTPS/WSS instead of HTTP/WS?
 > **A:** **Yes**. Configure `tlsCrtFile` and `tlsKeyFile` in `packages/relay/conf/security.yaml` with paths to your SSL certificate and key.
 
 **Deployment**
 
-> **Q:** Can I run multiple SFU instances for redundancy?  
+> **Q:** Can I run multiple SFU instances for redundancy?
 > **A:** The current implementation is single-instance. For redundancy, use a reverse proxy (nginx, HAProxy) with health checks and failover.
 
-> **Q:** Do I need TURN if the SFU server has a public IP?  
+> **Q:** Do I need TURN if the SFU server has a public IP?
 > **A:** Usually **no**. If both grabbers and viewers can reach the SFU server directly, TURN is unnecessary.
 
-> **Q:** What ports need to be open in the firewall?  
-> **A:** 
-   - **For SFU server**: 
+> **Q:** What ports need to be open in the firewall?
+> **A:**
+   - **For SFU server**:
   - TCP port 13478 (or configured `port`) for WebSocket connections
      - UDP ports for WebRTC (typically ephemeral ports 49152-65535, or configure specific range in OS)
    - **For grabbers**: Outbound connections to SFU server
@@ -570,54 +580,54 @@ If you're using this in production or planning to, feel free to reach out - I'd 
 
 **Connections and Network**
 
-> **Q:** How many TCP/UDP ports are needed?  
+> **Q:** How many TCP/UDP ports are needed?
 > **A:** The SFU uses one WebSocket connection per client (grabber or viewer) on the configured port. WebRTC media uses UDP with dynamic port allocation (typically 1-2 ports per active peer connection).
 
-> **Q:** Do all grabbers use the same server port?  
+> **Q:** Do all grabbers use the same server port?
 > **A:** **Yes**. All grabbers connect to the same WebSocket endpoint. They are distinguished by their socket connection ID and their configured `peerName`.
 
-> **Q:** What delays are acceptable for normal operation?  
+> **Q:** What delays are acceptable for normal operation?
 > **A:** WebRTC works well with latencies up to 200-300ms. The protocol handles packet loss gracefully. The system has been tested successfully over WiFi and VPN connections. Connection health is monitored automatically and will attempt recovery until explicitly closed.
 
-> **Q:** Have you tested compatibility with OpenVPN?  
+> **Q:** Have you tested compatibility with OpenVPN?
 > **A:** **Yes**. Streaming over VPN works, though it may add 20-50ms of latency.
 
-> **Q:** Is TURN-relay required at the network edge?  
+> **Q:** Is TURN-relay required at the network edge?
 > **A:** With SFU architecture, TURN is rarely needed. The SFU server should be accessible from both contestant and viewer networks. If the SFU server is on the network boundary with proper routing, TURN is unnecessary.
 
 **Troubleshooting**
 
-> **Q:** Grabber shows "connected" but no video appears?  
+> **Q:** Grabber shows "connected" but no video appears?
 > **A:** Check:
    1. Grabber is sending pings (check server logs)
    2. Correct `streamType` in viewer request ("webcam" or "screen")
    3. WebRTC peer connection established (check browser console)
    4. Firewall allows UDP traffic for WebRTC
 
-> **Q:** High CPU usage on SFU server?  
+> **Q:** High CPU usage on SFU server?
 > **A:** Normal for many concurrent streams. If excessive:
    1. Check for memory leaks (monitor with `pprof`)
    2. Verify broadcaster goroutines are cleaned up
    3. Consider reducing `webcamTrackCount` or video resolution
 
-> **Q:** Streams lag or freeze intermittently?  
+> **Q:** Streams lag or freeze intermittently?
 > **A:** Usually network issues:
    1. Check packet loss between grabber and SFU
    2. Verify sufficient bandwidth
    3. Check if firewall is dropping UDP packets
    4. Enable TURN as fallback if ICE connection fails
 
-> **Q:** How to check if the relay server is running?  
+> **Q:** How to check if the relay server is running?
 > **A:** Access the admin dashboard at `http://<server-ip>:<port>` (default: `http://localhost:13478`). You should see the authentication page if `adminCredential` is set, or the dashboard directly if not.
 
-> **Q:** Grabbers not appearing in admin dashboard?  
+> **Q:** Grabbers not appearing in admin dashboard?
 > **A:** Verify:
    1. Grabber successfully connected (check grabber logs)
    2. Grabber is sending pings (should see in server logs)
    3. Grabber name matches expected participant names in config
    4. No firewall blocking WebSocket connections
 
-  
+
 
 ## License
 
