@@ -118,7 +118,7 @@ func (s *Server) setupPlayerSockets() {
 			return
 		}
 
-		s.listenPlayerAdminSocket(c)
+		s.listenPlayerPlaySocket(c)
 	}))
 
 	s.app.Get("/ws/player/play", websocket.New(func(c *websocket.Conn) {
@@ -200,9 +200,8 @@ func (s *Server) checkPlayerAdmissions(c *websocket.Conn) bool {
 	return true
 }
 
-func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
+func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
-	s.playersSockets.AddSocket(c)
 	slog.Info("authorized", "socketID", socketID)
 
 	metrics.ActivePlayers.Inc()
@@ -228,83 +227,16 @@ func (s *Server) listenPlayerAdminSocket(c *websocket.Conn) {
 	sendPeerStatus()
 	timer := utils.SetIntervalTimer(PlayerSendPeerStatusInterval, sendPeerStatus)
 
-	for {
-		if err := newC.ReadJSON(&message); err != nil {
-			slog.Debug("disconnected", "socketID", socketID, "error", err.Error())
-			s.playersSockets.CloseSocket(socketID)
-			timer.Stop()
-			break
-		}
-		metrics.WebSocketMessagesTotal.WithLabelValues("player_admin", "in").Inc()
-
-		answer := s.processPlayerMessage(newC, socketID, message)
-		if answer == nil {
-			continue
-		}
-		if err := newC.WriteJSON(answer); err != nil {
-			slog.Error("failed to send message", "socketID", socketID, "answer", answer)
-			return
-		}
-	}
-}
-
-func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
-	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
-	s.playersSockets.AddSocket(c)
-	newC := s.playersSockets.AddSocket(c)
-	slog.Info("authorized", "socketID", socketID)
-
-	metrics.ActivePlayers.Inc()
-	metrics.PlayersConnectedTotal.Inc()
-	metrics.ActiveWebSocketConnections.Inc()
-	metrics.WebSocketConnectionsTotal.Inc()
-	defer func() {
-		metrics.ActivePlayers.Dec()
-		metrics.ActiveWebSocketConnections.Dec()
-		metrics.WebSocketDisconnectionsTotal.Inc()
-	}()
-
-	messages := make(chan interface{})
-	defer close(messages)
-
-	go func() { // rewrite this
-		for msg := range messages {
-			if err := newC.WriteJSON(msg); err != nil {
-				slog.Error("failed to send message", "socketID", socketID, "msg", msg)
-				return
-			}
-		}
-	}()
-
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			pingMsg := api.PlayerMessage{
-				Event: api.PlayerMessageEventPing,
-				Ping: &api.PingMessage{
-					Timestamp: time.Now().Unix(),
-				},
-			}
-			if err := newC.WriteJSON(pingMsg); err != nil {
-				return
-			}
-		}
-	}()
-
 	defer func() {
 		s.playersSockets.CloseSocket(socketID)
+		timer.Stop()
 		s.sfu.DeleteSubscriber(socketID)
 	}()
 
-	var message api.PlayerMessage
-
-	// Main read loop
 	for {
 		if err := newC.ReadJSON(&message); err != nil {
 			slog.Debug("disconnected", "socketID", socketID, "error", err.Error())
-			s.playersSockets.CloseSocket(socketID)
-			break
+			return
 		}
 		metrics.WebSocketMessagesTotal.WithLabelValues("player_play", "in").Inc()
 
@@ -313,13 +245,16 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 			continue
 		}
 		metrics.WebSocketMessagesTotal.WithLabelValues("player_play", "out").Inc()
-		messages <- answer
+		if err := newC.WriteJSON(answer); err != nil {
+			slog.Error("failed to send message", "socketID", socketID, "msg", answer)
+			return
+		}
 	}
 }
 
 func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 	m api.PlayerMessage) *api.PlayerMessage {
-	slog.Debug("player message", "event", m.Event, "streamType", m.Offer.StreamType)
+	slog.Debug("player message", "event", m.Event)
 	metrics.SignallingMessagesTotal.WithLabelValues(string(m.Event), "in").Inc()
 	switch m.Event {
 	case api.PlayerMessageEventPong:
@@ -328,6 +263,7 @@ func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 		if m.Offer == nil {
 			return nil
 		}
+		slog.Debug("playerMessage", "streamType", m.Offer.StreamType)
 		var grabberSocketID sockets.SocketID
 		if m.Offer.PeerId != nil {
 			grabberSocketID = sockets.SocketID(*m.Offer.PeerId)
@@ -355,9 +291,18 @@ func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 			return nil
 		}
 
-		ctx := sfu.CreateNewSubscriberContext(grabberSocketID, streamType, c, &m.Offer.Offer, grabberConn)
-		answer := s.sfu.AddSubscriber(id, ctx)
-		_ = c.WriteJSON(answer)
+		publisherKey := sfu.PublisherKey(grabberSocketID, streamType)
+
+		subscriberCallback := createSubscriberCallback(m, id, c, streamType, publisherKey)
+
+		publisherCallbacks := sfu.PublisherCallbacks{
+			OnOffer:        createOnOfferCallback(grabberConn, streamType),
+			OnICECandidate: createOnICECandidateCallback(grabberConn),
+		}
+
+		if err := s.sfu.AddSubscriber(id, grabberSocketID, streamType, subscriberCallback, publisherCallbacks); err != nil {
+			_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
+		}
 	case api.PlayerMessageEventPlayerIce:
 		if m.Ice == nil {
 			return nil
@@ -381,7 +326,6 @@ func (s *Server) setupGrabberSockets() {
 
 func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
-	s.grabberSockets.AddSocket(c)
 	newC := s.grabberSockets.AddSocket(c)
 
 	metrics.ActiveAgents.Inc()

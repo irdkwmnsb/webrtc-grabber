@@ -1,38 +1,27 @@
 package sfu
 
 import (
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
+	"fmt"
+
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"github.com/pion/webrtc/v4"
 )
 
-type NewSubscriberContext struct {
-	publisherSocketID sockets.SocketID
-	streamType        string
-	c                 sockets.Socket
-	offer             *webrtc.SessionDescription
-	publisherConn     sockets.Socket
+type Callback = func(pc *webrtc.PeerConnection) error
+
+type PublisherCallbacks struct {
+	OnOffer        func(offer webrtc.SessionDescription, publisherKey string)
+	OnICECandidate func(candidate webrtc.ICECandidateInit, publisherKey string)
 }
 
-func CreateNewSubscriberContext(publisherSocketID sockets.SocketID,
-	streamType string,
-	c sockets.Socket,
-	offer *webrtc.SessionDescription,
-	publisherConn sockets.Socket) *NewSubscriberContext {
-
-	return &NewSubscriberContext{
-		publisherSocketID: publisherSocketID,
-		streamType:        streamType,
-		c:                 c,
-		offer:             offer,
-		publisherConn:     publisherConn,
-	}
+func PublisherKey(publisherSocketID sockets.SocketID, streamType string) string {
+	return fmt.Sprintf("%s_%s", string(publisherSocketID), streamType)
 }
 
 type SFU interface {
 	Close()
 	DeleteSubscriber(id sockets.SocketID)
-	AddSubscriber(id sockets.SocketID, ctx *NewSubscriberContext) *api.PlayerMessage
+	AddSubscriber(id, publisherSocketID sockets.SocketID, streamType string, callback Callback, publisherCallbacks PublisherCallbacks) error
 	SubscriberICE(id sockets.SocketID, candidate webrtc.ICECandidateInit)
 	DeletePublisher(id sockets.SocketID)
 	OfferAnswerPublisher(publisherKey string, answer webrtc.SessionDescription)
