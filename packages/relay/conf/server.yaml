@@ -1,6 +1,7 @@
 # Server configuration
 # All fields are optional - defaults will be used if not specified
 
+# host: 127.0.0.1
 # port: 13478
 # publicIp: ""
 # grabberPingInterval: 3000

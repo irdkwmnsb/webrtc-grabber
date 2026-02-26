@@ -8,13 +8,14 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/pprof"
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
-	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/signalling"
 	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
+
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/signalling"
 )
 
 func main() {
@@ -67,16 +68,16 @@ func main() {
 	app.Static("/player", "./asset/player.html")
 	app.Static("/capture", "./asset/capture.html")
 
-	slog.Info("starting server", "port", cfg.Server.Port)
+	slog.Info("starting server", "host", cfg.Server.Host, "port", cfg.Server.Port)
 
 	if cfg.Security.TLSCrtFile != nil && cfg.Security.TLSKeyFile != nil {
 		slog.Info("running TLS http server")
-		if err := app.ListenTLS(":"+strconv.Itoa(cfg.Server.Port), *cfg.Security.TLSCrtFile, *cfg.Security.TLSKeyFile); err != nil {
+		if err := app.ListenTLS(cfg.Server.Host+":"+strconv.Itoa(cfg.Server.Port), *cfg.Security.TLSCrtFile, *cfg.Security.TLSKeyFile); err != nil {
 			slog.Error("server failed", "error", err)
 			os.Exit(1)
 		}
 	} else {
-		if err := app.Listen(":" + strconv.Itoa(cfg.Server.Port)); err != nil {
+		if err := app.Listen(cfg.Server.Host + ":" + strconv.Itoa(cfg.Server.Port)); err != nil {
 			slog.Error("server failed", "error", err)
 			os.Exit(1)
 		}
