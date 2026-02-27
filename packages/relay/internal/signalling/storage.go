@@ -48,24 +48,15 @@ func (s *Storage) getPeerByName(name string) (api.Peer, bool) {
 	return peer, isFind
 }
 
-func (s *Storage) deletePeer(streamId sockets.SocketID) {
+func (s *Storage) deleteOldPeers() {
+	// So because we do not have thousands peers in production, this code is ok
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-
-	delete(s.peers, streamId)
-	metrics.StoredPeers.Set(float64(len(s.peers)))
-}
-
-func (s *Storage) deleteOldPeers() {
-	peersToDelete := make([]sockets.SocketID, 0)
 	for peerSocketId, peer := range s.peers {
 		if peer.LastPing != nil && time.Since(*peer.LastPing).Seconds() > 60 {
-			peersToDelete = append(peersToDelete, peerSocketId)
+			delete(s.peers, peerSocketId)
+			metrics.StoredPeers.Set(float64(len(s.peers)))
 		}
-	}
-
-	for _, peerSocketId := range peersToDelete {
-		s.deletePeer(peerSocketId)
 	}
 }
 
@@ -106,5 +97,7 @@ func (s *Storage) getParticipantsStatus() []api.Peer {
 }
 
 func (s *Storage) setParticipants(participants []string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 	s.participants = participants
 }
