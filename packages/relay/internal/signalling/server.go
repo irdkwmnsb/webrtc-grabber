@@ -118,7 +118,18 @@ func (s *Server) setupPlayerSockets() {
 			return
 		}
 
-		s.listenPlayerPlaySocket(c)
+		createSendPeerStatus := func(socket sockets.Socket) func() {
+			return func() {
+				answer := api.PlayerMessage{
+					Event:              api.PlayerMessageEventPeerStatus,
+					PeersStatus:        s.storage.getAll(),
+					ParticipantsStatus: s.storage.getParticipantsStatus(),
+				}
+				_ = socket.WriteJSON(answer)
+			}
+		}
+
+		s.listenPlayerSocket(c, createSendPeerStatus)
 	}))
 
 	s.app.Get("/ws/player/play", websocket.New(func(c *websocket.Conn) {
@@ -134,7 +145,17 @@ func (s *Server) setupPlayerSockets() {
 			return
 		}
 
-		s.listenPlayerPlaySocket(c)
+		createSendPing := func(socket sockets.Socket) func() {
+			return func() {
+				answer := api.PlayerMessage{
+					Event: api.PlayerMessageEventPing,
+					Ping:  &api.PingMessage{Timestamp: time.Now().Unix()},
+				}
+				_ = socket.WriteJSON(answer)
+			}
+		}
+
+		s.listenPlayerSocket(c, createSendPing)
 	}))
 }
 
@@ -200,7 +221,7 @@ func (s *Server) checkPlayerAdmissions(c *websocket.Conn) bool {
 	return true
 }
 
-func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
+func (s *Server) listenPlayerSocket(c *websocket.Conn, createCallback func(socket sockets.Socket) func()) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	slog.Info("authorized", "socketID", socketID)
 
@@ -216,16 +237,9 @@ func (s *Server) listenPlayerPlaySocket(c *websocket.Conn) {
 	newC := s.playersSockets.AddSocket(c)
 
 	var message api.PlayerMessage
-	sendPeerStatus := func() {
-		answer := api.PlayerMessage{
-			Event:              api.PlayerMessageEventPeerStatus,
-			PeersStatus:        s.storage.getAll(),
-			ParticipantsStatus: s.storage.getParticipantsStatus(),
-		}
-		_ = newC.WriteJSON(answer)
-	}
-	sendPeerStatus()
-	timer := utils.SetIntervalTimer(PlayerSendPeerStatusInterval, sendPeerStatus)
+	callback := createCallback(newC)
+	callback()
+	timer := utils.SetIntervalTimer(PlayerSendPeerStatusInterval, callback)
 
 	defer func() {
 		s.playersSockets.CloseSocket(socketID)
