@@ -62,7 +62,7 @@ func (s *Server) Close() {
 }
 
 func (s *Server) UpdateConfig(cfg *config.AppConfig) {
-	s.config = cfg
+	s.config = cfg // not critical (race condition)
 	s.storage.setParticipants(cfg.Security.Participants)
 	metrics.ConfigReloads.Inc()
 	slog.Info("server configuration updated")
@@ -105,14 +105,17 @@ func (s *Server) isAdminIpAddr(addrPort string) (bool, error) {
 }
 
 func (s *Server) setupPlayerSockets() {
-	s.app.Get("/ws/player/admin", websocket.New(func(c *websocket.Conn) {
-		defer func() {
+	recoverHelper := func(route string) func() {
+		return func() {
 			if err := recover(); err != nil {
-				slog.Error("panic in /ws/player/admin", "error", err)
-
+				slog.Error(fmt.Sprintf("panic in %s", route), "error", err)
 				return
 			}
-		}()
+		}
+	}
+
+	s.app.Get("/ws/player/admin", websocket.New(func(c *websocket.Conn) {
+		defer recoverHelper("/ws/player/admin")()
 
 		if !s.checkPlayerAdmissions(c) {
 			return
@@ -133,13 +136,7 @@ func (s *Server) setupPlayerSockets() {
 	}))
 
 	s.app.Get("/ws/player/play", websocket.New(func(c *websocket.Conn) {
-		defer func() {
-			if err := recover(); err != nil {
-				slog.Error("panic in /ws/player/play", "error", err)
-
-				return
-			}
-		}()
+		defer recoverHelper("/ws/player/play")()
 
 		if !s.checkPlayerAdmissions(c) {
 			return
