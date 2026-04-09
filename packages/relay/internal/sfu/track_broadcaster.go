@@ -29,8 +29,9 @@ type TrackBroadcaster struct {
 	remoteSSRC      uint32
 	subscriberCount int32
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx      context.Context
+	cancel   context.CancelFunc
+	stopOnce sync.Once // TODO: Think about this (for now i want to fix double dec)
 
 	packetChan chan []byte
 }
@@ -133,8 +134,10 @@ func (tb *TrackBroadcaster) GetLocalTrack() *webrtc.TrackLocalStaticRTP {
 }
 
 func (tb *TrackBroadcaster) Stop() {
-	tb.cancel()
-	metrics.ActiveBroadcasters.Dec()
+	tb.stopOnce.Do(func() {
+		tb.cancel()
+		metrics.ActiveBroadcasters.Dec()
+	})
 }
 
 func (tb *TrackBroadcaster) GetSubscriberCount() int {

@@ -44,6 +44,7 @@ func (p *SocketPool) CloseSocket(id SocketID) {
 	defer p.mutex.Unlock()
 	if oldConn, contains := p.sockets[id]; contains {
 		_ = oldConn.Close()
+		delete(p.sockets, id)
 	}
 }
 

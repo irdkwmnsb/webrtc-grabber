@@ -31,9 +31,7 @@ func (s *Storage) addPeer(name string, socketId sockets.SocketID) *Storage {
 	return s
 }
 
-func (s *Storage) getPeerByName(name string) (api.Peer, bool) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+func (s *Storage) getPeerByNameLocked(name string) (api.Peer, bool) {
 	var peer api.Peer
 	isFind := false
 	for _, p := range s.peers {
@@ -46,6 +44,12 @@ func (s *Storage) getPeerByName(name string) (api.Peer, bool) {
 		}
 	}
 	return peer, isFind
+}
+
+func (s *Storage) getPeerByName(name string) (api.Peer, bool) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.getPeerByNameLocked(name)
 }
 
 func (s *Storage) deleteOldPeers() {
@@ -85,9 +89,11 @@ func (s *Storage) getAll() []api.Peer {
 }
 
 func (s *Storage) getParticipantsStatus() []api.Peer {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 	var peers []api.Peer
 	for _, participant := range s.participants {
-		if peer, ok := s.getPeerByName(participant); ok {
+		if peer, ok := s.getPeerByNameLocked(participant); ok {
 			peers = append(peers, peer)
 		} else {
 			peers = append(peers, api.Peer{Name: participant})

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -43,8 +44,6 @@ type LocalSFU struct {
 }
 
 func NewLocalSFU(cfg *config.WebRTCConfig, publicIP string) (*LocalSFU, error) {
-	debug.SetGCPercent(20) // SPECIFIC THING
-
 	mediaEngine := &webrtc.MediaEngine{}
 	for _, codec := range cfg.Codecs {
 		if err := mediaEngine.RegisterCodec(codec.Params, codec.Type); err != nil {
@@ -67,9 +66,14 @@ func NewLocalSFU(cfg *config.WebRTCConfig, publicIP string) (*LocalSFU, error) {
 
 	se := webrtc.SettingEngine{}
 	if len(cfg.PeerConnectionConfig.IceServers) == 0 && len(publicIP) > 0 {
-		se.SetNAT1To1IPs([]string{
-			publicIP,
-		}, webrtc.ICECandidateTypeHost)
+		se.SetICEAddressRewriteRules(
+			webrtc.ICEAddressRewriteRule{
+				External:        []string{publicIP},
+				AsCandidateType: webrtc.ICECandidateTypeHost,
+				Mode:            webrtc.ICEAddressRewriteReplace,
+			},
+		)
+
 	}
 
 	if cfg.PortMin > 0 && cfg.PortMax > 0 {
@@ -292,7 +296,7 @@ func (pm *LocalSFU) processRTCPFeedback(
 	remoteSSRC uint32,
 	subscriberID sockets.SocketID,
 ) {
-	rtcpBuf := make([]byte, 1500)
+	rtcpBuf := make([]byte, BufferSize)
 
 	for {
 		n, _, err := sender.Read(rtcpBuf)
@@ -456,6 +460,7 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 
 	publisher.pc = pc
 
+	expectedTracks := []webrtc.RTPCodecType{webrtc.RTPCodecTypeVideo}
 	_, err = pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
 		Direction: webrtc.RTPTransceiverDirectionRecvonly,
 	})
@@ -465,7 +470,7 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 		return
 	}
 
-	if streamType == "webcam" {
+	if streamType == "webcam" && !pm.config.DisableAudio {
 		_, err = pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
 			Direction: webrtc.RTPTransceiverDirectionRecvonly,
 		})
@@ -474,17 +479,17 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 			pm.cleanupPublisher(publisherKey)
 			return
 		}
+		expectedTracks = append(expectedTracks, webrtc.RTPCodecTypeAudio)
 	}
 
-	firstTrackReceived := false
-	trackTimeout := time.NewTimer(PublisherWaitingTime)
-	defer trackTimeout.Stop()
+	tracksDone := make(chan struct{})
+	tracksReceived := atomic.Int32{}
 
 	pc.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		slog.Info("track received", "trackID", remoteTrack.ID(), "kind", remoteTrack.Kind(), "codec", remoteTrack.Codec().MimeType, "payloadType", remoteTrack.Codec().PayloadType)
 
-		if pm.config.DisableAudio && remoteTrack.Kind() == webrtc.RTPCodecTypeAudio {
-			slog.Debug("track is audio but DisableAudio enabled, skipping track")
+		if !slices.Contains(expectedTracks, remoteTrack.Kind()) {
+			slog.Debug("skipping unexpected track kind", "kind", remoteTrack.Kind().String())
 			return
 		}
 
@@ -515,10 +520,9 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 			metrics.ActiveTracks.WithLabelValues(trackType).Inc()
 		}
 
-		if !firstTrackReceived {
-			firstTrackReceived = true
+		if int(tracksReceived.Add(1)) >= len(expectedTracks) {
+			close(tracksDone)
 		}
-		trackTimeout.Reset(2 * time.Second)
 	})
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
@@ -552,8 +556,9 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 
 	callbacks.OnOffer(offer, publisherKey)
 
-	<-trackTimeout.C
-	if !firstTrackReceived {
+	select {
+	case <-tracksDone:
+	case <-time.After(PublisherWaitingTime):
 		slog.Warn("timeout waiting for first track from publisher", "publisherSocketID", publisherSocketID)
 		pm.cleanupPublisher(publisherKey)
 		return
