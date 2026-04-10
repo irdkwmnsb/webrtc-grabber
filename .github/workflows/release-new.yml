@@ -1,0 +1,163 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.2.3)"
+        required: true
+
+jobs:
+  build_signalling:
+    name: Build signalling (${{ matrix.goos }}-${{ matrix.goarch }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            ext: ""
+            asset: webrtc_grabber_signalling_linux_x64
+          - goos: windows
+            goarch: amd64
+            ext: ".exe"
+            asset: webrtc_grabber_signalling_win_x64
+          - goos: darwin
+            goarch: arm64
+            ext: ""
+            asset: webrtc_grabber_signalling_darwin_arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/relay/go.mod
+
+      - name: Build signalling binary
+        working-directory: packages/relay
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist/${{ matrix.asset }}
+          go build -ldflags "-s -w" -o dist/${{ matrix.asset }}/signalling${{ matrix.ext }} ./cmd/signalling
+          cp -r conf dist/${{ matrix.asset }}/ 2>/dev/null || true
+          cp -r asset dist/${{ matrix.asset }}/ 2>/dev/null || true
+
+      - name: Archive (tar.gz for unix)
+        if: matrix.goos != 'windows'
+        working-directory: packages/relay/dist
+        run: tar -czvf ${{ matrix.asset }}.tar.gz ${{ matrix.asset }}
+
+      - name: Archive (zip for windows)
+        if: matrix.goos == 'windows'
+        working-directory: packages/relay/dist
+        run: zip -r ${{ matrix.asset }}.zip ${{ matrix.asset }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: packages/relay/dist/${{ matrix.asset }}.*
+          retention-days: 7
+
+  build_grabber_linux:
+    name: Build grabber (linux-x64)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+      - name: Install dependencies
+        working-directory: ./packages/grabber
+        run: npm ci
+      - name: Build grabber
+        env:
+          COMMIT_SHA: "${{ github.sha }}"
+          BUILD_DATE: "${{ github.event.repository.updated_at }}"
+        run: bash ./grabber_build.sh linux x64
+      - name: Create archive
+        working-directory: ./packages/grabber/build
+        run: tar -czvf ../webrtc_grabber_agent_linux_x64.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webrtc_grabber_agent_linux_x64
+          path: packages/grabber/webrtc_grabber_agent_linux_x64.tar.gz
+          retention-days: 7
+
+  build_grabber_windows:
+    name: Build grabber (windows-x64)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+      - name: Install dependencies
+        working-directory: .\packages\grabber
+        run: npm ci
+      - name: Build grabber
+        shell: cmd
+        env:
+          COMMIT_SHA: "${{ github.sha }}"
+          BUILD_DATE: "${{ github.event.repository.updated_at }}"
+        run: grabber_build_win64.bat
+      - name: Create archive
+        shell: pwsh
+        run: Compress-Archive -Path .\packages\grabber\build\webrtc_grabber_win_x64\* -DestinationPath .\packages\grabber\webrtc_grabber_agent_win_x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webrtc_grabber_agent_win_x64
+          path: packages/grabber/webrtc_grabber_agent_win_x64.zip
+          retention-days: 7
+
+  build_grabber_macos:
+    name: Build grabber (darwin-arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+      - name: Install dependencies
+        working-directory: ./packages/grabber
+        run: npm ci
+      - name: Build grabber
+        env:
+          COMMIT_SHA: "${{ github.sha }}"
+          BUILD_DATE: "${{ github.event.repository.updated_at }}"
+        run: bash ./grabber_build.sh darwin arm64
+      - name: Create archive
+        working-directory: ./packages/grabber/build
+        run: tar -czvf ../webrtc_grabber_agent_darwin_arm64.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: webrtc_grabber_agent_darwin_arm64
+          path: packages/grabber/webrtc_grabber_agent_darwin_arm64.tar.gz
+          retention-days: 7
+
+  publish_release:
+    name: Publish GitHub Release
+    needs:
+      - build_signalling
+      - build_grabber_linux
+      - build_grabber_windows
+      - build_grabber_macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List files
+        run: ls -la release-assets/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: release-assets/*
