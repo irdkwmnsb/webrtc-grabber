@@ -87,6 +87,44 @@
             list-style: none;
             margin: 8px 0;
         }
+
+        #proctoring {
+            grid-column-start: 1;
+            grid-column-end: 3;
+            margin-bottom: 8px;
+            padding: 8px 12px;
+            border: 1px solid #888;
+            border-radius: 4px;
+            background: #f5f5f5;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+        }
+
+        #proctoring.idle    { background: #f5f5f5; }
+        #proctoring.active  { background: #c8f7c5; border-color: #2e8b2e; }
+        #proctoring.paused  { background: #fff3a3; border-color: #b89c00; }
+
+        #proctoring .status-label {
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        #proctoring .params input {
+            width: 90px;
+            margin-right: 6px;
+        }
+
+        #proctoring button {
+            padding: 4px 12px;
+        }
+
+        #proctoring .meta {
+            color: #555;
+            font-size: 0.9em;
+        }
     </style>
     <script src="/sockets.js"></script>
     <script src="/grabber_player.js"></script>
@@ -94,6 +132,17 @@
 </head>
 <body>
 <div id="main">
+    <div id="proctoring" class="idle">
+        <span class="status-label">Proctoring: <span id="proctoring-state">idle</span></span>
+        <span class="meta" id="proctoring-meta"></span>
+        <span class="params" id="proctoring-params">
+            <label>chunk ms <input id="proctoring-chunk" type="number" value="60000" min="1000" step="1000"></label>
+            <label>fps <input id="proctoring-fps" type="number" value="1" min="1" max="30"></label>
+            <label>bitrate <input id="proctoring-bitrate" type="number" value="100000" min="10000" step="10000"></label>
+            <label>ends at <input id="proctoring-endsat" type="datetime-local"></label>
+        </span>
+        <span id="proctoring-buttons"></span>
+    </div>
     <div id="participants"></div>
     <div id="selectedParticipant"></div>
     <div id="peers"></div>
@@ -139,6 +188,95 @@
         localStorage.removeItem("adminCredentials");
         alert(accessMessage);
     });
+
+    let proctoringCountdownTimer = null;
+    const proctoringEl = {
+        root:    document.getElementById("proctoring"),
+        state:   document.getElementById("proctoring-state"),
+        meta:    document.getElementById("proctoring-meta"),
+        params:  document.getElementById("proctoring-params"),
+        buttons: document.getElementById("proctoring-buttons"),
+        chunk:   document.getElementById("proctoring-chunk"),
+        fps:     document.getElementById("proctoring-fps"),
+        bitrate: document.getElementById("proctoring-bitrate"),
+        endsAt:  document.getElementById("proctoring-endsat"),
+    };
+
+    const renderProctoring = (state) => {
+        const isIdle   = !state || !state.sessionId;
+        const isActive = !!state && state.active;
+        const isPaused = !!state && state.paused;
+
+        proctoringEl.root.classList.remove("idle", "active", "paused");
+        proctoringEl.root.classList.add(isIdle ? "idle" : isActive ? "active" : "paused");
+        proctoringEl.state.innerText = isIdle ? "idle" : isActive ? "active" : "paused";
+
+        proctoringEl.params.style.display = isIdle ? "" : "none";
+
+        const meta = [];
+        if (!isIdle) {
+            meta.push(`session=${state.sessionId}`);
+            meta.push(`fps=${state.fps}`, `chunk=${state.chunkDurationMs}ms`, `bitrate=${state.videoBitrate}`);
+            if (state.startedAt) meta.push(`started=${new Date(state.startedAt).toLocaleTimeString()}`);
+        }
+        proctoringEl.meta.innerText = meta.join("  ");
+
+        if (proctoringCountdownTimer) {
+            clearInterval(proctoringCountdownTimer);
+            proctoringCountdownTimer = null;
+        }
+        if (state && state.endsAt) {
+            const tick = () => {
+                const ms = new Date(state.endsAt) - new Date();
+                if (ms <= 0) { proctoringEl.meta.innerText = meta.join("  "); return; }
+                const s = Math.floor(ms / 1000);
+                const mm = String(Math.floor(s / 60)).padStart(2, "0");
+                const ss = String(s % 60).padStart(2, "0");
+                proctoringEl.meta.innerText = meta.concat([`ends in ${mm}:${ss}`]).join("  ");
+            };
+            tick();
+            proctoringCountdownTimer = setInterval(tick, 1000);
+        }
+
+        proctoringEl.buttons.innerHTML = "";
+        const mkBtn = (label, fn) => {
+            const b = document.createElement("button");
+            b.innerText = label;
+            b.onclick = async () => {
+                b.disabled = true;
+                try {
+                    const res = await fn();
+                    if (!res.ok) {
+                        alert(`${label} failed: ${res.status} ${await res.text()}`);
+                    }
+                } finally { b.disabled = false; }
+            };
+            proctoringEl.buttons.appendChild(b);
+        };
+        if (isIdle) {
+            mkBtn("Start", () => adminClient.proctoringStart({
+                chunkDurationMs: parseInt(proctoringEl.chunk.value, 10),
+                fps:             parseInt(proctoringEl.fps.value, 10),
+                videoBitrate:    parseInt(proctoringEl.bitrate.value, 10),
+                endsAt:          proctoringEl.endsAt.value ? new Date(proctoringEl.endsAt.value).toISOString() : null,
+            }));
+        } else if (isActive) {
+            mkBtn("Pause", () => adminClient.proctoringPause());
+            mkBtn("Stop",  () => adminClient.proctoringStop());
+        } else {
+            mkBtn("Resume", () => adminClient.proctoringResume());
+            mkBtn("Stop",   () => adminClient.proctoringStop());
+        }
+    };
+
+    client.target.addEventListener("proctoring", ({detail: [state]}) => renderProctoring(state));
+    client.target.addEventListener("initialized", async () => {
+        try {
+            const state = await adminClient.proctoringGet();
+            renderProctoring(state);
+        } catch (e) { console.warn("failed to load initial proctoring state", e); }
+    });
+    renderProctoring(null);
 
     const renderParticipants = (peers, participantsStatus) => {
         const allPeersAnchor = document.getElementById("peers");

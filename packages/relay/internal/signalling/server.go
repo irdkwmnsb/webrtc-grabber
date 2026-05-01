@@ -13,6 +13,7 @@ import (
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/proctoring"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sfu"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/utils"
@@ -32,6 +33,7 @@ type Server struct {
 	playersSockets  *sockets.SocketPool
 	grabberSockets  *sockets.SocketPool
 	sfu             sfu.SFU
+	proctoring      *proctoring.Manager
 }
 
 func NewServer(parent context.Context, cfg *config.AppConfig, app *fiber.App) (*Server, error) {
@@ -44,7 +46,7 @@ func NewServer(parent context.Context, cfg *config.AppConfig, app *fiber.App) (*
 		return nil, err
 	}
 
-	server := Server{
+	server := &Server{
 		ctx:            ctx,
 		cancel:         cancel,
 		config:         cfg,
@@ -54,12 +56,20 @@ func NewServer(parent context.Context, cfg *config.AppConfig, app *fiber.App) (*
 		storage:        NewStorage(),
 		sfu:            sfu,
 	}
+
+	manager, err := proctoring.NewManager(cfg.Record.StorageDir, server.broadcastProctoring)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("init proctoring manager: %w", err)
+	}
+	server.proctoring = manager
+
 	server.storage.setParticipants(cfg.Security.Participants)
 	server.oldPeersCleaner = utils.SetIntervalTimer(time.Minute, server.storage.deleteOldPeers)
 
 	metrics.StartTime.Set(float64(time.Now().Unix()))
 
-	return &server, nil
+	return server, nil
 }
 
 func (s *Server) Close() {
@@ -68,6 +78,9 @@ func (s *Server) Close() {
 	s.playersSockets.Close()
 	s.grabberSockets.Close()
 	s.sfu.Close()
+	if s.proctoring != nil {
+		s.proctoring.Close()
+	}
 }
 
 func (s *Server) UpdateConfig(cfg *config.AppConfig) {
@@ -224,6 +237,15 @@ func (s *Server) checkPlayerAdmissions(c *websocket.Conn) bool {
 	}); err != nil {
 		slog.Error("failed to send init_peer", "socketID", socketID)
 	}
+
+	state := s.proctoring.Get()
+	if state.SessionId != "" {
+		_ = c.WriteJSON(api.PlayerMessage{
+			Event:      api.PlayerMessageEventProctoring,
+			Proctoring: &state,
+		})
+	}
+
 	return true
 }
 
@@ -389,6 +411,33 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 		return
 	}
 
+	if state := s.proctoring.Get(); state.Active || state.Paused {
+		cfg := &api.ProctoringConfigMessage{
+			SessionId:       state.SessionId,
+			ChunkDurationMs: state.ChunkDurationMs,
+			Fps:             state.Fps,
+			VideoBitrate:    state.VideoBitrate,
+		}
+		var msg api.GrabberMessage
+		if state.Active {
+			msg = api.GrabberMessage{
+				Event:           api.GrabberMessageEventProctoringStart,
+				ProctoringStart: cfg,
+			}
+		} else {
+			_ = newC.WriteJSON(api.GrabberMessage{
+				Event:           api.GrabberMessageEventProctoringStart,
+				ProctoringStart: cfg,
+			})
+			msg = api.GrabberMessage{
+				Event: api.GrabberMessageEventProctoringPause,
+			}
+		}
+		if err := newC.WriteJSON(msg); err != nil {
+			slog.Error("failed to send proctoring catch-up", "socketID", socketID, "error", err)
+		}
+	}
+
 	var message api.GrabberMessage
 	for {
 		if err := newC.ReadJSON(&message); err != nil {
@@ -432,4 +481,56 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 		s.sfu.AddICECandidatePublisher(grabberKey, m.Ice.Candidate)
 	}
 	return nil
+}
+
+func (s *Server) broadcastProctoring(prev, next proctoring.State) {
+	s.broadcastToPlayers(api.PlayerMessage{
+		Event:      api.PlayerMessageEventProctoring,
+		Proctoring: &next,
+	})
+
+	cfg := &api.ProctoringConfigMessage{
+		SessionId:       next.SessionId,
+		ChunkDurationMs: next.ChunkDurationMs,
+		Fps:             next.Fps,
+		VideoBitrate:    next.VideoBitrate,
+	}
+
+	switch {
+	case !prev.Active && next.Active && !prev.Paused:
+		s.broadcastToGrabbers(api.GrabberMessage{
+			Event:           api.GrabberMessageEventProctoringStart,
+			ProctoringStart: cfg,
+		})
+	case prev.Active && next.Paused:
+		s.broadcastToGrabbers(api.GrabberMessage{
+			Event: api.GrabberMessageEventProctoringPause,
+		})
+	case prev.Paused && next.Active:
+		s.broadcastToGrabbers(api.GrabberMessage{
+			Event:            api.GrabberMessageEventProctoringResume,
+			ProctoringResume: cfg,
+		})
+	case (prev.Active || prev.Paused) && next.SessionId == "":
+		s.broadcastToGrabbers(api.GrabberMessage{
+			Event: api.GrabberMessageEventProctoringStop,
+		})
+		s.scheduleProctoringFinalize(prev.SessionId)
+	}
+}
+
+func (s *Server) broadcastToPlayers(msg api.PlayerMessage) {
+	for _, sock := range s.playersSockets.Snapshot() {
+		if err := sock.WriteJSON(msg); err != nil {
+			slog.Debug("broadcast to player failed", "event", msg.Event, "error", err)
+		}
+	}
+}
+
+func (s *Server) broadcastToGrabbers(msg api.GrabberMessage) {
+	for _, sock := range s.grabberSockets.Snapshot() {
+		if err := sock.WriteJSON(msg); err != nil {
+			slog.Debug("broadcast to grabber failed", "event", msg.Event, "error", err)
+		}
+	}
 }

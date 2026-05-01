@@ -39,6 +39,16 @@ func (p *SocketPool) GetSocket(id SocketID) Socket {
 	return nil
 }
 
+func (p *SocketPool) Snapshot() []Socket {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	out := make([]Socket, 0, len(p.sockets))
+	for _, s := range p.sockets {
+		out = append(out, s)
+	}
+	return out
+}
+
 func (p *SocketPool) CloseSocket(id SocketID) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()

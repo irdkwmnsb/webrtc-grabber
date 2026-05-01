@@ -50,4 +50,32 @@ class GrabberAdminClient {
             },
         })
     }
+
+    _proctoring(path, body) {
+        return fetch(this._url + "/api/admin/proctoring" + path, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Basic " + btoa("admin:" + this._credential),
+            },
+            body: body ? JSON.stringify(body) : undefined,
+        });
+    }
+
+    proctoringStart({ chunkDurationMs, fps, videoBitrate, endsAt }) {
+        return this._proctoring("/start", { chunkDurationMs, fps, videoBitrate, endsAt: endsAt ?? null });
+    }
+
+    proctoringPause()  { return this._proctoring("/pause"); }
+    proctoringResume() { return this._proctoring("/resume"); }
+    proctoringStop()   { return this._proctoring("/stop"); }
+
+    proctoringGet() {
+        return fetch(this._url + "/api/admin/proctoring", {
+            method: "GET",
+            headers: {
+                "Authorization": "Basic " + btoa("admin:" + this._credential),
+            },
+        }).then(r => r.ok ? r.json() : null);
+    }
 }

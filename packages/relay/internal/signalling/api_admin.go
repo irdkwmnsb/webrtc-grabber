@@ -1,9 +1,12 @@
 package signalling
 
 import (
+	"errors"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/basicauth"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/proctoring"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 )
 
@@ -110,7 +113,69 @@ func (s *Server) setupAdminApi() {
 			}
 			return c.Status(fiber.StatusOK).SendString("Ok")
 		})
+
+		router.Post("/proctoring/start", func(c *fiber.Ctx) error {
+			var req api.ProctoringRequest
+			if err := c.BodyParser(&req); err != nil {
+				return c.Status(fiber.StatusBadRequest).SendString("Bad Request")
+			}
+
+			err := s.proctoring.Start(proctoring.StartConfig{
+				EndsAt:          req.EndsAt,
+				ChunkDurationMs: req.ChunkDurationMs,
+				Fps:             req.Fps,
+				VideoBitrate:    req.VideoBitrate,
+			})
+
+			if errors.Is(err, proctoring.ErrAlreadyActive) {
+				return c.Status(fiber.StatusConflict).SendString(err.Error())
+			}
+
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
+			}
+
+			return c.JSON(s.proctoring.Get())
+		})
+
+		router.Post("/proctoring/pause", func(c *fiber.Ctx) error {
+			return proctoringAction(c, s.proctoring.Pause, s.proctoring.Get)
+		})
+
+		router.Post("/proctoring/resume", func(c *fiber.Ctx) error {
+			return proctoringAction(c, s.proctoring.Resume, s.proctoring.Get)
+		})
+
+		router.Post("/proctoring/stop", func(c *fiber.Ctx) error {
+			return proctoringAction(c, s.proctoring.Stop, s.proctoring.Get)
+		})
+
+		router.Post("/proctoring/finalize/:sessionId", func(c *fiber.Ctx) error {
+			sessionId := c.Params("sessionId")
+			if !isSafePathSegment(sessionId) {
+				return c.Status(fiber.StatusBadRequest).SendString("Invalid sessionId")
+			}
+			if s.config.Record.StorageDir == "" {
+				return c.Status(fiber.StatusMethodNotAllowed).SendString("Record storage is not enabled")
+			}
+			finalizeProctoringSession(s.config.Record.StorageDir, sessionId)
+			return c.Status(fiber.StatusOK).SendString("OK")
+		})
+
 	})
+}
+
+func proctoringAction(c *fiber.Ctx, action func() error, getter func() proctoring.State) error {
+	err := action()
+	switch {
+	case errors.Is(err, proctoring.ErrNoSession),
+		errors.Is(err, proctoring.ErrNotPaused),
+		errors.Is(err, proctoring.ErrNotActive):
+		return c.Status(fiber.StatusConflict).SendString(err.Error())
+	case err != nil:
+		return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
+	}
+	return c.JSON(getter())
 }
 
 type startRecordRequest struct {

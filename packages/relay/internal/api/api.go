@@ -64,3 +64,11 @@ func (c PeerConnectionConfig) WebrtcConfiguration() webrtc.Configuration {
 	}
 	return conf
 }
+
+type ProctoringRequest struct {
+	Enabled         bool       `json:"enabled"`
+	EndsAt          *time.Time `json:"endsAt,omitempty"`
+	ChunkDurationMs uint32     `json:"chunkDurationMs"`
+	Fps             uint32     `json:"fps"`
+	VideoBitrate    uint32     `json:"videoBitrate"`
+}
