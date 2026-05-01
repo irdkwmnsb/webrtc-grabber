@@ -2,12 +2,14 @@ package main
 
 import (
 	"log/slog"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
+	"runtime"
 	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/pprof"
 	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -51,7 +53,21 @@ func main() {
 	})
 
 	server.SetupWebSocketsAndApi()
-	app.Use(pprof.New())
+
+	if cfg.Debug.PprofAddr != "" {
+		runtime.SetMutexProfileFraction(5)
+		runtime.SetBlockProfileRate(10000)
+		go func() {
+			slog.Info("starting pprof server", "addr", cfg.Debug.PprofAddr)
+			srv := &http.Server{
+				Addr:              cfg.Debug.PprofAddr,
+				ReadHeaderTimeout: 5 * time.Second,
+			}
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("pprof server failed", "error", err)
+			}
+		}()
+	}
 
 	prometheus.Unregister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{

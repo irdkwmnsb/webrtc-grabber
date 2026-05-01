@@ -12,7 +12,7 @@ import (
 type Storage struct {
 	peers        map[sockets.SocketID]api.Peer
 	participants []string
-	mutex        sync.Mutex
+	mutex        sync.RWMutex
 }
 
 func NewStorage() *Storage {
@@ -47,8 +47,8 @@ func (s *Storage) getPeerByNameLocked(name string) (api.Peer, bool) {
 }
 
 func (s *Storage) getPeerByName(name string) (api.Peer, bool) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
 	return s.getPeerByNameLocked(name)
 }
 
@@ -64,7 +64,7 @@ func (s *Storage) deleteOldPeers() {
 	}
 }
 
-func (s *Storage) ping(socketId sockets.SocketID, status api.PeerStatus) {
+func (s *Storage) ping(socketId sockets.SocketID, status *api.PeerStatus) {
 	now := time.Now()
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -78,8 +78,8 @@ func (s *Storage) ping(socketId sockets.SocketID, status api.PeerStatus) {
 }
 
 func (s *Storage) getAll() []api.Peer {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
 
 	var peers []api.Peer
 	for _, peer := range s.peers {
@@ -89,8 +89,8 @@ func (s *Storage) getAll() []api.Peer {
 }
 
 func (s *Storage) getParticipantsStatus() []api.Peer {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
 	var peers []api.Peer
 	for _, participant := range s.participants {
 		if peer, ok := s.getPeerByNameLocked(participant); ok {

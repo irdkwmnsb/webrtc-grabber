@@ -13,6 +13,11 @@ type AppConfig struct {
 	Security SecurityConfig `json:"security" yaml:"security"`
 	WebRTC   WebRTCConfig   `json:"webrtc" yaml:"webrtc"`
 	Record   RecordConfig   `json:"record" yaml:"record"`
+	Debug    DebugConfig    `json:"debug" yaml:"debug"`
+}
+
+type DebugConfig struct {
+	PprofAddr string `json:"pprofAddr" yaml:"pprofAddr"`
 }
 
 type ServerConfig struct {
@@ -76,6 +81,9 @@ func DefaultAppConfig() AppConfig {
 		Record: RecordConfig{
 			Timeout:    180000,
 			StorageDir: "./records",
+		},
+		Debug: DebugConfig{
+			PprofAddr: "127.0.0.1:6060",
 		},
 	}
 }

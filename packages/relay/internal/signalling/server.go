@@ -388,7 +388,7 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 		if m.Ping == nil {
 			return nil
 		}
-		s.storage.ping(id, *m.Ping)
+		s.storage.ping(id, m.Ping)
 	case api.GrabberMessageEventOfferAnswer:
 		if m.OfferAnswer == nil || m.OfferAnswer.PeerId == "" {
 			return nil
