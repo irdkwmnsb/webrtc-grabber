@@ -1,6 +1,7 @@
 package signalling
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -22,6 +23,8 @@ const (
 )
 
 type Server struct {
+	ctx             context.Context
+	cancel          context.CancelFunc
 	app             *fiber.App
 	config          *config.AppConfig
 	storage         *Storage
@@ -31,14 +34,19 @@ type Server struct {
 	sfu             sfu.SFU
 }
 
-func NewServer(cfg *config.AppConfig, app *fiber.App) (*Server, error) {
+func NewServer(parent context.Context, cfg *config.AppConfig, app *fiber.App) (*Server, error) {
 
-	sfu, err := sfu.NewLocalSFU(&cfg.WebRTC, cfg.Server.PublicIP)
+	ctx, cancel := context.WithCancel(parent)
+
+	sfu, err := sfu.NewLocalSFU(ctx, &cfg.WebRTC, cfg.Server.PublicIP)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
 	server := Server{
+		ctx:            ctx,
+		cancel:         cancel,
 		config:         cfg,
 		app:            app,
 		playersSockets: sockets.NewSocketPool(),
@@ -55,6 +63,7 @@ func NewServer(cfg *config.AppConfig, app *fiber.App) (*Server, error) {
 }
 
 func (s *Server) Close() {
+	s.cancel()
 	s.oldPeersCleaner.Stop()
 	s.playersSockets.Close()
 	s.grabberSockets.Close()
@@ -222,28 +231,35 @@ func (s *Server) listenPlayerSocket(c *websocket.Conn, createCallback func(socke
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	slog.Info("authorized", "socketID", socketID)
 
+	newC := s.playersSockets.AddSocket(c)
+	callback := createCallback(newC)
+	callback()
+	timer := utils.SetIntervalTimer(PlayerSendPeerStatusInterval, callback)
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			_ = newC.Close()
+		case <-done:
+		}
+	}()
+
 	metrics.ActivePlayers.Inc()
 	metrics.PlayersConnectedTotal.Inc()
 	metrics.ActiveWebSocketConnections.Inc()
 	metrics.WebSocketConnectionsTotal.Inc()
 	defer func() {
+		s.playersSockets.CloseSocket(socketID)
+		timer.Stop()
+		s.sfu.DeleteSubscriber(socketID)
 		metrics.ActivePlayers.Dec()
 		metrics.ActiveWebSocketConnections.Dec()
 		metrics.WebSocketDisconnectionsTotal.Inc()
 	}()
-	newC := s.playersSockets.AddSocket(c)
 
 	var message api.PlayerMessage
-	callback := createCallback(newC)
-	callback()
-	timer := utils.SetIntervalTimer(PlayerSendPeerStatusInterval, callback)
-
-	defer func() {
-		s.playersSockets.CloseSocket(socketID)
-		timer.Stop()
-		s.sfu.DeleteSubscriber(socketID)
-	}()
-
 	for {
 		if err := newC.ReadJSON(&message); err != nil {
 			slog.Debug("disconnected", "socketID", socketID, "error", err.Error())
@@ -339,11 +355,24 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	newC := s.grabberSockets.AddSocket(c)
 
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			_ = newC.Close()
+		case <-done:
+		}
+	}()
+
 	metrics.ActiveAgents.Inc()
 	metrics.AgentsRegisteredTotal.Inc()
 	metrics.ActiveWebSocketConnections.Inc()
 	metrics.WebSocketConnectionsTotal.Inc()
 	defer func() {
+		s.grabberSockets.CloseSocket(socketID)
+		s.sfu.DeletePublisher(socketID)
+		s.storage.removePeer(socketID)
 		metrics.ActiveAgents.Dec()
 		metrics.ActiveWebSocketConnections.Dec()
 		metrics.WebSocketDisconnectionsTotal.Inc()
@@ -364,9 +393,7 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 	for {
 		if err := newC.ReadJSON(&message); err != nil {
 			slog.Debug("grabber disconnected", "socketID", socketID, "error", err.Error())
-			s.grabberSockets.CloseSocket(socketID)
-			s.sfu.DeletePublisher(socketID)
-			break
+			return
 		}
 		metrics.WebSocketMessagesTotal.WithLabelValues("grabber", "in").Inc()
 

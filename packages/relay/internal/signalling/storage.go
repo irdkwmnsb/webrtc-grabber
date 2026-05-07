@@ -31,6 +31,16 @@ func (s *Storage) addPeer(name string, socketId sockets.SocketID) *Storage {
 	return s
 }
 
+func (s *Storage) removePeer(socketId sockets.SocketID) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if _, ok := s.peers[socketId]; ok {
+		delete(s.peers, socketId)
+		metrics.StoredPeers.Set(float64(len(s.peers)))
+	}
+}
+
 func (s *Storage) getPeerByNameLocked(name string) (api.Peer, bool) {
 	var peer api.Peer
 	isFind := false

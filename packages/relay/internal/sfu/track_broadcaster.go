@@ -36,7 +36,11 @@ type TrackBroadcaster struct {
 	packetChan chan []byte
 }
 
-func NewTrackBroadcaster(remoteTrack *webrtc.TrackRemote, publisherSocketID sockets.SocketID) (*TrackBroadcaster, error) {
+func NewTrackBroadcaster(
+	parent context.Context,
+	remoteTrack *webrtc.TrackRemote,
+	publisherSocketID sockets.SocketID,
+) (*TrackBroadcaster, error) {
 	localTrack, err := webrtc.NewTrackLocalStaticRTP(
 		remoteTrack.Codec().RTPCodecCapability,
 		remoteTrack.ID(),
@@ -46,7 +50,7 @@ func NewTrackBroadcaster(remoteTrack *webrtc.TrackRemote, publisherSocketID sock
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 
 	broadcaster := &TrackBroadcaster{
 		localTrack: localTrack,

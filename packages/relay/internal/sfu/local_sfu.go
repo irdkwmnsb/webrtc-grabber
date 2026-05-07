@@ -43,7 +43,7 @@ type LocalSFU struct {
 	cancel      context.CancelFunc
 }
 
-func NewLocalSFU(cfg *config.WebRTCConfig, publicIP string) (*LocalSFU, error) {
+func NewLocalSFU(parent context.Context, cfg *config.WebRTCConfig, publicIP string) (*LocalSFU, error) {
 	mediaEngine := &webrtc.MediaEngine{}
 	for _, codec := range cfg.Codecs {
 		if err := mediaEngine.RegisterCodec(codec.Params, codec.Type); err != nil {
@@ -89,7 +89,7 @@ func NewLocalSFU(cfg *config.WebRTCConfig, publicIP string) (*LocalSFU, error) {
 		webrtc.WithSettingEngine(se),
 	)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 
 	pm := &LocalSFU{
 		api:         webrtcApi,
@@ -326,6 +326,20 @@ func (pm *LocalSFU) processRTCPFeedback(
 	}
 }
 
+func (pm *LocalSFU) waitForStep(publisher *Publisher, publisherKey string) bool {
+	select {
+	case <-publisher.setupChan:
+		slog.Debug("setup completed", "publisherKey", publisherKey)
+		return true
+	case <-time.After(PublisherWaitingTime):
+		slog.Warn("timeout waiting for setup", "publisherKey", publisherKey)
+		return false
+	case <-pm.ctx.Done():
+		slog.Debug("sfu shutting down, abandoning setup wait", "publisherKey", publisherKey)
+		return false
+	}
+}
+
 func (pm *LocalSFU) ensureGrabberConnection(publisherKey string, publisherSocketID sockets.SocketID,
 	streamType string, callbacks PublisherCallbacks) bool {
 
@@ -333,38 +347,23 @@ func (pm *LocalSFU) ensureGrabberConnection(publisherKey string, publisherSocket
 	if loaded {
 		if atomic.LoadInt32(&publisher.setupInProgress) > 0 {
 			slog.Debug("setup in progress, waiting", "publisherKey", publisherKey)
-			select {
-			case <-publisher.setupChan:
-				slog.Debug("setup completed", "publisherKey", publisherKey)
-				return true
-			case <-time.After(PublisherWaitingTime):
-				slog.Warn("timeout waiting for setup", "publisherKey", publisherKey)
-				return false
-			}
+			return pm.waitForStep(publisher, publisherKey)
 		}
 		return true
 	}
 
 	if !atomic.CompareAndSwapInt32(&publisher.setupInProgress, 0, 1) {
-		select {
-		case <-publisher.setupChan:
-			return true
-		case <-time.After(PublisherWaitingTime):
-			return false
-		}
+		return pm.waitForStep(publisher, publisherKey)
 	}
 
 	go pm.setupGrabberPeerConnection(publisherSocketID, publisher, streamType, callbacks)
 
-	select {
-	case <-publisher.setupChan:
-		slog.Debug("setup completed", "publisherKey", publisherKey)
-		return true
-	case <-time.After(PublisherWaitingTime):
-		slog.Warn("timeout during setup", "publisherKey", publisherKey)
+	ok := pm.waitForStep(publisher, publisherKey)
+	if !ok {
 		pm.cleanupPublisher(publisherKey)
-		return false
 	}
+
+	return ok
 }
 
 func (pm *LocalSFU) SubscriberICE(id sockets.SocketID, candidate webrtc.ICECandidateInit) {
@@ -493,7 +492,7 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 			return
 		}
 
-		broadcaster, err := NewTrackBroadcaster(remoteTrack, publisherSocketID)
+		broadcaster, err := NewTrackBroadcaster(pm.ctx, remoteTrack, publisherSocketID)
 		if err != nil {
 			slog.Error("failed to create broadcaster for publisher", "publisherSocketID", publisherSocketID, "error", err)
 			return
@@ -560,6 +559,10 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisherSocketID sockets.SocketI
 	case <-tracksDone:
 	case <-time.After(PublisherWaitingTime):
 		slog.Warn("timeout waiting for first track from publisher", "publisherSocketID", publisherSocketID)
+		pm.cleanupPublisher(publisherKey)
+		return
+	case <-pm.ctx.Done():
+		slog.Debug("sfu shutting down during publisher setup", "publisherSocketID", publisherSocketID)
 		pm.cleanupPublisher(publisherKey)
 		return
 	}

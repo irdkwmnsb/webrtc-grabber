@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -19,6 +21,9 @@ func main() {
 		}),
 	))
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	config, err := recorder.LoadRecorderConfig()
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
@@ -29,9 +34,6 @@ func main() {
 		slog.Warn("failed to create output directory", "error", err)
 	}
 
-	ctx, ctxCancel := context.WithCancel(context.Background())
-	defer ctxCancel()
-
 	app := fiber.New()
 	server := recorder.NewRecorderServer(config, app)
 
@@ -41,6 +43,14 @@ func main() {
 		CacheDuration: time.Second,
 	})
 	app.Static("/record", "./asset/record.html")
+
+	go func() {
+		<-ctx.Done()
+		slog.Info("shutdown signal received")
+		if err := app.ShutdownWithTimeout(10 * time.Second); err != nil {
+			slog.Error("graceful shutdown failed", "error", err)
+		}
+	}()
 
 	if err := app.Listen(":8001"); err != nil {
 		slog.Error("server failed", "error", err)
