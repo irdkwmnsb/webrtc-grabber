@@ -1,14 +1,16 @@
 const {GrabberSocket, CustomEvent} = require("./sockets.js");
 
 
-function uploadRecord(fileBlob, fileName, signallingUrl, peerName) {
+function uploadRecord(fileBlob, fileName, signallingUrl, peerName, uploadToken) {
     const formData = new FormData()
     formData.append('file', fileBlob, fileName)
 
+    const headers = uploadToken ? {'X-Upload-Token': uploadToken} : {};
     return fetch(`${signallingUrl}/api/agent/${peerName}/record_upload`,
         {
             method: "POST",
             body: formData,
+            headers,
         });
 }
 
@@ -35,8 +37,8 @@ class GrabberCaptureClient {
         const player_ice_handle = async function ({ice: {peerId, candidate}}) {
             this.target.dispatchEvent(new CustomEvent('player_ice', {detail: {peerId, candidate}}));
         }
-        const record_start_handle = async function ({recordStart: {recordId, timeout}}) {
-            this.target.dispatchEvent(new CustomEvent('record_start', {detail: {recordId, timeout}}));
+        const record_start_handle = async function ({recordStart: {recordId, timeout, uploadToken}}) {
+            this.target.dispatchEvent(new CustomEvent('record_start', {detail: {recordId, timeout, uploadToken}}));
         }
         const record_stop_handle = async function ({recordStop: {recordId}}) {
             this.target.dispatchEvent(new CustomEvent('record_stop', {detail: {recordId}}));
@@ -52,6 +54,18 @@ class GrabberCaptureClient {
                 }
             }));
         }
+        const proctoring_start_handle = function ({proctoringStart}) {
+            this.target.dispatchEvent(new CustomEvent('proctoring_start', {detail: proctoringStart}));
+        };
+        const proctoring_pause_handle = function () {
+            this.target.dispatchEvent(new CustomEvent('proctoring_pause'));
+        };
+        const proctoring_resume_handle = function ({proctoringResume}) {
+            this.target.dispatchEvent(new CustomEvent('proctoring_resume', {detail: proctoringResume}));
+        };
+        const proctoring_stop_handle = function () {
+            this.target.dispatchEvent(new CustomEvent('proctoring_stop'));
+        };
 
         this.socket.on("init_peer", init_peer_handle.bind(this));
         this.socket.on("offer", offer_handle.bind(this));
@@ -60,14 +74,19 @@ class GrabberCaptureClient {
         this.socket.on("record_stop", record_stop_handle.bind(this));
         this.socket.on("record_upload", record_upload_handle.bind(this));
         this.socket.on("players_disconnect", players_disconnect_handle.bind(this));
+        this.socket.on("proctoring_start",  proctoring_start_handle.bind(this));
+        this.socket.on("proctoring_pause",  proctoring_pause_handle.bind(this));
+        this.socket.on("proctoring_resume", proctoring_resume_handle.bind(this));
+        this.socket.on("proctoring_stop",   proctoring_stop_handle.bind(this));
     }
 
-    send_ping(connectionsCount, streamTypes, currentRecordId) {
+    send_ping(connectionsCount, streamTypes, currentRecordId, proctoringActiveStreams) {
         this.socket.emit("ping", {
             ping: {
                 connectionsCount: connectionsCount,
                 streamTypes: streamTypes,
-                currentRecordId: currentRecordId
+                currentRecordId: currentRecordId,
+                proctoringActiveStreams: proctoringActiveStreams || [],
             }
         });
     }
@@ -80,8 +99,8 @@ class GrabberCaptureClient {
         this.socket.emit("grabber_ice", {ice: {peerId, candidate}});
     }
 
-    record_upload(fileName, fileBlob) {
-        return uploadRecord(fileBlob, fileName, this.signallingUrl, this.peerName);
+    record_upload(fileName, fileBlob, uploadToken) {
+        return uploadRecord(fileBlob, fileName, this.signallingUrl, this.peerName, uploadToken);
     }
 }
 

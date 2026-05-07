@@ -75,12 +75,17 @@ function runGrabbing(window) {
 
     runStreamsCapturing(window);
 
-    let connectionsStatus = {connectionsCount: 0, streamTypes: [], currentRecordId: null};
+    let connectionsStatus = {connectionsCount: 0, streamTypes: [], currentRecordId: null, proctoringActiveStreams: []};
     ipcMain.handle('status:connections', (_, cs) => {
         connectionsStatus = cs;
     });
 
     const client = new GrabberCaptureClient(config.peerName, config.signalingUrl);
+
+    ipcMain.handle('proctoring:config', () => ({
+        signallingUrl: client.signallingUrl,
+        peerName: client.peerName,
+    }));
 
     let pingTimerId;
     client.target.addEventListener("init_peer", async ({detail: {pcConfig, pingInterval}}) => {
@@ -90,7 +95,12 @@ function runGrabbing(window) {
             clearInterval(pingTimerId);
         }
         pingTimerId = setInterval(() => {
-            client.send_ping(connectionsStatus.connectionsCount, connectionsStatus.streamTypes, connectionsStatus.currentRecordId);
+            client.send_ping(
+                connectionsStatus.connectionsCount,
+                connectionsStatus.streamTypes,
+                connectionsStatus.currentRecordId,
+                connectionsStatus.proctoringActiveStreams,
+            );
         }, pingInterval);
         console.log(`init peer (pingInterval = ${pingInterval})`);
     });
@@ -112,8 +122,10 @@ function runGrabbing(window) {
         client.send_grabber_ice(playerId, JSON.parse(candidate));
     });
 
-    client.target.addEventListener("record_start", async ({detail: {recordId, timeout, streams}}) => {
-        window.webContents.send("record_start", recordId, timeout);
+    let lastRecordUploadToken = null;
+    client.target.addEventListener("record_start", async ({detail: {recordId, timeout, uploadToken}}) => {
+        lastRecordUploadToken = uploadToken || null;
+        window.webContents.send("record_start", recordId, timeout, uploadToken);
     });
 
     client.target.addEventListener("record_stop", async ({detail: {recordId}}) => {
@@ -126,7 +138,7 @@ function runGrabbing(window) {
             fs.readFile(path.join(configS.recordingsDirectory ?? ".", fileName), function (err, data) {
                 if (!err) {
                     console.log(`Uploading reaction ${fileName} to server (main)`)
-                    window.webContents.send("upload_record", data, fileName, client.signallingUrl, client.peerName);
+                    window.webContents.send("upload_record", data, fileName, client.signallingUrl, client.peerName, lastRecordUploadToken);
                 } else {
                     console.error(`Reaction upload ${fileName} error: ${err}`);
                 }
@@ -136,6 +148,19 @@ function runGrabbing(window) {
 
     client.target.addEventListener("players_disconnect", async () => {
         window.webContents.send("player_disconnect");
+    });
+
+    client.target.addEventListener("proctoring_start", async ({detail: cfg}) => {
+        window.webContents.send("proctoring_start", cfg);
+    });
+    client.target.addEventListener("proctoring_pause", async () => {
+        window.webContents.send("proctoring_pause");
+    });
+    client.target.addEventListener("proctoring_resume", async ({detail: cfg}) => {
+        window.webContents.send("proctoring_resume", cfg);
+    });
+    client.target.addEventListener("proctoring_stop", async () => {
+        window.webContents.send("proctoring_stop");
     });
 
     ipcMain.handle("record_save", async (_, recordId, streamKey, buffer) => {

@@ -3,7 +3,7 @@ const WebSocket = require("ws");
 class CustomEvent extends Event {
     constructor(message, data) {
         super(message, data)
-        this.detail = data.detail
+        this.detail = data && data.detail
     }
 }
 
