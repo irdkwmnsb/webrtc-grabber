@@ -61,22 +61,32 @@ func finalizeProctoringSession(storageDir, sessionId string) {
 	}
 
 	sessionDir := proctoringSessionDir(storageDir, sessionId)
-	entries, err := os.ReadDir(sessionDir)
+	peers, err := os.ReadDir(sessionDir)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			slog.Warn("proctoring finalize: cannot read session dir", "dir", sessionDir, "error", err)
 		}
 		return
 	}
-	for _, e := range entries {
-		if !e.IsDir() {
+	for _, peer := range peers {
+		if !peer.IsDir() {
 			continue
 		}
-		full := filepath.Join(sessionDir, e.Name(), "full.webm")
-		if _, err := os.Stat(full); err != nil {
+		peerDir := filepath.Join(sessionDir, peer.Name())
+		streams, err := os.ReadDir(peerDir)
+		if err != nil {
 			continue
 		}
-		remuxFile(full)
+		for _, st := range streams {
+			if !st.IsDir() {
+				continue
+			}
+			full := filepath.Join(peerDir, st.Name(), "full.webm")
+			if _, err := os.Stat(full); err != nil {
+				continue
+			}
+			remuxFile(full)
+		}
 	}
 
 	markProctoringFinalized(storageDir, sessionId)
@@ -89,12 +99,25 @@ func remuxFile(input string) {
 	}
 
 	dir := filepath.Dir(input)
-	tmp := filepath.Join(dir, "full.fixed.webm")
+	output := filepath.Join(dir, "full.remuxed.webm")
+
+	if _, err := os.Stat(output); err == nil {
+		return
+	}
+
+	tmp := output + ".tmp"
 
 	ctx, cancel := context.WithTimeout(context.Background(), proctoringFinalizeTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-y", "-loglevel", "error", "-i", input, "-c", "copy", tmp)
+	cmd := exec.CommandContext(ctx, "ffmpeg",
+		"-y", "-loglevel", "error",
+		"-fflags", "+genpts",
+		"-i", input,
+		"-c", "copy",
+		"-f", "webm",
+		tmp,
+	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		slog.Error("ffmpeg remux failed", "input", input, "error", err, "stderr", string(out))
@@ -102,13 +125,13 @@ func remuxFile(input string) {
 		return
 	}
 
-	if err := os.Rename(tmp, input); err != nil {
-		slog.Error("ffmpeg remux: failed to swap file", "input", input, "error", err)
+	if err := os.Rename(tmp, output); err != nil {
+		slog.Error("ffmpeg remux: failed to publish remuxed file", "output", output, "error", err)
 		_ = os.Remove(tmp)
 		return
 	}
 
-	slog.Info("proctoring file remuxed", "file", input)
+	slog.Info("proctoring file remuxed", "input", input, "output", output)
 }
 
 func (s *Server) scheduleProctoringFinalize(sessionId string) {

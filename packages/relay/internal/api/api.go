@@ -8,13 +8,13 @@ import (
 )
 
 type Peer struct {
-	Name             string           `json:"name"`
-	SocketId         sockets.SocketID `json:"id"`
-	LastPing         *time.Time       `json:"lastPing"`
-	ConnectionsCount int              `json:"connectionsCount"`
-	StreamTypes      []StreamType     `json:"streamTypes"`
-	CurrentRecordId  *string          `json:"currentRecordId"`
-	ProctoringSource *StreamType      `json:"proctoringSource,omitempty"`
+	Name                    string           `json:"name"`
+	SocketId                sockets.SocketID `json:"id"`
+	LastPing                *time.Time       `json:"lastPing"`
+	ConnectionsCount        int              `json:"connectionsCount"`
+	StreamTypes             []StreamType     `json:"streamTypes"`
+	CurrentRecordId         *string          `json:"currentRecordId"`
+	ProctoringActiveStreams []StreamType     `json:"proctoringActiveStreams,omitempty"`
 }
 
 type StreamType string
@@ -25,10 +25,10 @@ const (
 )
 
 type PeerStatus struct {
-	ConnectionsCount int          `json:"connectionsCount"`
-	StreamTypes      []StreamType `json:"streamTypes"`
-	CurrentRecordId  *string      `json:"currentRecordId"`
-	ProctoringSource *StreamType  `json:"proctoringSource,omitempty"`
+	ConnectionsCount        int          `json:"connectionsCount"`
+	StreamTypes             []StreamType `json:"streamTypes"`
+	CurrentRecordId         *string      `json:"currentRecordId"`
+	ProctoringActiveStreams []StreamType `json:"proctoringActiveStreams,omitempty"`
 }
 
 type PlayerAuth struct {

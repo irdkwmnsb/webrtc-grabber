@@ -14,13 +14,14 @@ import (
 )
 
 type adminProctoringPeer struct {
-	PeerName         string          `json:"peerName"`
-	Online           bool            `json:"online"`
-	ProctoringSource *api.StreamType `json:"proctoringSource,omitempty"`
-	CommittedSeq     int64           `json:"committedSeq"`
-	TotalBytes       int64           `json:"totalBytes"`
-	LastChunkAt      *time.Time      `json:"lastChunkAt,omitempty"`
-	Finalized        bool            `json:"finalized"`
+	PeerName       string         `json:"peerName"`
+	StreamKey      string         `json:"streamKey"`
+	Online         bool           `json:"online"`
+	ActivelyStreaming bool        `json:"activelyStreaming"`
+	CommittedSeq   int64          `json:"committedSeq"`
+	TotalBytes     int64          `json:"totalBytes"`
+	LastChunkAt    *time.Time     `json:"lastChunkAt,omitempty"`
+	Finalized      bool           `json:"finalized"`
 }
 
 type adminProctoringResponse struct {
@@ -183,32 +184,39 @@ func (s *Server) setupAdminApi() {
 				online[p.Name] = &peer
 			}
 
-			diskPeers := map[string]bool{}
+			seen := map[string]bool{}
+			emit := func(peerName, streamKey string) {
+				key := peerName + "/" + streamKey
+				if seen[key] {
+					return
+				}
+				seen[key] = true
+				resp.Peers = append(resp.Peers, buildAdminPeer(s.config.Record.StorageDir, state.SessionId, peerName, streamKey, online[peerName]))
+			}
+
 			if state.SessionId != "" && s.config.Record.StorageDir != "" {
 				sessionDir := proctoringSessionDir(s.config.Record.StorageDir, state.SessionId)
-				if entries, err := os.ReadDir(sessionDir); err == nil {
-					finalized := isProctoringFinalized(s.config.Record.StorageDir, state.SessionId)
-					for _, e := range entries {
-						if !e.IsDir() {
+				if peers, err := os.ReadDir(sessionDir); err == nil {
+					for _, p := range peers {
+						if !p.IsDir() {
 							continue
 						}
-						peerName := e.Name()
-						diskPeers[peerName] = true
-						resp.Peers = append(resp.Peers, buildAdminPeer(s.config.Record.StorageDir, state.SessionId, peerName, online[peerName], finalized))
+						peerDir := filepath.Join(sessionDir, p.Name())
+						if streams, err := os.ReadDir(peerDir); err == nil {
+							for _, st := range streams {
+								if st.IsDir() {
+									emit(p.Name(), st.Name())
+								}
+							}
+						}
 					}
 				}
 			}
 
 			for name, peer := range online {
-				if diskPeers[name] {
-					continue
+				for _, sk := range peer.ProctoringActiveStreams {
+					emit(name, string(sk))
 				}
-				resp.Peers = append(resp.Peers, adminProctoringPeer{
-					PeerName:         name,
-					Online:           true,
-					ProctoringSource: peer.ProctoringSource,
-					CommittedSeq:     -1,
-				})
 			}
 
 			return c.JSON(resp)
@@ -229,22 +237,31 @@ func (s *Server) setupAdminApi() {
 	})
 }
 
-func buildAdminPeer(storageDir, sessionId, peerName string, online *api.Peer, finalized bool) adminProctoringPeer {
+func buildAdminPeer(storageDir, sessionId, peerName, streamKey string, online *api.Peer) adminProctoringPeer {
 	out := adminProctoringPeer{
 		PeerName:     peerName,
+		StreamKey:    streamKey,
 		CommittedSeq: -1,
-		Finalized:    finalized,
+		Finalized:    sessionId != "" && isProctoringFinalized(storageDir, sessionId),
 	}
 	if online != nil {
 		out.Online = true
-		out.ProctoringSource = online.ProctoringSource
+		for _, sk := range online.ProctoringActiveStreams {
+			if string(sk) == streamKey {
+				out.ActivelyStreaming = true
+				break
+			}
+		}
 	}
-	stateFile := filepath.Join(storageDir, "proctoring", sessionId, peerName, "state.json")
+	if sessionId == "" {
+		return out
+	}
+	stateFile := filepath.Join(storageDir, "proctoring", sessionId, peerName, streamKey, "state.json")
 	if st, err := loadProctoringState(stateFile); err == nil {
 		out.CommittedSeq = st.CommittedSeq
 		out.TotalBytes = st.TotalBytes
 	}
-	full := filepath.Join(storageDir, "proctoring", sessionId, peerName, "full.webm")
+	full := filepath.Join(storageDir, "proctoring", sessionId, peerName, streamKey, "full.webm")
 	if info, err := os.Stat(full); err == nil {
 		t := info.ModTime()
 		out.LastChunkAt = &t

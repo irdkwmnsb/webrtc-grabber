@@ -136,7 +136,7 @@
         <span class="status-label">Proctoring: <span id="proctoring-state">idle</span></span>
         <span class="meta" id="proctoring-meta"></span>
         <span class="params" id="proctoring-params">
-            <label>chunk ms <input id="proctoring-chunk" type="number" value="60000" min="1000" step="1000"></label>
+            <label>chunk ms <input id="proctoring-chunk" type="number" value="5000" min="1000" step="1000"></label>
             <label>fps <input id="proctoring-fps" type="number" value="1" min="1" max="30"></label>
             <label>bitrate <input id="proctoring-bitrate" type="number" value="100000" min="10000" step="10000"></label>
             <label>ends at <input id="proctoring-endsat" type="datetime-local"></label>
@@ -272,8 +272,8 @@
     client.target.addEventListener("proctoring", ({detail: [state]}) => renderProctoring(state));
     client.target.addEventListener("initialized", async () => {
         try {
-            const state = await adminClient.proctoringGet();
-            renderProctoring(state);
+            const resp = await adminClient.proctoringGet();
+            renderProctoring(resp ? resp.state : null);
         } catch (e) { console.warn("failed to load initial proctoring state", e); }
     });
     renderProctoring(null);

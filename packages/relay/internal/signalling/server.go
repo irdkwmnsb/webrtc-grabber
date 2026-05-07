@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -430,7 +432,7 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn, peerName string) {
 			ChunkDurationMs: state.ChunkDurationMs,
 			Fps:             state.Fps,
 			VideoBitrate:    state.VideoBitrate,
-			UploadToken:     s.signUploadToken(proctoringScope(state.SessionId, peerName)),
+			UploadTokens:    s.proctoringUploadTokens(state.SessionId, peerName),
 		}
 		var msg api.GrabberMessage
 		if state.IsActive() {
@@ -509,12 +511,13 @@ func (s *Server) broadcastProctoring(prev, next proctoring.State) {
 			ChunkDurationMs: next.ChunkDurationMs,
 			Fps:             next.Fps,
 			VideoBitrate:    next.VideoBitrate,
-			UploadToken:     s.signUploadToken(proctoringScope(next.SessionId, peerName)),
+			UploadTokens:    s.proctoringUploadTokens(next.SessionId, peerName),
 		}
 	}
 
 	switch {
 	case prev.IsIdle() && next.IsActive():
+		s.preCreateProctoringDirs(next.SessionId)
 		s.broadcastToGrabbersPerPeer(func(peerName string) api.GrabberMessage {
 			return api.GrabberMessage{
 				Event:           api.GrabberMessageEventProctoringStart,
@@ -537,6 +540,20 @@ func (s *Server) broadcastProctoring(prev, next proctoring.State) {
 			Event: api.GrabberMessageEventProctoringStop,
 		})
 		s.scheduleProctoringFinalize(prev.SessionId)
+	}
+}
+
+func (s *Server) preCreateProctoringDirs(sessionId string) {
+	if sessionId == "" || s.config.Record.StorageDir == "" {
+		return
+	}
+	for _, name := range s.storage.peerNamesBySocketId() {
+		for _, sk := range proctoringStreamKeys() {
+			dir := filepath.Join(s.config.Record.StorageDir, "proctoring", sessionId, name, sk)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				slog.Warn("failed to pre-create proctoring dir", "dir", dir, "error", err)
+			}
+		}
 	}
 }
 

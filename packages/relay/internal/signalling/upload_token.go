@@ -35,8 +35,20 @@ func (s *Server) verifyUploadToken(scope, token string) bool {
 	return hmac.Equal([]byte(expected), []byte(token))
 }
 
-func proctoringScope(sessionId, peerName string) string {
-	return "proctoring:" + sessionId + ":" + peerName
+func proctoringScope(sessionId, peerName, streamKey string) string {
+	return "proctoring:" + sessionId + ":" + peerName + ":" + streamKey
+}
+
+func proctoringStreamKeys() []string {
+	return []string{"desktop", "webcam"}
+}
+
+func (s *Server) proctoringUploadTokens(sessionId, peerName string) map[string]string {
+	out := make(map[string]string, 2)
+	for _, k := range proctoringStreamKeys() {
+		out[k] = s.signUploadToken(proctoringScope(sessionId, peerName, k))
+	}
+	return out
 }
 
 func recordScope(peerName string) string {

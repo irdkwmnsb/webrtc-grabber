@@ -64,11 +64,11 @@ type PlayerAuthMessage struct {
 }
 
 type ProctoringConfigMessage struct {
-	SessionId       string `json:"sessionId"`
-	ChunkDurationMs uint32 `json:"chunkDurationMs"`
-	Fps             uint32 `json:"fps"`
-	VideoBitrate    uint32 `json:"videoBitrate"`
-	UploadToken     string `json:"uploadToken,omitempty"`
+	SessionId       string            `json:"sessionId"`
+	ChunkDurationMs uint32            `json:"chunkDurationMs"`
+	Fps             uint32            `json:"fps"`
+	VideoBitrate    uint32            `json:"videoBitrate"`
+	UploadTokens    map[string]string `json:"uploadTokens,omitempty"`
 }
 
 type GrabberMessage struct {

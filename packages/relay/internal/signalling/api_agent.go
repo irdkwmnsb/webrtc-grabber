@@ -41,8 +41,17 @@ type proctoringChunkState struct {
 
 var proctoringLocks sync.Map
 
-func proctoringLockKey(sessionId, peerName string) string {
-	return sessionId + "/" + peerName
+func proctoringLockKey(sessionId, peerName, streamKey string) string {
+	return sessionId + "/" + peerName + "/" + streamKey
+}
+
+func isProctoringStreamKey(s string) bool {
+	for _, k := range proctoringStreamKeys() {
+		if s == k {
+			return true
+		}
+	}
+	return false
 }
 
 func proctoringLock(key string) *sync.Mutex {
@@ -142,13 +151,14 @@ func (s *Server) setupAgentApi() {
 			}
 			peerName := c.Params("peerName")
 			sessionId := c.Query("sessionId")
-			if !isSafePathSegment(peerName) || !isSafePathSegment(sessionId) {
+			streamKey := c.Query("streamKey")
+			if !isSafePathSegment(peerName) || !isSafePathSegment(sessionId) || !isProctoringStreamKey(streamKey) {
 				return c.Status(fiber.StatusBadRequest).SendString("Invalid params")
 			}
-			if !s.verifyUploadToken(proctoringScope(sessionId, peerName), c.Get(uploadTokenHeader)) {
+			if !s.verifyUploadToken(proctoringScope(sessionId, peerName, streamKey), c.Get(uploadTokenHeader)) {
 				return c.Status(fiber.StatusUnauthorized).SendString("Invalid upload token")
 			}
-			stateFile := filepath.Join(s.config.Record.StorageDir, "proctoring", sessionId, peerName, "state.json")
+			stateFile := filepath.Join(s.config.Record.StorageDir, "proctoring", sessionId, peerName, streamKey, "state.json")
 			st, err := loadProctoringState(stateFile)
 			if err != nil {
 				slog.Error("failed to load proctoring side-state", "stateFile", stateFile, "error", err)
@@ -164,12 +174,13 @@ func (s *Server) setupAgentApi() {
 
 			peerName := c.Params("peerName")
 			sessionId := c.Query("sessionId")
+			streamKey := c.Query("streamKey")
 			seqStr := c.Query("seq")
 
-			if !isSafePathSegment(peerName) || !isSafePathSegment(sessionId) || !isSafePathSegment(seqStr) {
+			if !isSafePathSegment(peerName) || !isSafePathSegment(sessionId) || !isSafePathSegment(seqStr) || !isProctoringStreamKey(streamKey) {
 				return c.Status(fiber.StatusBadRequest).SendString("Invalid params")
 			}
-			if !s.verifyUploadToken(proctoringScope(sessionId, peerName), c.Get(uploadTokenHeader)) {
+			if !s.verifyUploadToken(proctoringScope(sessionId, peerName, streamKey), c.Get(uploadTokenHeader)) {
 				return c.Status(fiber.StatusUnauthorized).SendString("Invalid upload token")
 			}
 			seq, err := strconv.ParseInt(seqStr, 10, 64)
@@ -182,13 +193,13 @@ func (s *Server) setupAgentApi() {
 				return c.Status(fiber.StatusBadRequest).SendString("No file to upload")
 			}
 
-			dir := filepath.Join(s.config.Record.StorageDir, "proctoring", sessionId, peerName)
+			dir := filepath.Join(s.config.Record.StorageDir, "proctoring", sessionId, peerName, streamKey)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				slog.Error("failed to create proctoring dir", "dir", dir, "error", err)
 				return c.Status(fiber.StatusInternalServerError).SendString("Failed to create dir")
 			}
 
-			lock := proctoringLock(proctoringLockKey(sessionId, peerName))
+			lock := proctoringLock(proctoringLockKey(sessionId, peerName, streamKey))
 			lock.Lock()
 			defer lock.Unlock()
 

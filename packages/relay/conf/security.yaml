@@ -5,6 +5,12 @@
 # tlsCrtFile: "/path/to/cert.crt"
 # tlsKeyFile: "/path/to/key.key"
 
+# HMAC secret for signing record/proctoring upload tokens.
+# If unset, a random secret is generated on every restart and previously-issued
+# tokens become invalid. Set to a stable value in production so agents can
+# survive relay restarts. Use 32+ random bytes (e.g. `openssl rand -hex 32`).
+uploadSecret: "b378cf87386ecee47c77ad19e2fb75a9d0e7f7051f8b22427bab1d4fc3278c62"
+
 participants:
   - "001"
   - "002"

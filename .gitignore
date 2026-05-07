@@ -1,5 +1,7 @@
 **/node_modules
 **/.idea
 **/*.iml
+**/.DS_Store
 packages/signaling/config.json
 packages/grabber/build
+packages/relay/records/
