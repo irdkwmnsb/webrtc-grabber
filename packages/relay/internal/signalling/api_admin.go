@@ -25,8 +25,15 @@ type adminProctoringPeer struct {
 }
 
 type adminProctoringResponse struct {
-	State proctoring.State      `json:"state"`
-	Peers []adminProctoringPeer `json:"peers"`
+	State    proctoring.State        `json:"state"`
+	Peers    []adminProctoringPeer   `json:"peers"`
+	Sessions []adminProctoringSession `json:"sessions"`
+}
+
+type adminProctoringSession struct {
+	SessionId string `json:"sessionId"`
+	Finalized bool   `json:"finalized"`
+	IsActive  bool   `json:"isActive"`
 }
 
 func (s *Server) setupAdminApi() {
@@ -176,7 +183,28 @@ func (s *Server) setupAdminApi() {
 
 		router.Get("/proctoring", func(c *fiber.Ctx) error {
 			state := s.proctoring.Get()
-			resp := adminProctoringResponse{State: state, Peers: []adminProctoringPeer{}}
+			resp := adminProctoringResponse{
+				State:    state,
+				Peers:    []adminProctoringPeer{},
+				Sessions: []adminProctoringSession{},
+			}
+
+			if s.config.Record.StorageDir != "" {
+				base := filepath.Join(s.config.Record.StorageDir, "proctoring")
+				if entries, err := os.ReadDir(base); err == nil {
+					for _, e := range entries {
+						if !e.IsDir() {
+							continue
+						}
+						sid := e.Name()
+						resp.Sessions = append(resp.Sessions, adminProctoringSession{
+							SessionId: sid,
+							Finalized: isProctoringFinalized(s.config.Record.StorageDir, sid),
+							IsActive:  sid == state.SessionId,
+						})
+					}
+				}
+			}
 
 			online := map[string]*api.Peer{}
 			for _, p := range s.storage.getAll() {
@@ -220,6 +248,29 @@ func (s *Server) setupAdminApi() {
 			}
 
 			return c.JSON(resp)
+		})
+
+		router.Get("/proctoring/file/:sessionId/:peerName/:streamKey/:file", func(c *fiber.Ctx) error {
+			if s.config.Record.StorageDir == "" {
+				return c.Status(fiber.StatusMethodNotAllowed).SendString("Record storage is not enabled")
+			}
+			sessionId := c.Params("sessionId")
+			peerName := c.Params("peerName")
+			streamKey := c.Params("streamKey")
+			fileName := c.Params("file")
+			if !isSafePathSegment(sessionId) || !isSafePathSegment(peerName) || !isProctoringStreamKey(streamKey) {
+				return c.Status(fiber.StatusBadRequest).SendString("Invalid params")
+			}
+			if fileName != "full.webm" && fileName != "full.remuxed.webm" {
+				return c.Status(fiber.StatusBadRequest).SendString("Invalid file")
+			}
+			path := filepath.Join(s.config.Record.StorageDir, "proctoring", sessionId, peerName, streamKey, fileName)
+			if _, err := os.Stat(path); err != nil {
+				return c.Status(fiber.StatusNotFound).SendString("Not found")
+			}
+			c.Set("Content-Type", "video/webm")
+			c.Set("Content-Disposition", `attachment; filename="`+sessionId+"_"+peerName+"_"+streamKey+"_"+fileName+`"`)
+			return c.SendFile(path, false)
 		})
 
 		router.Post("/proctoring/finalize/:sessionId", func(c *fiber.Ctx) error {
