@@ -68,6 +68,7 @@ type ProctoringConfigMessage struct {
 	ChunkDurationMs uint32 `json:"chunkDurationMs"`
 	Fps             uint32 `json:"fps"`
 	VideoBitrate    uint32 `json:"videoBitrate"`
+	UploadToken     string `json:"uploadToken,omitempty"`
 }
 
 type GrabberMessage struct {
@@ -114,6 +115,7 @@ type IceMessage struct {
 type RecordStartMessage struct {
 	RecordId    string `json:"recordId"`
 	TimeoutMsec uint   `json:"timeout"`
+	UploadToken string `json:"uploadToken,omitempty"`
 }
 
 type RecordStopMessage struct {

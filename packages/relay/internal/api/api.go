@@ -14,6 +14,7 @@ type Peer struct {
 	ConnectionsCount int              `json:"connectionsCount"`
 	StreamTypes      []StreamType     `json:"streamTypes"`
 	CurrentRecordId  *string          `json:"currentRecordId"`
+	ProctoringSource *StreamType      `json:"proctoringSource,omitempty"`
 }
 
 type StreamType string
@@ -27,6 +28,7 @@ type PeerStatus struct {
 	ConnectionsCount int          `json:"connectionsCount"`
 	StreamTypes      []StreamType `json:"streamTypes"`
 	CurrentRecordId  *string      `json:"currentRecordId"`
+	ProctoringSource *StreamType  `json:"proctoringSource,omitempty"`
 }
 
 type PlayerAuth struct {

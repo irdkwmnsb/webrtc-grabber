@@ -111,8 +111,8 @@
             const player_ice_handle = async function ({ ice: { peerId, candidate } }) {
                 this.target.dispatchEvent(new CustomEvent('player_ice', { detail: { peerId, candidate } }));
             }
-            const record_start_handle = async function ({ recordStart: { recordId, timeout } }) {
-                this.target.dispatchEvent(new CustomEvent('record_start', { detail: { recordId, timeout } }));
+            const record_start_handle = async function ({ recordStart: { recordId, timeout, uploadToken } }) {
+                this.target.dispatchEvent(new CustomEvent('record_start', { detail: { recordId, timeout, uploadToken } }));
             }
             const record_stop_handle = async function ({ recordStop: { recordId } }) {
                 this.target.dispatchEvent(new CustomEvent('record_stop', { detail: { recordId } }));
@@ -149,13 +149,14 @@
             this.socket.on("proctoring_stop",   proctoring_stop_handle.bind(this));
         }
 
-        send_ping(connectionsCount, streamTypes, currentRecordId) {
-            this.socket.emit("ping", { 
-                ping: { 
-                    connectionsCount: connectionsCount, 
+        send_ping(connectionsCount, streamTypes, currentRecordId, proctoringSource) {
+            this.socket.emit("ping", {
+                ping: {
+                    connectionsCount: connectionsCount,
                     streamTypes: streamTypes,
-                    currentRecordId: currentRecordId
-                } 
+                    currentRecordId: currentRecordId,
+                    proctoringSource: proctoringSource || null,
+                }
             });
         }
 
@@ -167,14 +168,16 @@
             this.socket.emit("grabber_ice", { ice: { peerId, candidate } });
         }
 
-        async record_upload(fileName, fileBlob) {
+        async record_upload(fileName, fileBlob, uploadToken) {
             const formData = new FormData();
             formData.append('file', fileBlob, fileName);
-            
+
             const url = `${this.signallingUrl}/api/agent/${this.peerName}/record_upload`;
+            const headers = uploadToken ? { 'X-Upload-Token': uploadToken } : {};
             return fetch(url, {
                 method: "POST",
                 body: formData,
+                headers,
             });
         }
     }
@@ -186,6 +189,7 @@
                 recordId: null,
                 recordedChunks: new Map(),
                 startTime: null,
+                uploadToken: null,
             };
             this.recordingDuration = 0;
         }
@@ -206,13 +210,14 @@
             return '';
         }
 
-        async startRecording(recordId, timeout, streams) {
+        async startRecording(recordId, timeout, streams, uploadToken) {
             this.stopRecording(this.activeRecording.recordId);
-            
+
             this.activeRecording.recordId = recordId;
             this.activeRecording.recorders = [];
             this.activeRecording.recordedChunks.clear();
             this.activeRecording.startTime = Date.now();
+            this.activeRecording.uploadToken = uploadToken || null;
 
             for (const [streamKey, stream] of Object.entries(streams)) {
                 let recordStream = stream;
@@ -319,7 +324,8 @@
     await new Promise(resolve => setTimeout(resolve, 1000));
     
     const chunksMap = new Map(this.activeRecording.recordedChunks);
-    
+    const uploadToken = this.activeRecording.uploadToken;
+
     if (!chunksMap.size) {
         console.warn('No recordings to upload');
         return;
@@ -351,7 +357,7 @@
         console.log(`Uploading ${fileName}: ${chunks.length} chunks, ${blob.size} bytes, duration: ${this.recordingDuration}ms`);
         
         try {
-            const response = await client.record_upload(fileName, blob);
+            const response = await client.record_upload(fileName, blob, uploadToken);
             const text = await response.text();
             console.log(`Upload ${fileName} response: ${text}`);
         } catch (e) {
@@ -432,6 +438,23 @@
             this.queue = queue;
             this.running = false;
             this.attempt = 0;
+            this.uploadToken = null;
+        }
+
+        setUploadToken(token) {
+            this.uploadToken = token || null;
+        }
+
+        _authHeaders() {
+            return this.uploadToken ? { 'X-Upload-Token': this.uploadToken } : {};
+        }
+
+        async _backoff(label) {
+            this.attempt++;
+            const base = Math.min(Math.pow(2, this.attempt) * 1000, 5 * 60 * 1000);
+            const delay = base / 2 + Math.random() * (base / 2);
+            console.warn(`proctoring ${label} (attempt ${this.attempt}), retry in ${Math.round(delay)}ms`);
+            await new Promise(r => setTimeout(r, delay));
         }
 
         kick() {
@@ -442,16 +465,29 @@
                     while (true) {
                         const item = await this.queue.peek();
                         if (!item) break;
+                        let outcome;
                         try {
-                            await this._upload(item);
+                            outcome = await this._upload(item);
+                        } catch (e) {
+                            await this._backoff(`upload failed: ${e}`);
+                            continue;
+                        }
+                        if (outcome === 'ok' || outcome === 'drop') {
                             await this.queue.remove(item.id);
                             this.attempt = 0;
+                            continue;
+                        }
+                        // outcome === 'conflict'
+                        let progressed = false;
+                        try {
+                            progressed = await this._reconcile(item.sessionId);
                         } catch (e) {
-                            this.attempt++;
-                            const base = Math.min(Math.pow(2, this.attempt) * 1000, 5 * 60 * 1000);
-                            const delay = base / 2 + Math.random() * (base / 2);
-                            console.warn(`proctoring upload failed (attempt ${this.attempt}), retry in ${Math.round(delay)}ms`, e);
-                            await new Promise(r => setTimeout(r, delay));
+                            console.warn('proctoring reconcile failed', e);
+                        }
+                        if (progressed) {
+                            this.attempt = 0;
+                        } else {
+                            await this._backoff('conflict not resolved');
                         }
                     }
                 } finally {
@@ -465,8 +501,33 @@
             fd.append('file', blob, `${seq}.webm`);
             const url = `${this.signallingUrl}/api/agent/${this.peerName}/proctoring_upload`
                 + `?sessionId=${encodeURIComponent(sessionId)}&seq=${encodeURIComponent(seq)}`;
-            const res = await fetch(url, { method: 'POST', body: fd });
-            if (!res.ok) throw new Error(`status ${res.status}: ${await res.text().catch(() => '')}`);
+            const res = await fetch(url, { method: 'POST', body: fd, headers: this._authHeaders() });
+            if (res.ok) return 'ok';
+            if (res.status === 409) return 'conflict';
+            if (res.status === 400 || res.status === 413 || res.status === 415) {
+                const body = await res.text().catch(() => '');
+                console.error(`proctoring upload: permanent ${res.status} for seq=${seq}, dropping: ${body}`);
+                return 'drop';
+            }
+            throw new Error(`status ${res.status}: ${await res.text().catch(() => '')}`);
+        }
+
+        async _reconcile(sessionId) {
+            const url = `${this.signallingUrl}/api/agent/${this.peerName}/proctoring_state`
+                + `?sessionId=${encodeURIComponent(sessionId)}`;
+            const res = await fetch(url, { headers: this._authHeaders() });
+            if (!res.ok) throw new Error(`state fetch: status ${res.status}`);
+            const state = await res.json();
+            const committed = state.committedSeq;
+            let dropped = 0;
+            while (true) {
+                const head = await this.queue.peek();
+                if (!head || head.sessionId !== sessionId || head.seq > committed) break;
+                await this.queue.remove(head.id);
+                dropped++;
+            }
+            console.log(`proctoring reconcile: committedSeq=${committed}, dropped ${dropped} stale chunks`);
+            return dropped > 0;
         }
     }
 
@@ -484,20 +545,29 @@
             this.drawTimer = null;
             this.seq = 0;
             this.seqStorageKey = null;
+            this.activeSourceKey = null;
+            this.activeSourceTrack = null;
+            this.activeSourceEndedHandler = null;
             this.uploader.kick();
+        }
+
+        getActiveSource() {
+            return this.activeSourceKey;
         }
 
         _seqKey(sessionId) {
             return `proctoring_next_seq:${this.peerName}:${sessionId}`;
         }
 
-        async start(cfg, sourceStream) {
+        async start(cfg, sourceStream, sourceKey) {
             await this.stop();
             this.cfg = cfg;
+            this.uploader.setUploadToken(cfg.uploadToken);
             this.seqStorageKey = this._seqKey(cfg.sessionId);
             const saved = parseInt(localStorage.getItem(this.seqStorageKey), 10);
             this.seq = Number.isFinite(saved) && saved >= 0 ? saved : 0;
-            console.log(`proctoring: starting session=${cfg.sessionId} from seq=${this.seq}`);
+            this.activeSourceKey = sourceKey || null;
+            console.log(`proctoring: starting session=${cfg.sessionId} source=${sourceKey} from seq=${this.seq}`);
             await this._initPipeline(sourceStream);
         }
 
@@ -509,6 +579,16 @@
             this.video = video;
 
             const track = sourceStream.getVideoTracks()[0];
+            if (track) {
+                const onended = () => {
+                    console.warn(`proctoring: source track (${this.activeSourceKey}) ended`);
+                    this.activeSourceKey = null;
+                    this.pause();
+                };
+                this.activeSourceTrack = track;
+                this.activeSourceEndedHandler = onended;
+                track.addEventListener('ended', onended);
+            }
             const settings = track ? track.getSettings() : {};
             const w = settings.width  || video.videoWidth  || 1280;
             const h = settings.height || video.videoHeight || 720;
@@ -577,13 +657,22 @@
         }
 
         resume(cfg) {
-            if (cfg) this.cfg = cfg;
+            if (cfg) {
+                this.cfg = cfg;
+                this.uploader.setUploadToken(cfg.uploadToken);
+            }
             if (!this.canvasStream || !this.cfg) return;
             if (!this.recorder) this._startRecorder();
         }
 
         async stop() {
             this.pause();
+            if (this.activeSourceTrack && this.activeSourceEndedHandler) {
+                try { this.activeSourceTrack.removeEventListener('ended', this.activeSourceEndedHandler); } catch (e) {}
+            }
+            this.activeSourceTrack = null;
+            this.activeSourceEndedHandler = null;
+            this.activeSourceKey = null;
             if (this.drawTimer) { clearInterval(this.drawTimer); this.drawTimer = null; }
             if (this.canvasStream) {
                 try { this.canvasStream.getTracks().forEach(t => t.stop()); } catch (e) {}
@@ -672,6 +761,14 @@
         updateState("detecting");
 
         const streams = await detectStreams();
+        for (const [key, stream] of Object.entries(streams)) {
+            stream.getVideoTracks().forEach(track => {
+                track.addEventListener('ended', () => {
+                    console.warn(`stream "${key}" video track ended; removing from active streams`);
+                    delete streams[key];
+                });
+            });
+        }
         const pcs = new Map();
         const recordingManager = new RecordingManager();
         let peerConnectionConfig = undefined;
@@ -694,7 +791,12 @@
                 clearInterval(pingTimerId);
             }
             pingTimerId = setInterval(() => {
-                client.send_ping(pcs.size, Object.keys(streams), recordingManager.activeRecording.recordId);
+                client.send_ping(
+                    pcs.size,
+                    Object.keys(streams),
+                    recordingManager.activeRecording.recordId,
+                    proctoringManager.getActiveSource(),
+                );
             }, pingInterval);
             console.log(`init peer (pingInterval = ${pingInterval})`);
             updateState("active");
@@ -740,10 +842,10 @@
                 .then(() => console.log(`add player_ice from ${peerId}`));
         });
 
-        client.target.addEventListener('record_start', async ({ detail: { recordId, timeout } }) => {
+        client.target.addEventListener('record_start', async ({ detail: { recordId, timeout, uploadToken } }) => {
             console.log(`Start recording: ${recordId}, timeout: ${timeout}ms`);
             updateState("recording");
-            await recordingManager.startRecording(recordId, timeout, streams);
+            await recordingManager.startRecording(recordId, timeout, streams, uploadToken);
         });
 
         client.target.addEventListener('record_stop', async ({ detail: { recordId } }) => {
@@ -775,7 +877,7 @@
             }
             console.log(`proctoring_start: using ${src.key} stream`);
             try {
-                await proctoringManager.start(cfg, src.stream);
+                await proctoringManager.start(cfg, src.stream, src.key);
             } catch (e) {
                 console.error('failed to start proctoring', e);
             }

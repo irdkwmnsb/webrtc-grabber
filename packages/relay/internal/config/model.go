@@ -31,6 +31,7 @@ type SecurityConfig struct {
 	PlayerCredential  *string        `json:"adminCredential" yaml:"adminCredential"`
 	TLSCrtFile        *string        `json:"tlsCrtFile" yaml:"tlsCrtFile"`
 	TLSKeyFile        *string        `json:"tlsKeyFile" yaml:"tlsKeyFile"`
+	UploadSecret      *string        `json:"uploadSecret" yaml:"uploadSecret"`
 	Participants      []string       `json:"participants" yaml:"participants"`
 	AdminsRawNetworks []netip.Prefix `json:"adminsNetworks" yaml:"adminsNetworks"`
 }

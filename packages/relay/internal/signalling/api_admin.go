@@ -2,6 +2,9 @@ package signalling
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/basicauth"
@@ -9,6 +12,21 @@ import (
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/proctoring"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 )
+
+type adminProctoringPeer struct {
+	PeerName         string          `json:"peerName"`
+	Online           bool            `json:"online"`
+	ProctoringSource *api.StreamType `json:"proctoringSource,omitempty"`
+	CommittedSeq     int64           `json:"committedSeq"`
+	TotalBytes       int64           `json:"totalBytes"`
+	LastChunkAt      *time.Time      `json:"lastChunkAt,omitempty"`
+	Finalized        bool            `json:"finalized"`
+}
+
+type adminProctoringResponse struct {
+	State proctoring.State      `json:"state"`
+	Peers []adminProctoringPeer `json:"peers"`
+}
 
 func (s *Server) setupAdminApi() {
 	s.app.Route("/api/admin", func(router fiber.Router) {
@@ -43,6 +61,7 @@ func (s *Server) setupAdminApi() {
 				RecordStart: &api.RecordStartMessage{
 					RecordId:    req.RecordId,
 					TimeoutMsec: recordTimeout,
+					UploadToken: s.signUploadToken(recordScope(req.PeerName)),
 				}})
 			if err != nil {
 				return c.Status(fiber.StatusInternalServerError).SendString("Failed to send start recoding request")
@@ -131,6 +150,10 @@ func (s *Server) setupAdminApi() {
 				return c.Status(fiber.StatusConflict).SendString(err.Error())
 			}
 
+			if errors.Is(err, proctoring.ErrInvalidConfig) {
+				return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+			}
+
 			if err != nil {
 				return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
 			}
@@ -150,6 +173,47 @@ func (s *Server) setupAdminApi() {
 			return proctoringAction(c, s.proctoring.Stop, s.proctoring.Get)
 		})
 
+		router.Get("/proctoring", func(c *fiber.Ctx) error {
+			state := s.proctoring.Get()
+			resp := adminProctoringResponse{State: state, Peers: []adminProctoringPeer{}}
+
+			online := map[string]*api.Peer{}
+			for _, p := range s.storage.getAll() {
+				peer := p
+				online[p.Name] = &peer
+			}
+
+			diskPeers := map[string]bool{}
+			if state.SessionId != "" && s.config.Record.StorageDir != "" {
+				sessionDir := proctoringSessionDir(s.config.Record.StorageDir, state.SessionId)
+				if entries, err := os.ReadDir(sessionDir); err == nil {
+					finalized := isProctoringFinalized(s.config.Record.StorageDir, state.SessionId)
+					for _, e := range entries {
+						if !e.IsDir() {
+							continue
+						}
+						peerName := e.Name()
+						diskPeers[peerName] = true
+						resp.Peers = append(resp.Peers, buildAdminPeer(s.config.Record.StorageDir, state.SessionId, peerName, online[peerName], finalized))
+					}
+				}
+			}
+
+			for name, peer := range online {
+				if diskPeers[name] {
+					continue
+				}
+				resp.Peers = append(resp.Peers, adminProctoringPeer{
+					PeerName:         name,
+					Online:           true,
+					ProctoringSource: peer.ProctoringSource,
+					CommittedSeq:     -1,
+				})
+			}
+
+			return c.JSON(resp)
+		})
+
 		router.Post("/proctoring/finalize/:sessionId", func(c *fiber.Ctx) error {
 			sessionId := c.Params("sessionId")
 			if !isSafePathSegment(sessionId) {
@@ -163,6 +227,29 @@ func (s *Server) setupAdminApi() {
 		})
 
 	})
+}
+
+func buildAdminPeer(storageDir, sessionId, peerName string, online *api.Peer, finalized bool) adminProctoringPeer {
+	out := adminProctoringPeer{
+		PeerName:     peerName,
+		CommittedSeq: -1,
+		Finalized:    finalized,
+	}
+	if online != nil {
+		out.Online = true
+		out.ProctoringSource = online.ProctoringSource
+	}
+	stateFile := filepath.Join(storageDir, "proctoring", sessionId, peerName, "state.json")
+	if st, err := loadProctoringState(stateFile); err == nil {
+		out.CommittedSeq = st.CommittedSeq
+		out.TotalBytes = st.TotalBytes
+	}
+	full := filepath.Join(storageDir, "proctoring", sessionId, peerName, "full.webm")
+	if info, err := os.Stat(full); err == nil {
+		t := info.ModTime()
+		out.LastChunkAt = &t
+	}
+	return out
 }
 
 func proctoringAction(c *fiber.Ctx, action func() error, getter func() proctoring.State) error {

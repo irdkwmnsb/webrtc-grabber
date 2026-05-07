@@ -34,6 +34,7 @@ type Server struct {
 	grabberSockets  *sockets.SocketPool
 	sfu             sfu.SFU
 	proctoring      *proctoring.Manager
+	uploadSecret    []byte
 }
 
 func NewServer(parent context.Context, cfg *config.AppConfig, app *fiber.App) (*Server, error) {
@@ -46,6 +47,15 @@ func NewServer(parent context.Context, cfg *config.AppConfig, app *fiber.App) (*
 		return nil, err
 	}
 
+	uploadSecret, configured, err := newUploadSecret(cfg.Security.UploadSecret)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if !configured {
+		slog.Warn("security.uploadSecret not configured; generated ephemeral secret (won't survive restart)")
+	}
+
 	server := &Server{
 		ctx:            ctx,
 		cancel:         cancel,
@@ -55,6 +65,7 @@ func NewServer(parent context.Context, cfg *config.AppConfig, app *fiber.App) (*
 		grabberSockets: sockets.NewSocketPool(),
 		storage:        NewStorage(),
 		sfu:            sfu,
+		uploadSecret:   uploadSecret,
 	}
 
 	manager, err := proctoring.NewManager(cfg.Record.StorageDir, server.broadcastProctoring)
@@ -63,6 +74,8 @@ func NewServer(parent context.Context, cfg *config.AppConfig, app *fiber.App) (*
 		return nil, fmt.Errorf("init proctoring manager: %w", err)
 	}
 	server.proctoring = manager
+
+	sweepProctoringSessions(cfg.Record.StorageDir, manager.Get().SessionId)
 
 	server.storage.setParticipants(cfg.Security.Participants)
 	server.oldPeersCleaner = utils.SetIntervalTimer(time.Minute, server.storage.deleteOldPeers)
@@ -369,11 +382,11 @@ func (s *Server) setupGrabberSockets() {
 
 		s.storage.addPeer(peerName, socketID)
 
-		s.listenGrabberSocket(c)
+		s.listenGrabberSocket(c, peerName)
 	}))
 }
 
-func (s *Server) listenGrabberSocket(c *websocket.Conn) {
+func (s *Server) listenGrabberSocket(c *websocket.Conn, peerName string) {
 	socketID := sockets.SocketID(c.NetConn().RemoteAddr().String())
 	newC := s.grabberSockets.AddSocket(c)
 
@@ -411,15 +424,16 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn) {
 		return
 	}
 
-	if state := s.proctoring.Get(); state.Active || state.Paused {
+	if state := s.proctoring.Get(); state.IsActive() || state.IsPaused() {
 		cfg := &api.ProctoringConfigMessage{
 			SessionId:       state.SessionId,
 			ChunkDurationMs: state.ChunkDurationMs,
 			Fps:             state.Fps,
 			VideoBitrate:    state.VideoBitrate,
+			UploadToken:     s.signUploadToken(proctoringScope(state.SessionId, peerName)),
 		}
 		var msg api.GrabberMessage
-		if state.Active {
+		if state.IsActive() {
 			msg = api.GrabberMessage{
 				Event:           api.GrabberMessageEventProctoringStart,
 				ProctoringStart: cfg,
@@ -489,33 +503,53 @@ func (s *Server) broadcastProctoring(prev, next proctoring.State) {
 		Proctoring: &next,
 	})
 
-	cfg := &api.ProctoringConfigMessage{
-		SessionId:       next.SessionId,
-		ChunkDurationMs: next.ChunkDurationMs,
-		Fps:             next.Fps,
-		VideoBitrate:    next.VideoBitrate,
+	buildCfg := func(peerName string) *api.ProctoringConfigMessage {
+		return &api.ProctoringConfigMessage{
+			SessionId:       next.SessionId,
+			ChunkDurationMs: next.ChunkDurationMs,
+			Fps:             next.Fps,
+			VideoBitrate:    next.VideoBitrate,
+			UploadToken:     s.signUploadToken(proctoringScope(next.SessionId, peerName)),
+		}
 	}
 
 	switch {
-	case !prev.Active && next.Active && !prev.Paused:
-		s.broadcastToGrabbers(api.GrabberMessage{
-			Event:           api.GrabberMessageEventProctoringStart,
-			ProctoringStart: cfg,
+	case prev.IsIdle() && next.IsActive():
+		s.broadcastToGrabbersPerPeer(func(peerName string) api.GrabberMessage {
+			return api.GrabberMessage{
+				Event:           api.GrabberMessageEventProctoringStart,
+				ProctoringStart: buildCfg(peerName),
+			}
 		})
-	case prev.Active && next.Paused:
+	case prev.IsActive() && next.IsPaused():
 		s.broadcastToGrabbers(api.GrabberMessage{
 			Event: api.GrabberMessageEventProctoringPause,
 		})
-	case prev.Paused && next.Active:
-		s.broadcastToGrabbers(api.GrabberMessage{
-			Event:            api.GrabberMessageEventProctoringResume,
-			ProctoringResume: cfg,
+	case prev.IsPaused() && next.IsActive():
+		s.broadcastToGrabbersPerPeer(func(peerName string) api.GrabberMessage {
+			return api.GrabberMessage{
+				Event:            api.GrabberMessageEventProctoringResume,
+				ProctoringResume: buildCfg(peerName),
+			}
 		})
-	case (prev.Active || prev.Paused) && next.SessionId == "":
+	case !prev.IsIdle() && next.IsIdle():
 		s.broadcastToGrabbers(api.GrabberMessage{
 			Event: api.GrabberMessageEventProctoringStop,
 		})
 		s.scheduleProctoringFinalize(prev.SessionId)
+	}
+}
+
+func (s *Server) broadcastToGrabbersPerPeer(buildMsg func(peerName string) api.GrabberMessage) {
+	for socketID, peerName := range s.storage.peerNamesBySocketId() {
+		sock := s.grabberSockets.GetSocket(socketID)
+		if sock == nil {
+			continue
+		}
+		msg := buildMsg(peerName)
+		if err := sock.WriteJSON(msg); err != nil {
+			slog.Debug("broadcast to grabber failed", "event", msg.Event, "error", err)
+		}
 	}
 }
 

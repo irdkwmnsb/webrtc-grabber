@@ -5,13 +5,17 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/gofiber/fiber/v2"
+)
+
+const (
+	proctoringChunkMaxBytes = 32 * 1024 * 1024
+	recordUploadMaxBytes    = 50 * 1024 * 1024
 )
 
 func isSafePathSegment(s string) bool {
@@ -21,6 +25,15 @@ func isSafePathSegment(s string) bool {
 	return !strings.ContainsAny(s, `/\`)
 }
 
+func limitBody(max int) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if c.Request().Header.ContentLength() > max {
+			return c.Status(fiber.StatusRequestEntityTooLarge).SendString("Body too large")
+		}
+		return c.Next()
+	}
+}
+
 type proctoringChunkState struct {
 	CommittedSeq int64 `json:"committedSeq"`
 	TotalBytes   int64 `json:"totalBytes"`
@@ -28,9 +41,23 @@ type proctoringChunkState struct {
 
 var proctoringLocks sync.Map
 
+func proctoringLockKey(sessionId, peerName string) string {
+	return sessionId + "/" + peerName
+}
+
 func proctoringLock(key string) *sync.Mutex {
 	v, _ := proctoringLocks.LoadOrStore(key, &sync.Mutex{})
 	return v.(*sync.Mutex)
+}
+
+func cleanupProctoringLocks(sessionId string) {
+	prefix := sessionId + "/"
+	proctoringLocks.Range(func(k, _ any) bool {
+		if key, ok := k.(string); ok && strings.HasPrefix(key, prefix) {
+			proctoringLocks.Delete(k)
+		}
+		return true
+	})
 }
 
 func loadProctoringState(stateFile string) (proctoringChunkState, error) {
@@ -49,9 +76,27 @@ func loadProctoringState(stateFile string) (proctoringChunkState, error) {
 }
 
 func saveProctoringState(stateFile string, st proctoringChunkState) error {
+	data, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
 	tmp := stateFile + ".tmp"
-	data, _ := json.Marshal(st)
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, stateFile)
@@ -59,24 +104,31 @@ func saveProctoringState(stateFile string, st proctoringChunkState) error {
 
 func (s *Server) setupAgentApi() {
 	s.app.Route("/api/agent", func(router fiber.Router) {
-		router.Post("/:peerName/record_upload", func(c *fiber.Ctx) error {
+		router.Post("/:peerName/record_upload", limitBody(recordUploadMaxBytes), func(c *fiber.Ctx) error {
 			if s.config.Record.StorageDir == "" {
 				return c.Status(fiber.StatusMethodNotAllowed).SendString("Record storage is not enabled")
 			}
 
 			peerName := c.Params("peerName")
+			if !isSafePathSegment(peerName) {
+				return c.Status(fiber.StatusBadRequest).SendString("Invalid peerName")
+			}
+			if !s.verifyUploadToken(recordScope(peerName), c.Get(uploadTokenHeader)) {
+				return c.Status(fiber.StatusUnauthorized).SendString("Invalid upload token")
+			}
 
 			file, err := c.FormFile("file")
 			if err != nil {
 				return c.Status(fiber.StatusBadRequest).SendString("No file to upload")
 			}
-			if !strings.HasSuffix(file.Filename, ".webm") {
-				return c.Status(fiber.StatusBadRequest).SendString("File has incorrect extension")
+			safeName := filepath.Base(file.Filename)
+			if !isSafePathSegment(safeName) || !strings.HasSuffix(safeName, ".webm") {
+				return c.Status(fiber.StatusBadRequest).SendString("File has incorrect name or extension")
 			}
 
-			slog.Info("store agent record file", "filename", file.Filename, "sizeKB", file.Size/1024)
+			slog.Info("store agent record file", "filename", safeName, "sizeKB", file.Size/1024)
 
-			destination := path.Join(s.config.Record.StorageDir, peerName+"_"+file.Filename)
+			destination := filepath.Join(s.config.Record.StorageDir, peerName+"_"+safeName)
 			if err := c.SaveFile(file, destination); err != nil {
 				return c.Status(fiber.StatusBadRequest).SendString("Failed to upload file")
 			}
@@ -84,7 +136,28 @@ func (s *Server) setupAgentApi() {
 			return c.Status(fiber.StatusOK).SendString("OK")
 		})
 
-		router.Post("/:peerName/proctoring_upload", func(c *fiber.Ctx) error {
+		router.Get("/:peerName/proctoring_state", func(c *fiber.Ctx) error {
+			if s.config.Record.StorageDir == "" {
+				return c.Status(fiber.StatusMethodNotAllowed).SendString("Record storage is not enabled")
+			}
+			peerName := c.Params("peerName")
+			sessionId := c.Query("sessionId")
+			if !isSafePathSegment(peerName) || !isSafePathSegment(sessionId) {
+				return c.Status(fiber.StatusBadRequest).SendString("Invalid params")
+			}
+			if !s.verifyUploadToken(proctoringScope(sessionId, peerName), c.Get(uploadTokenHeader)) {
+				return c.Status(fiber.StatusUnauthorized).SendString("Invalid upload token")
+			}
+			stateFile := filepath.Join(s.config.Record.StorageDir, "proctoring", sessionId, peerName, "state.json")
+			st, err := loadProctoringState(stateFile)
+			if err != nil {
+				slog.Error("failed to load proctoring side-state", "stateFile", stateFile, "error", err)
+				return c.Status(fiber.StatusInternalServerError).SendString("Failed to load state")
+			}
+			return c.JSON(st)
+		})
+
+		router.Post("/:peerName/proctoring_upload", limitBody(proctoringChunkMaxBytes), func(c *fiber.Ctx) error {
 			if s.config.Record.StorageDir == "" {
 				return c.Status(fiber.StatusMethodNotAllowed).SendString("Record storage is not enabled")
 			}
@@ -95,6 +168,9 @@ func (s *Server) setupAgentApi() {
 
 			if !isSafePathSegment(peerName) || !isSafePathSegment(sessionId) || !isSafePathSegment(seqStr) {
 				return c.Status(fiber.StatusBadRequest).SendString("Invalid params")
+			}
+			if !s.verifyUploadToken(proctoringScope(sessionId, peerName), c.Get(uploadTokenHeader)) {
+				return c.Status(fiber.StatusUnauthorized).SendString("Invalid upload token")
 			}
 			seq, err := strconv.ParseInt(seqStr, 10, 64)
 			if err != nil || seq < 0 {
@@ -112,7 +188,7 @@ func (s *Server) setupAgentApi() {
 				return c.Status(fiber.StatusInternalServerError).SendString("Failed to create dir")
 			}
 
-			lock := proctoringLock(sessionId + "/" + peerName)
+			lock := proctoringLock(proctoringLockKey(sessionId, peerName))
 			lock.Lock()
 			defer lock.Unlock()
 
