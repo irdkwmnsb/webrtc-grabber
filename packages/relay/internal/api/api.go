@@ -8,12 +8,13 @@ import (
 )
 
 type Peer struct {
-	Name             string           `json:"name"`
-	SocketId         sockets.SocketID `json:"id"`
-	LastPing         *time.Time       `json:"lastPing"`
-	ConnectionsCount int              `json:"connectionsCount"`
-	StreamTypes      []StreamType     `json:"streamTypes"`
-	CurrentRecordId  *string          `json:"currentRecordId"`
+	Name                    string           `json:"name"`
+	SocketId                sockets.SocketID `json:"id"`
+	LastPing                *time.Time       `json:"lastPing"`
+	ConnectionsCount        int              `json:"connectionsCount"`
+	StreamTypes             []StreamType     `json:"streamTypes"`
+	CurrentRecordId         *string          `json:"currentRecordId"`
+	ProctoringActiveStreams []StreamType     `json:"proctoringActiveStreams,omitempty"`
 }
 
 type StreamType string
@@ -24,9 +25,10 @@ const (
 )
 
 type PeerStatus struct {
-	ConnectionsCount int          `json:"connectionsCount"`
-	StreamTypes      []StreamType `json:"streamTypes"`
-	CurrentRecordId  *string      `json:"currentRecordId"`
+	ConnectionsCount        int          `json:"connectionsCount"`
+	StreamTypes             []StreamType `json:"streamTypes"`
+	CurrentRecordId         *string      `json:"currentRecordId"`
+	ProctoringActiveStreams []StreamType `json:"proctoringActiveStreams,omitempty"`
 }
 
 type PlayerAuth struct {
@@ -63,4 +65,12 @@ func (c PeerConnectionConfig) WebrtcConfiguration() webrtc.Configuration {
 		conf.ICEServers = append(conf.ICEServers, iceServer)
 	}
 	return conf
+}
+
+type ProctoringRequest struct {
+	Enabled         bool       `json:"enabled"`
+	EndsAt          *time.Time `json:"endsAt,omitempty"`
+	ChunkDurationMs uint32     `json:"chunkDurationMs"`
+	Fps             uint32     `json:"fps"`
+	VideoBitrate    uint32     `json:"videoBitrate"`
 }

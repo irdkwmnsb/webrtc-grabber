@@ -111,8 +111,8 @@
             const player_ice_handle = async function ({ ice: { peerId, candidate } }) {
                 this.target.dispatchEvent(new CustomEvent('player_ice', { detail: { peerId, candidate } }));
             }
-            const record_start_handle = async function ({ recordStart: { recordId, timeout } }) {
-                this.target.dispatchEvent(new CustomEvent('record_start', { detail: { recordId, timeout } }));
+            const record_start_handle = async function ({ recordStart: { recordId, timeout, uploadToken } }) {
+                this.target.dispatchEvent(new CustomEvent('record_start', { detail: { recordId, timeout, uploadToken } }));
             }
             const record_stop_handle = async function ({ recordStop: { recordId } }) {
                 this.target.dispatchEvent(new CustomEvent('record_stop', { detail: { recordId } }));
@@ -123,6 +123,18 @@
             const players_disconnect_handle = async function ({ event }) {
                 this.target.dispatchEvent(new CustomEvent("players_disconnect", { detail: {} }));
             }
+            const proctoring_start_handle = function ({ proctoringStart }) {
+                this.target.dispatchEvent(new CustomEvent('proctoring_start', { detail: proctoringStart }));
+            };
+            const proctoring_pause_handle = function () {
+                this.target.dispatchEvent(new CustomEvent('proctoring_pause'));
+            };
+            const proctoring_resume_handle = function ({ proctoringResume }) {
+                this.target.dispatchEvent(new CustomEvent('proctoring_resume', { detail: proctoringResume }));
+            };
+            const proctoring_stop_handle = function () {
+                this.target.dispatchEvent(new CustomEvent('proctoring_stop'));
+            };
 
             this.socket.on("init_peer", init_peer_handle.bind(this));
             this.socket.on("offer", offer_handle.bind(this));
@@ -131,15 +143,20 @@
             this.socket.on("record_stop", record_stop_handle.bind(this));
             this.socket.on("record_upload", record_upload_handle.bind(this));
             this.socket.on("players_disconnect", players_disconnect_handle.bind(this));
+            this.socket.on("proctoring_start",  proctoring_start_handle.bind(this));
+            this.socket.on("proctoring_pause",  proctoring_pause_handle.bind(this));
+            this.socket.on("proctoring_resume", proctoring_resume_handle.bind(this));
+            this.socket.on("proctoring_stop",   proctoring_stop_handle.bind(this));
         }
 
-        send_ping(connectionsCount, streamTypes, currentRecordId) {
-            this.socket.emit("ping", { 
-                ping: { 
-                    connectionsCount: connectionsCount, 
+        send_ping(connectionsCount, streamTypes, currentRecordId, proctoringActiveStreams) {
+            this.socket.emit("ping", {
+                ping: {
+                    connectionsCount: connectionsCount,
                     streamTypes: streamTypes,
-                    currentRecordId: currentRecordId
-                } 
+                    currentRecordId: currentRecordId,
+                    proctoringActiveStreams: proctoringActiveStreams || [],
+                }
             });
         }
 
@@ -151,14 +168,16 @@
             this.socket.emit("grabber_ice", { ice: { peerId, candidate } });
         }
 
-        async record_upload(fileName, fileBlob) {
+        async record_upload(fileName, fileBlob, uploadToken) {
             const formData = new FormData();
             formData.append('file', fileBlob, fileName);
-            
+
             const url = `${this.signallingUrl}/api/agent/${this.peerName}/record_upload`;
+            const headers = uploadToken ? { 'X-Upload-Token': uploadToken } : {};
             return fetch(url, {
                 method: "POST",
                 body: formData,
+                headers,
             });
         }
     }
@@ -170,6 +189,7 @@
                 recordId: null,
                 recordedChunks: new Map(),
                 startTime: null,
+                uploadToken: null,
             };
             this.recordingDuration = 0;
         }
@@ -190,13 +210,14 @@
             return '';
         }
 
-        async startRecording(recordId, timeout, streams) {
+        async startRecording(recordId, timeout, streams, uploadToken) {
             this.stopRecording(this.activeRecording.recordId);
-            
+
             this.activeRecording.recordId = recordId;
             this.activeRecording.recorders = [];
             this.activeRecording.recordedChunks.clear();
             this.activeRecording.startTime = Date.now();
+            this.activeRecording.uploadToken = uploadToken || null;
 
             for (const [streamKey, stream] of Object.entries(streams)) {
                 let recordStream = stream;
@@ -303,7 +324,8 @@
     await new Promise(resolve => setTimeout(resolve, 1000));
     
     const chunksMap = new Map(this.activeRecording.recordedChunks);
-    
+    const uploadToken = this.activeRecording.uploadToken;
+
     if (!chunksMap.size) {
         console.warn('No recordings to upload');
         return;
@@ -335,7 +357,7 @@
         console.log(`Uploading ${fileName}: ${chunks.length} chunks, ${blob.size} bytes, duration: ${this.recordingDuration}ms`);
         
         try {
-            const response = await client.record_upload(fileName, blob);
+            const response = await client.record_upload(fileName, blob, uploadToken);
             const text = await response.text();
             console.log(`Upload ${fileName} response: ${text}`);
         } catch (e) {
@@ -345,6 +367,394 @@
     
     this.activeRecording.recordedChunks.clear();
 }
+    }
+
+    class ProctoringQueue {
+        constructor(dbName = 'webrtc-grabber-proctoring') {
+            this.dbName = dbName;
+            this.dbPromise = this._open();
+        }
+
+        _open() {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(this.dbName, 1);
+                req.onupgradeneeded = () => {
+                    const db = req.result;
+                    if (!db.objectStoreNames.contains('chunks')) {
+                        db.createObjectStore('chunks', { keyPath: 'id', autoIncrement: true });
+                    }
+                };
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async _store(mode) {
+            const db = await this.dbPromise;
+            return db.transaction('chunks', mode).objectStore('chunks');
+        }
+
+        async enqueue(item) {
+            const store = await this._store('readwrite');
+            return new Promise((resolve, reject) => {
+                const req = store.add(item);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async peek() {
+            const store = await this._store('readonly');
+            return new Promise((resolve, reject) => {
+                const req = store.openCursor();
+                req.onsuccess = () => resolve(req.result ? req.result.value : null);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async remove(id) {
+            const store = await this._store('readwrite');
+            return new Promise((resolve, reject) => {
+                const req = store.delete(id);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async size() {
+            const store = await this._store('readonly');
+            return new Promise((resolve, reject) => {
+                const req = store.count();
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+    }
+
+    class ProctoringUploader {
+        constructor({ signallingUrl, peerName, streamKey, queue }) {
+            this.signallingUrl = signallingUrl;
+            this.peerName = peerName;
+            this.streamKey = streamKey;
+            this.queue = queue;
+            this.running = false;
+            this.attempt = 0;
+            this.uploadToken = null;
+        }
+
+        setUploadToken(token) {
+            this.uploadToken = token || null;
+        }
+
+        _authHeaders() {
+            return this.uploadToken ? { 'X-Upload-Token': this.uploadToken } : {};
+        }
+
+        async _backoff(label) {
+            this.attempt++;
+            const base = Math.min(Math.pow(2, this.attempt) * 1000, 5 * 60 * 1000);
+            const delay = base / 2 + Math.random() * (base / 2);
+            console.warn(`proctoring[${this.streamKey}] ${label} (attempt ${this.attempt}), retry in ${Math.round(delay)}ms`);
+            await new Promise(r => setTimeout(r, delay));
+        }
+
+        kick() {
+            if (this.running) return;
+            this.running = true;
+            (async () => {
+                try {
+                    while (true) {
+                        const item = await this.queue.peek();
+                        if (!item) break;
+                        let outcome;
+                        try {
+                            outcome = await this._upload(item);
+                        } catch (e) {
+                            await this._backoff(`upload failed: ${e}`);
+                            continue;
+                        }
+                        if (outcome === 'ok' || outcome === 'drop') {
+                            await this.queue.remove(item.id);
+                            this.attempt = 0;
+                            continue;
+                        }
+                        // outcome === 'conflict'
+                        let progressed = false;
+                        try {
+                            progressed = await this._reconcile(item.sessionId);
+                        } catch (e) {
+                            console.warn(`proctoring[${this.streamKey}] reconcile failed`, e);
+                        }
+                        if (progressed) {
+                            this.attempt = 0;
+                        } else {
+                            await this._backoff('conflict not resolved');
+                        }
+                    }
+                } finally {
+                    this.running = false;
+                }
+            })();
+        }
+
+        async _upload({ sessionId, seq, blob }) {
+            const fd = new FormData();
+            fd.append('file', blob, `${seq}.webm`);
+            const url = `${this.signallingUrl}/api/agent/${this.peerName}/proctoring_upload`
+                + `?sessionId=${encodeURIComponent(sessionId)}`
+                + `&streamKey=${encodeURIComponent(this.streamKey)}`
+                + `&seq=${encodeURIComponent(seq)}`;
+            const res = await fetch(url, { method: 'POST', body: fd, headers: this._authHeaders() });
+            if (res.ok) return 'ok';
+            if (res.status === 409) return 'conflict';
+            if (res.status === 400 || res.status === 413 || res.status === 415) {
+                const body = await res.text().catch(() => '');
+                console.error(`proctoring[${this.streamKey}] permanent ${res.status} seq=${seq}, dropping: ${body}`);
+                return 'drop';
+            }
+            throw new Error(`status ${res.status}: ${await res.text().catch(() => '')}`);
+        }
+
+        async _reconcile(sessionId) {
+            const url = `${this.signallingUrl}/api/agent/${this.peerName}/proctoring_state`
+                + `?sessionId=${encodeURIComponent(sessionId)}`
+                + `&streamKey=${encodeURIComponent(this.streamKey)}`;
+            const res = await fetch(url, { headers: this._authHeaders() });
+            if (!res.ok) throw new Error(`state fetch: status ${res.status}`);
+            const state = await res.json();
+            const committed = state.committedSeq;
+            let dropped = 0;
+            while (true) {
+                const head = await this.queue.peek();
+                if (!head || head.sessionId !== sessionId || head.seq > committed) break;
+                await this.queue.remove(head.id);
+                dropped++;
+            }
+            console.log(`proctoring[${this.streamKey}] reconcile: committedSeq=${committed}, dropped ${dropped} stale chunks`);
+            return dropped > 0;
+        }
+    }
+
+    class ProctoringManager {
+        constructor({ signallingUrl, peerName, streamKey }) {
+            this.peerName = peerName;
+            this.streamKey = streamKey;
+            this.queue = new ProctoringQueue(`webrtc-grabber-proctoring-${peerName}-${streamKey}`);
+            this.uploader = new ProctoringUploader({ signallingUrl, peerName, streamKey, queue: this.queue });
+            this.cfg = null;
+            this.video = null;
+            this.canvas = null;
+            this.canvasCtx = null;
+            this.canvasStream = null;
+            this.recordedStream = null;
+            this.recorder = null;
+            this.drawTimer = null;
+            this.seq = 0;
+            this.seqStorageKey = null;
+            this.streamingActive = false;
+            this.trackListeners = [];
+            this.uploader.kick();
+        }
+
+        isStreaming() { return this.streamingActive; }
+
+        _seqKey(sessionId) {
+            return `proctoring_next_seq:${this.peerName}:${this.streamKey}:${sessionId}`;
+        }
+
+        _trackEndedSubscribe(track, handler) {
+            track.addEventListener('ended', handler);
+            this.trackListeners.push({ track, handler });
+        }
+
+        _clearTrackListeners() {
+            for (const { track, handler } of this.trackListeners) {
+                try { track.removeEventListener('ended', handler); } catch (e) {}
+            }
+            this.trackListeners = [];
+        }
+
+        async start(cfg, sourceStream) {
+            await this.stop();
+            this.cfg = cfg;
+            this.uploader.setUploadToken(cfg.uploadTokens && cfg.uploadTokens[this.streamKey]);
+            this.seqStorageKey = this._seqKey(cfg.sessionId);
+            const saved = parseInt(localStorage.getItem(this.seqStorageKey), 10);
+            this.seq = Number.isFinite(saved) && saved >= 0 ? saved : 0;
+            console.log(`proctoring[${this.streamKey}]: starting session=${cfg.sessionId} from seq=${this.seq}`);
+            await this._initPipeline(sourceStream);
+        }
+
+        async _initPipeline(sourceStream) {
+            const videoTrack = sourceStream.getVideoTracks().find(t => t.readyState === 'live');
+            const audioTrack = sourceStream.getAudioTracks().find(t => t.readyState === 'live');
+
+            if (!videoTrack) {
+                console.warn(`proctoring[${this.streamKey}]: no live video track, aborting`);
+                return;
+            }
+
+            this.recordedStream = new MediaStream();
+
+            const videoOnlyStream = new MediaStream([videoTrack]);
+            const video = document.createElement('video');
+            video.muted = true;
+            video.srcObject = videoOnlyStream;
+            await video.play().catch(e => console.warn(`proctoring[${this.streamKey}] video play failed`, e));
+            this.video = video;
+
+            const settings = videoTrack.getSettings();
+            const w = settings.width  || video.videoWidth  || 1280;
+            const h = settings.height || video.videoHeight || 720;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            this.canvas = canvas;
+            this.canvasCtx = canvas.getContext('2d');
+
+            const drawIntervalMs = Math.max(1, Math.floor(1000 / this.cfg.fps));
+            this.drawTimer = setInterval(() => {
+                try { this.canvasCtx.drawImage(this.video, 0, 0, canvas.width, canvas.height); }
+                catch (e) {}
+            }, drawIntervalMs);
+
+            this.canvasStream = canvas.captureStream(this.cfg.fps);
+            this.canvasStream.getVideoTracks().forEach(t => this.recordedStream.addTrack(t));
+
+            this._trackEndedSubscribe(videoTrack, () => {
+                console.warn(`proctoring[${this.streamKey}]: video track ended; pausing`);
+                this.streamingActive = false;
+                this.pause();
+            });
+
+            if (audioTrack) {
+                this.recordedStream.addTrack(audioTrack);
+                this._trackEndedSubscribe(audioTrack, () => {
+                    console.warn(`proctoring[${this.streamKey}]: audio track ended; continuing without audio`);
+                });
+            }
+
+            this._startRecorder();
+        }
+
+        _startRecorder() {
+            const hasAudio = this.recordedStream && this.recordedStream.getAudioTracks().length > 0;
+            const candidates = hasAudio
+                ? ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm']
+                : ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm'];
+            const mimeType = candidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
+
+            let recorder;
+            try {
+                const opts = { videoBitsPerSecond: this.cfg.videoBitrate };
+                if (mimeType) opts.mimeType = mimeType;
+                if (hasAudio) opts.audioBitsPerSecond = 64000;
+                recorder = new MediaRecorder(this.recordedStream, opts);
+            } catch (e) {
+                console.error(`proctoring[${this.streamKey}] failed to create MediaRecorder`, e);
+                return;
+            }
+            this.recorder = recorder;
+            this.streamingActive = true;
+
+            const sessionId = this.cfg.sessionId;
+            recorder.addEventListener('dataavailable', async (e) => {
+                if (!e.data || !e.data.size) return;
+                const seq = this.seq++;
+                try {
+                    await this.queue.enqueue({ sessionId, seq, blob: e.data, createdAt: Date.now() });
+                    if (this.seqStorageKey) localStorage.setItem(this.seqStorageKey, String(this.seq));
+                    this.uploader.kick();
+                } catch (err) {
+                    console.error(`proctoring[${this.streamKey}] enqueue failed`, err);
+                }
+            });
+            recorder.addEventListener('error', e => console.error(`proctoring[${this.streamKey}] recorder error`, e.error));
+
+            try {
+                recorder.start(this.cfg.chunkDurationMs);
+                console.log(`proctoring[${this.streamKey}] started: session=${sessionId} fps=${this.cfg.fps} chunk=${this.cfg.chunkDurationMs}ms mime=${mimeType}`);
+            } catch (e) {
+                console.error(`proctoring[${this.streamKey}] failed to start recorder`, e);
+            }
+        }
+
+        pause() {
+            if (this.recorder && this.recorder.state === 'recording') {
+                try { this.recorder.requestData(); } catch (e) {}
+                try { this.recorder.stop(); } catch (e) {}
+            }
+            this.recorder = null;
+            this.streamingActive = false;
+            console.log(`proctoring[${this.streamKey}] paused`);
+        }
+
+        async stop() {
+            this.pause();
+            this._clearTrackListeners();
+            if (this.drawTimer) { clearInterval(this.drawTimer); this.drawTimer = null; }
+            if (this.canvasStream) {
+                try { this.canvasStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+                this.canvasStream = null;
+            }
+            this.recordedStream = null;
+            if (this.video) {
+                try { this.video.srcObject = null; } catch (e) {}
+                this.video = null;
+            }
+            this.canvas = null;
+            this.canvasCtx = null;
+            if (this.seqStorageKey) {
+                localStorage.removeItem(this.seqStorageKey);
+                this.seqStorageKey = null;
+            }
+            this.cfg = null;
+        }
+    }
+
+    class ProctoringSession {
+        constructor({ signallingUrl, peerName }) {
+            this.signallingUrl = signallingUrl;
+            this.peerName = peerName;
+            this.managers = new Map(); // streamKey -> ProctoringManager
+        }
+
+        _ensure(streamKey) {
+            let m = this.managers.get(streamKey);
+            if (!m) {
+                m = new ProctoringManager({ signallingUrl: this.signallingUrl, peerName: this.peerName, streamKey });
+                this.managers.set(streamKey, m);
+            }
+            return m;
+        }
+
+        getActiveStreams() {
+            const out = [];
+            for (const [key, m] of this.managers) {
+                if (m.isStreaming()) out.push(key);
+            }
+            return out;
+        }
+
+        async start(cfg, streams) {
+            const promises = [];
+            for (const [key, stream] of Object.entries(streams)) {
+                if (!stream.getVideoTracks().some(t => t.readyState === 'live')) continue;
+                promises.push(this._ensure(key).start(cfg, stream).catch(e => console.error(`proctoring[${key}] start failed`, e)));
+            }
+            await Promise.all(promises);
+        }
+
+        pause() {
+            for (const m of this.managers.values()) m.pause();
+        }
+
+        async stop() {
+            const ps = [];
+            for (const m of this.managers.values()) ps.push(m.stop());
+            await Promise.all(ps);
+        }
     }
 
     const extractArguments = () => {
@@ -416,6 +826,16 @@
         updateState("detecting");
 
         const streams = await detectStreams();
+        for (const [key, stream] of Object.entries(streams)) {
+            stream.getTracks().forEach(track => {
+                track.addEventListener('ended', () => {
+                    console.warn(`stream "${key}" ${track.kind} track ended`);
+                });
+            });
+        }
+        const liveStreamTypes = () => Object.entries(streams)
+            .filter(([_, s]) => s.getVideoTracks().some(t => t.readyState === 'live'))
+            .map(([k]) => k);
         const pcs = new Map();
         const recordingManager = new RecordingManager();
         let peerConnectionConfig = undefined;
@@ -423,7 +843,12 @@
 
         updateState("connecting");
         const client = new GrabberCaptureClient(connectionArgs.peerName);
-        
+
+        const proctoringSession = new ProctoringSession({
+            signallingUrl: client.signallingUrl,
+            peerName: connectionArgs.peerName,
+        });
+
         client.target.addEventListener("init_peer", async ({ detail: { pcConfig, pingInterval } }) => {
             peerConnectionConfig = pcConfig;
             pingInterval = pingInterval ?? 3000;
@@ -431,7 +856,12 @@
                 clearInterval(pingTimerId);
             }
             pingTimerId = setInterval(() => {
-                client.send_ping(pcs.size, Object.keys(streams), recordingManager.activeRecording.recordId);
+                client.send_ping(
+                    pcs.size,
+                    liveStreamTypes(),
+                    recordingManager.activeRecording.recordId,
+                    proctoringSession.getActiveStreams(),
+                );
             }, pingInterval);
             console.log(`init peer (pingInterval = ${pingInterval})`);
             updateState("active");
@@ -477,10 +907,10 @@
                 .then(() => console.log(`add player_ice from ${peerId}`));
         });
 
-        client.target.addEventListener('record_start', async ({ detail: { recordId, timeout } }) => {
+        client.target.addEventListener('record_start', async ({ detail: { recordId, timeout, uploadToken } }) => {
             console.log(`Start recording: ${recordId}, timeout: ${timeout}ms`);
             updateState("recording");
-            await recordingManager.startRecording(recordId, timeout, streams);
+            await recordingManager.startRecording(recordId, timeout, streams, uploadToken);
         });
 
         client.target.addEventListener('record_stop', async ({ detail: { recordId } }) => {
@@ -492,6 +922,31 @@
         client.target.addEventListener('record_upload', async ({ detail: { recordId } }) => {
             console.log(`Upload recording: ${recordId}`);
             await recordingManager.uploadRecordings(recordId, client);
+        });
+
+        client.target.addEventListener('proctoring_start', async ({ detail: cfg }) => {
+            try {
+                await proctoringSession.start(cfg, streams);
+            } catch (e) {
+                console.error('failed to start proctoring', e);
+            }
+        });
+
+        client.target.addEventListener('proctoring_pause', () => {
+            proctoringSession.pause();
+        });
+
+        client.target.addEventListener('proctoring_resume', async ({ detail: cfg }) => {
+            // Re-evaluate live tracks since they may have changed during pause.
+            try {
+                await proctoringSession.start(cfg, streams);
+            } catch (e) {
+                console.error('failed to resume proctoring', e);
+            }
+        });
+
+        client.target.addEventListener('proctoring_stop', async () => {
+            await proctoringSession.stop();
         });
 
         client.target.addEventListener('players_disconnect', async () => {

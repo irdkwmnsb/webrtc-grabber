@@ -1,6 +1,9 @@
 package api
 
-import "github.com/pion/webrtc/v4"
+import (
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/proctoring"
+	"github.com/pion/webrtc/v4"
+)
 
 type PlayerMessageEvent string
 type GrabberMessageEvent string
@@ -18,6 +21,7 @@ const (
 	PlayerMessageEventPlayerIce   = PlayerMessageEvent("player_ice")
 	PlayerMessageEventPing        = PlayerMessageEvent("ping")
 	PlayerMessageEventPong        = PlayerMessageEvent("pong")
+	PlayerMessageEventProctoring  = PlayerMessageEvent("proctoring")
 )
 
 const (
@@ -31,6 +35,10 @@ const (
 	GrabberMessageEventRecordStop        = GrabberMessageEvent("record_stop")
 	GrabberMessageEventRecordUpload      = GrabberMessageEvent("record_upload")
 	GrabberMessageEventPlayersDisconnect = GrabberMessageEvent("players_disconnect")
+	GrabberMessageEventProctoringStart   = GrabberMessageEvent("proctoring_start")
+	GrabberMessageEventProctoringPause   = GrabberMessageEvent("proctoring_pause")
+	GrabberMessageEventProctoringResume  = GrabberMessageEvent("proctoring_resume")
+	GrabberMessageEventProctoringStop    = GrabberMessageEvent("proctoring_stop")
 )
 
 type PingMessage struct {
@@ -48,26 +56,33 @@ type PlayerMessage struct {
 	InitPeer           *PcConfigMessage    `json:"initPeer"`
 	AccessMessage      *string             `json:"accessMessage"`
 	Ping               *PingMessage        `json:"ping"`
+	Proctoring         *proctoring.State   `json:"proctoring,omitempty"`
 }
 
 type PlayerAuthMessage struct {
 	Credential string `json:"credential"`
 }
 
+type ProctoringConfigMessage struct {
+	SessionId       string            `json:"sessionId"`
+	ChunkDurationMs uint32            `json:"chunkDurationMs"`
+	Fps             uint32            `json:"fps"`
+	VideoBitrate    uint32            `json:"videoBitrate"`
+	UploadTokens    map[string]string `json:"uploadTokens,omitempty"`
+}
+
 type GrabberMessage struct {
-	Event        GrabberMessageEvent     `json:"event"`
-	Ping         *PeerStatus             `json:"ping"`
-	InitPeer     *GrabberInitPeerMessage `json:"initPeer"`
-	Offer        *OfferMessage           `json:"offer"`
-	OfferAnswer  *OfferAnswerMessage     `json:"offerAnswer"`
-	Ice          *IceMessage             `json:"ice"`
-	RecordStart  *RecordStartMessage     `json:"recordStart"`
-	RecordStop   *RecordStopMessage      `json:"recordStop"`
-	RecordUpload *RecordUploadMessage    `json:"recordUpload"`
-	//PlayerAuth         *PlayerAuthMessage `json:"playerAuth"`
-	//PeersStatus        []Peer             `json:"peersStatus"`
-	//ParticipantsStatus []Peer             `json:"participantsStatus"`
-	//Offer              OfferMessage `json:"offer"`
+	Event            GrabberMessageEvent      `json:"event"`
+	Ping             *PeerStatus              `json:"ping"`
+	InitPeer         *GrabberInitPeerMessage  `json:"initPeer"`
+	Offer            *OfferMessage            `json:"offer"`
+	OfferAnswer      *OfferAnswerMessage      `json:"offerAnswer"`
+	Ice              *IceMessage              `json:"ice"`
+	RecordStart      *RecordStartMessage      `json:"recordStart"`
+	RecordStop       *RecordStopMessage       `json:"recordStop"`
+	RecordUpload     *RecordUploadMessage     `json:"recordUpload"`
+	ProctoringStart  *ProctoringConfigMessage `json:"proctoringStart,omitempty"`
+	ProctoringResume *ProctoringConfigMessage `json:"proctoringResume,omitempty"`
 }
 
 type GrabberInitPeerMessage struct {
@@ -100,6 +115,7 @@ type IceMessage struct {
 type RecordStartMessage struct {
 	RecordId    string `json:"recordId"`
 	TimeoutMsec uint   `json:"timeout"`
+	UploadToken string `json:"uploadToken,omitempty"`
 }
 
 type RecordStopMessage struct {

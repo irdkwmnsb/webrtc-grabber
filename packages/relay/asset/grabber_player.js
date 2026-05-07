@@ -4,6 +4,7 @@ class GrabberPlayerClient {
         this.peerConnectionConfig = null;
         this.peersStatus = null;
         this.participantsStatus = null;
+        this.proctoring = null;
         this.accessMessage = null;
 
         this.target = new EventTarget();
@@ -32,6 +33,11 @@ class GrabberPlayerClient {
             _client.peersStatus = peersStatus ?? [];
             _client.participantsStatus = participantsStatus ?? [];
             _client.target.dispatchEvent(new CustomEvent("peers", { detail: [ peersStatus, participantsStatus ] }));
+        });
+
+        _client.ws.on("proctoring", ({ proctoring }) => {
+            _client.proctoring = proctoring ?? null;
+            _client.target.dispatchEvent(new CustomEvent("proctoring", { detail: [proctoring] }));
         });
 
         _client.ws.on("offer_answer", async ({ offerAnswer: { peerId, answer } }) => {

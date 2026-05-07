@@ -38,6 +38,7 @@ type RawSecurityConfig struct {
 	PlayerCredential  *string   `yaml:"adminCredential" json:"adminCredential"`
 	TLSCrtFile        *string   `yaml:"tlsCrtFile" json:"tlsCrtFile"`
 	TLSKeyFile        *string   `yaml:"tlsKeyFile" json:"tlsKeyFile"`
+	UploadSecret      *string   `yaml:"uploadSecret" json:"uploadSecret"`
 	Participants      *[]string `yaml:"participants" json:"participants"`
 	AdminsRawNetworks *[]string `yaml:"adminsNetworks" json:"adminsNetworks"`
 }
@@ -47,6 +48,7 @@ func (r RawSecurityConfig) ToDomain() (SecurityConfig, error) {
 	cfg.PlayerCredential = r.PlayerCredential
 	cfg.TLSCrtFile = r.TLSCrtFile
 	cfg.TLSKeyFile = r.TLSKeyFile
+	cfg.UploadSecret = r.UploadSecret
 
 	if r.Participants != nil {
 		cfg.Participants = *r.Participants

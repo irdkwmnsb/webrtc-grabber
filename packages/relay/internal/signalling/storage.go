@@ -84,6 +84,7 @@ func (s *Storage) ping(socketId sockets.SocketID, status *api.PeerStatus) {
 	peer.ConnectionsCount = status.ConnectionsCount
 	peer.StreamTypes = status.StreamTypes
 	peer.CurrentRecordId = status.CurrentRecordId
+	peer.ProctoringActiveStreams = status.ProctoringActiveStreams
 	s.peers[socketId] = peer
 }
 
@@ -110,6 +111,16 @@ func (s *Storage) getParticipantsStatus() []api.Peer {
 		}
 	}
 	return peers
+}
+
+func (s *Storage) peerNamesBySocketId() map[sockets.SocketID]string {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	m := make(map[sockets.SocketID]string, len(s.peers))
+	for id, p := range s.peers {
+		m[id] = p.Name
+	}
+	return m
 }
 
 func (s *Storage) setParticipants(participants []string) {

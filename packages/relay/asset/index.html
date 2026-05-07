@@ -87,6 +87,105 @@
             list-style: none;
             margin: 8px 0;
         }
+
+        #proctoring {
+            grid-column-start: 1;
+            grid-column-end: 3;
+            margin-bottom: 8px;
+            padding: 8px 12px;
+            border: 1px solid #888;
+            border-radius: 4px;
+            background: #f5f5f5;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+        }
+
+        #proctoring.idle    { background: #f5f5f5; }
+        #proctoring.active  { background: #c8f7c5; border-color: #2e8b2e; }
+        #proctoring.paused  { background: #fff3a3; border-color: #b89c00; }
+
+        #proctoring .status-label {
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        #proctoring .params input {
+            width: 90px;
+            margin-right: 6px;
+        }
+
+        #proctoring button {
+            padding: 4px 12px;
+        }
+
+        #proctoring .meta {
+            color: #555;
+            font-size: 0.9em;
+        }
+
+        #proctoring-details {
+            grid-column-start: 1;
+            grid-column-end: 3;
+            margin-bottom: 12px;
+        }
+
+        #proctoring-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+
+        #proctoring-table th, #proctoring-table td {
+            padding: 4px 8px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        #proctoring-table th {
+            background: #fafafa;
+        }
+
+        #proctoring-table tr.stalled  { background: #ffd6d6; }
+        #proctoring-table tr.gone     { background: #fff3a3; }
+        #proctoring-table tr.finalized { color: #777; }
+
+        #proctoring-table .pill {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 8px;
+            font-size: 0.85em;
+            background: #e0e0e0;
+        }
+        #proctoring-table .pill.live    { background: #c8f7c5; }
+        #proctoring-table .pill.offline { background: #ddd; }
+        #proctoring-table .pill.stale   { background: #ffaaaa; }
+
+        #proctoring-table .dl {
+            font-size: 0.85em;
+            margin-right: 6px;
+        }
+
+        #proctoring-sessions {
+            margin-top: 8px;
+            font-size: 0.9em;
+        }
+
+        #proctoring-sessions .session-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin: 2px 8px 2px 0;
+            padding: 2px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: #fafafa;
+        }
+
+        #proctoring-sessions .session-row.unfinalized { background: #fff3a3; }
+        #proctoring-sessions .session-row.active { background: #c8f7c5; }
     </style>
     <script src="/sockets.js"></script>
     <script src="/grabber_player.js"></script>
@@ -94,6 +193,34 @@
 </head>
 <body>
 <div id="main">
+    <div id="proctoring" class="idle">
+        <span class="status-label">Proctoring: <span id="proctoring-state">idle</span></span>
+        <span class="meta" id="proctoring-meta"></span>
+        <span class="params" id="proctoring-params">
+            <label>chunk ms <input id="proctoring-chunk" type="number" value="5000" min="1000" step="1000"></label>
+            <label>fps <input id="proctoring-fps" type="number" value="1" min="1" max="30"></label>
+            <label>bitrate <input id="proctoring-bitrate" type="number" value="100000" min="10000" step="10000"></label>
+            <label>ends at <input id="proctoring-endsat" type="datetime-local"></label>
+        </span>
+        <span id="proctoring-buttons"></span>
+    </div>
+    <div id="proctoring-details">
+        <table id="proctoring-table" hidden>
+            <thead>
+                <tr>
+                    <th>peer</th>
+                    <th>stream</th>
+                    <th>state</th>
+                    <th>committedSeq</th>
+                    <th>bytes</th>
+                    <th>last chunk</th>
+                    <th>files</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+        <div id="proctoring-sessions"></div>
+    </div>
     <div id="participants"></div>
     <div id="selectedParticipant"></div>
     <div id="peers"></div>
@@ -139,6 +266,242 @@
         localStorage.removeItem("adminCredentials");
         alert(accessMessage);
     });
+
+    let proctoringCountdownTimer = null;
+    const proctoringEl = {
+        root:    document.getElementById("proctoring"),
+        state:   document.getElementById("proctoring-state"),
+        meta:    document.getElementById("proctoring-meta"),
+        params:  document.getElementById("proctoring-params"),
+        buttons: document.getElementById("proctoring-buttons"),
+        chunk:   document.getElementById("proctoring-chunk"),
+        fps:     document.getElementById("proctoring-fps"),
+        bitrate: document.getElementById("proctoring-bitrate"),
+        endsAt:  document.getElementById("proctoring-endsat"),
+    };
+
+    const renderProctoring = (state) => {
+        const isIdle   = !state || !state.sessionId;
+        const isActive = !!state && state.active;
+        const isPaused = !!state && state.paused;
+
+        proctoringEl.root.classList.remove("idle", "active", "paused");
+        proctoringEl.root.classList.add(isIdle ? "idle" : isActive ? "active" : "paused");
+        proctoringEl.state.innerText = isIdle ? "idle" : isActive ? "active" : "paused";
+
+        proctoringEl.params.style.display = isIdle ? "" : "none";
+
+        const meta = [];
+        if (!isIdle) {
+            meta.push(`session=${state.sessionId}`);
+            meta.push(`fps=${state.fps}`, `chunk=${state.chunkDurationMs}ms`, `bitrate=${state.videoBitrate}`);
+            if (state.startedAt) meta.push(`started=${new Date(state.startedAt).toLocaleTimeString()}`);
+        }
+        proctoringEl.meta.innerText = meta.join("  ");
+
+        if (proctoringCountdownTimer) {
+            clearInterval(proctoringCountdownTimer);
+            proctoringCountdownTimer = null;
+        }
+        if (state && state.endsAt) {
+            const tick = () => {
+                const ms = new Date(state.endsAt) - new Date();
+                if (ms <= 0) { proctoringEl.meta.innerText = meta.join("  "); return; }
+                const s = Math.floor(ms / 1000);
+                const mm = String(Math.floor(s / 60)).padStart(2, "0");
+                const ss = String(s % 60).padStart(2, "0");
+                proctoringEl.meta.innerText = meta.concat([`ends in ${mm}:${ss}`]).join("  ");
+            };
+            tick();
+            proctoringCountdownTimer = setInterval(tick, 1000);
+        }
+
+        proctoringEl.buttons.innerHTML = "";
+        const mkBtn = (label, fn) => {
+            const b = document.createElement("button");
+            b.innerText = label;
+            b.onclick = async () => {
+                b.disabled = true;
+                try {
+                    const res = await fn();
+                    if (!res.ok) {
+                        alert(`${label} failed: ${res.status} ${await res.text()}`);
+                    }
+                } finally { b.disabled = false; }
+            };
+            proctoringEl.buttons.appendChild(b);
+        };
+        if (isIdle) {
+            mkBtn("Start", () => adminClient.proctoringStart({
+                chunkDurationMs: parseInt(proctoringEl.chunk.value, 10),
+                fps:             parseInt(proctoringEl.fps.value, 10),
+                videoBitrate:    parseInt(proctoringEl.bitrate.value, 10),
+                endsAt:          proctoringEl.endsAt.value ? new Date(proctoringEl.endsAt.value).toISOString() : null,
+            }));
+        } else if (isActive) {
+            mkBtn("Pause", () => adminClient.proctoringPause());
+            mkBtn("Stop",  () => adminClient.proctoringStop());
+        } else {
+            mkBtn("Resume", () => adminClient.proctoringResume());
+            mkBtn("Stop",   () => adminClient.proctoringStop());
+        }
+    };
+
+    const proctoringTable = document.getElementById("proctoring-table");
+    const proctoringTableBody = proctoringTable.querySelector("tbody");
+    const proctoringSessionsEl = document.getElementById("proctoring-sessions");
+    const STALL_THRESHOLD_MS = 15000;
+
+    const formatBytes = (n) => {
+        if (n < 1024) return `${n}B`;
+        if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
+        return `${(n / (1024 * 1024)).toFixed(1)}MB`;
+    };
+    const formatAgo = (iso) => {
+        if (!iso) return "—";
+        const ms = Date.now() - new Date(iso).getTime();
+        if (ms < 1000) return "now";
+        if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
+        if (ms < 3600_000) return `${Math.floor(ms / 60_000)}m ago`;
+        return `${Math.floor(ms / 3600_000)}h ago`;
+    };
+
+    const renderProctoringDetails = (resp, currentState) => {
+        const sessionId = currentState && currentState.sessionId;
+        const peers = (resp && resp.peers) || [];
+
+        if (peers.length === 0 && !sessionId) {
+            proctoringTable.hidden = true;
+        } else {
+            proctoringTable.hidden = false;
+            proctoringTableBody.innerHTML = "";
+            const sessionActive = currentState && (currentState.active || currentState.paused);
+            peers.sort((a, b) => a.peerName.localeCompare(b.peerName) || a.streamKey.localeCompare(b.streamKey));
+            for (const p of peers) {
+                const tr = document.createElement("tr");
+                let stateLabel = "idle";
+                let pillClass = "offline";
+                if (p.activelyStreaming) {
+                    stateLabel = "live";
+                    pillClass = "live";
+                } else if (p.online) {
+                    stateLabel = "online";
+                }
+
+                const lastMs = p.lastChunkAt ? Date.now() - new Date(p.lastChunkAt).getTime() : null;
+                const stalled = sessionActive && p.online && p.activelyStreaming && lastMs !== null && lastMs > STALL_THRESHOLD_MS;
+                const gone = sessionActive && !p.online && p.committedSeq >= 0;
+                if (p.finalized) tr.classList.add("finalized");
+                if (stalled) {
+                    tr.classList.add("stalled");
+                    pillClass = "stale";
+                    stateLabel = `stalled ${Math.floor(lastMs / 1000)}s`;
+                } else if (gone) {
+                    tr.classList.add("gone");
+                    stateLabel = "peer offline";
+                }
+
+                tr.innerHTML = `
+                    <td>${p.peerName}</td>
+                    <td>${p.streamKey}</td>
+                    <td><span class="pill ${pillClass}">${stateLabel}</span></td>
+                    <td>${p.committedSeq < 0 ? "—" : p.committedSeq}</td>
+                    <td>${formatBytes(p.totalBytes || 0)}</td>
+                    <td>${formatAgo(p.lastChunkAt)}</td>
+                    <td class="files"></td>
+                `;
+                const files = tr.querySelector(".files");
+                const sid = (resp && resp.state && resp.state.sessionId) || sessionId;
+                if (sid && p.committedSeq >= 0) {
+                    const mkDl = (label, file) => {
+                        const a = document.createElement("a");
+                        a.href = "#";
+                        a.className = "dl";
+                        a.innerText = label;
+                        a.onclick = async (ev) => {
+                            ev.preventDefault();
+                            try { await adminClient.proctoringDownload(sid, p.peerName, p.streamKey, file); }
+                            catch (e) { alert(`download failed: ${e}`); }
+                        };
+                        files.appendChild(a);
+                    };
+                    mkDl("↓ raw", "full.webm");
+                    if (p.finalized) mkDl("↓ remuxed", "full.remuxed.webm");
+                }
+                proctoringTableBody.appendChild(tr);
+            }
+        }
+
+        proctoringSessionsEl.innerHTML = "";
+        const sessions = ((resp && resp.sessions) || []).slice().sort((a, b) => b.sessionId.localeCompare(a.sessionId));
+        if (sessions.length > 0) {
+            const label = document.createElement("span");
+            label.innerText = "Sessions: ";
+            label.style.color = "#555";
+            proctoringSessionsEl.appendChild(label);
+            for (const s of sessions) {
+                const row = document.createElement("span");
+                row.className = "session-row" + (s.isActive ? " active" : (s.finalized ? "" : " unfinalized"));
+                row.innerText = s.sessionId + (s.isActive ? " (active)" : (s.finalized ? "" : " ⚠ unfinalized"));
+                if (!s.finalized && !s.isActive) {
+                    const btn = document.createElement("button");
+                    btn.innerText = "Finalize";
+                    btn.style.padding = "0 6px";
+                    btn.onclick = async () => {
+                        btn.disabled = true;
+                        try {
+                            const r = await adminClient.proctoringFinalize(s.sessionId);
+                            if (!r.ok) alert(`finalize failed: ${r.status} ${await r.text()}`);
+                            await refreshProctoringDetails();
+                        } finally { btn.disabled = false; }
+                    };
+                    row.appendChild(btn);
+                }
+                proctoringSessionsEl.appendChild(row);
+            }
+        }
+    };
+
+    let proctoringPollTimer = null;
+    let lastProctoringResp = null;
+    let lastProctoringState = null;
+    const refreshProctoringDetails = async () => {
+        try {
+            const resp = await adminClient.proctoringGet();
+            lastProctoringResp = resp;
+            renderProctoringDetails(resp, resp ? resp.state : null);
+        } catch (e) { console.warn("proctoring poll failed", e); }
+    };
+    const updatePolling = (state) => {
+        const shouldPoll = !!(state && state.sessionId);
+        if (shouldPoll && !proctoringPollTimer) {
+            proctoringPollTimer = setInterval(refreshProctoringDetails, 3000);
+        } else if (!shouldPoll && proctoringPollTimer) {
+            clearInterval(proctoringPollTimer);
+            proctoringPollTimer = null;
+        }
+    };
+
+    client.target.addEventListener("proctoring", ({detail: [state]}) => {
+        lastProctoringState = state;
+        renderProctoring(state);
+        renderProctoringDetails(lastProctoringResp, state);
+        updatePolling(state);
+        // After state transitions, fetch immediately so the table catches up.
+        refreshProctoringDetails();
+    });
+    client.target.addEventListener("initialized", async () => {
+        try {
+            const resp = await adminClient.proctoringGet();
+            lastProctoringResp = resp;
+            const state = resp ? resp.state : null;
+            lastProctoringState = state;
+            renderProctoring(state);
+            renderProctoringDetails(resp, state);
+            updatePolling(state);
+        } catch (e) { console.warn("failed to load initial proctoring state", e); }
+    });
+    renderProctoring(null);
 
     const renderParticipants = (peers, participantsStatus) => {
         const allPeersAnchor = document.getElementById("peers");

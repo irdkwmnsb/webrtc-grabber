@@ -41,6 +41,36 @@
         #play-button:hover {
             background-color: #45a049;
         }
+
+        #proctoring-banner {
+            position: fixed;
+            top: 8px;
+            right: 8px;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-family: sans-serif;
+            font-size: 12px;
+            font-weight: bold;
+            color: #fff;
+            background: rgba(46, 139, 46, 0.85);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            z-index: 1001;
+            display: none;
+        }
+
+        #proctoring-banner.paused {
+            background: rgba(184, 156, 0, 0.85);
+        }
+
+        #proctoring-banner::before {
+            content: "● ";
+            animation: proctoring-pulse 1.4s infinite;
+        }
+
+        @keyframes proctoring-pulse {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: 0.3; }
+        }
     </style>
     <script>
         const extractPlayerArguments = () => {
@@ -58,6 +88,34 @@
 
         const client = new GrabberPlayerClient("play");
         client.authorize(connectionArgs.credential);
+
+        let proctoringCountdownTimer = null;
+        const renderProctoringBanner = (state) => {
+            const banner = document.getElementById("proctoring-banner");
+            if (proctoringCountdownTimer) {
+                clearInterval(proctoringCountdownTimer);
+                proctoringCountdownTimer = null;
+            }
+            if (!state || !state.sessionId) {
+                banner.style.display = "none";
+                return;
+            }
+            banner.classList.toggle("paused", !!state.paused);
+            const label = state.active ? "Идёт прокторинг" : "Прокторинг на паузе";
+            const renderText = () => {
+                if (!state.endsAt) { banner.innerText = label; return; }
+                const ms = new Date(state.endsAt) - new Date();
+                if (ms <= 0) { banner.innerText = label; return; }
+                const s = Math.floor(ms / 1000);
+                const mm = String(Math.floor(s / 60)).padStart(2, "0");
+                const ss = String(s % 60).padStart(2, "0");
+                banner.innerText = `${label} • ${mm}:${ss}`;
+            };
+            renderText();
+            banner.style.display = "block";
+            if (state.endsAt) proctoringCountdownTimer = setInterval(renderText, 1000);
+        };
+        client.on("proctoring", ([state]) => renderProctoringBanner(state));
         client.on("initialized", () => {
             client.connect({peerName: connectionArgs.peerName}, connectionArgs.streamType, (track) => {
                 console.log("got video track");
@@ -83,6 +141,7 @@
 </head>
 <body>
 <video id="video" width="100%" autoplay></video>
+<div id="proctoring-banner"></div>
 <div id="play-overlay">
     <button id="play-button">▶ Click to Play</button>
 </div>
