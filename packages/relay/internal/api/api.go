@@ -15,6 +15,8 @@ type Peer struct {
 	StreamTypes             []StreamType     `json:"streamTypes"`
 	CurrentRecordId         *string          `json:"currentRecordId"`
 	ProctoringActiveStreams []StreamType     `json:"proctoringActiveStreams,omitempty"`
+	TeamName                string           `json:"teamName,omitempty"`
+	University              string           `json:"university,omitempty"`
 }
 
 type StreamType string

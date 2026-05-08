@@ -5,3 +5,7 @@
 # port: 13478
 # publicIp: ""
 # grabberPingInterval: 3000
+
+# Branding shown in the admin dashboard header and browser tab.
+# Defaults to "webrtc-grabber".
+# title: "webrtc-grabber"

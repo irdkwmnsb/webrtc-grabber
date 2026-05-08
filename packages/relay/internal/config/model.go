@@ -25,15 +25,22 @@ type ServerConfig struct {
 	Port                int    `json:"port" yaml:"port"`
 	PublicIP            string `json:"publicIp" yaml:"publicIp"`
 	GrabberPingInterval int    `json:"grabberPingInterval" yaml:"grabberPingInterval"`
+	Title               string `json:"title" yaml:"title"`
+}
+
+type ParticipantInfo struct {
+	Name       string `json:"name" yaml:"name"`
+	TeamName   string `json:"teamName,omitempty" yaml:"teamName,omitempty"`
+	University string `json:"university,omitempty" yaml:"university,omitempty"`
 }
 
 type SecurityConfig struct {
-	PlayerCredential  *string        `json:"adminCredential" yaml:"adminCredential"`
-	TLSCrtFile        *string        `json:"tlsCrtFile" yaml:"tlsCrtFile"`
-	TLSKeyFile        *string        `json:"tlsKeyFile" yaml:"tlsKeyFile"`
-	UploadSecret      *string        `json:"uploadSecret" yaml:"uploadSecret"`
-	Participants      []string       `json:"participants" yaml:"participants"`
-	AdminsRawNetworks []netip.Prefix `json:"adminsNetworks" yaml:"adminsNetworks"`
+	PlayerCredential  *string           `json:"adminCredential" yaml:"adminCredential"`
+	TLSCrtFile        *string           `json:"tlsCrtFile" yaml:"tlsCrtFile"`
+	TLSKeyFile        *string           `json:"tlsKeyFile" yaml:"tlsKeyFile"`
+	UploadSecret      *string           `json:"uploadSecret" yaml:"uploadSecret"`
+	Participants      []ParticipantInfo `json:"participants" yaml:"participants"`
+	AdminsRawNetworks []netip.Prefix    `json:"adminsNetworks" yaml:"adminsNetworks"`
 }
 
 type WebRTCConfig struct {
@@ -62,10 +69,11 @@ func DefaultAppConfig() AppConfig {
 			Port:                13478,
 			PublicIP:            "",
 			GrabberPingInterval: 3000,
+			Title:               "webrtc-grabber",
 		},
 		Security: SecurityConfig{
 			PlayerCredential: &playerPassword,
-			Participants:     []string{},
+			Participants:     []ParticipantInfo{},
 			AdminsRawNetworks: []netip.Prefix{
 				netip.MustParsePrefix("0.0.0.0/0"),
 			},

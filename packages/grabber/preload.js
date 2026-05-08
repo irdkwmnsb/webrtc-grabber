@@ -385,7 +385,14 @@ class ProctoringManager {
         this.trackListeners = [];
     }
     async start(cfg, sourceStream) {
-        await this.stop();
+        // If the previous session was a different one, clear its persisted seq.
+        // For the same sessionId (e.g. a fallback from resume after track end),
+        // we must NOT clear so the seq counter survives the pipeline rebuild —
+        // otherwise the relay drops every chunk until seq passes committedSeq.
+        const sameSession = this.cfg && this.cfg.sessionId === cfg.sessionId;
+        if (!sameSession) await this.stop();
+        else this._destroyPipeline();
+
         this.cfg = cfg;
         this.uploader.setUploadToken(cfg.uploadTokens && cfg.uploadTokens[this.streamKey]);
         this.seqStorageKey = this._seqKey(cfg.sessionId);
@@ -428,9 +435,8 @@ class ProctoringManager {
         this.canvasStream.getVideoTracks().forEach(t => this.recordedStream.addTrack(t));
 
         this._trackEndedSubscribe(videoTrack, () => {
-            console.warn(`proctoring[${this.streamKey}] video track ended; pausing`);
-            this.streamingActive = false;
-            this.pause();
+            console.warn(`proctoring[${this.streamKey}] video track ended; tearing down recorder`);
+            this._teardownRecorder();
         });
         if (audioTrack) {
             this.recordedStream.addTrack(audioTrack);
@@ -474,17 +480,39 @@ class ProctoringManager {
             console.log(`proctoring[${this.streamKey}] started: session=${sessionId} fps=${this.cfg.fps} chunk=${this.cfg.chunkDurationMs}ms mime=${mimeType}`);
         } catch (e) { console.error(`proctoring[${this.streamKey}] failed to start recorder`, e); }
     }
+    // Pause without tearing down the recorder so resume can reuse the same
+    // WebM byte stream (and the same seq counter). A torn-down recorder would
+    // emit a fresh WebM header on the next chunk, corrupting the appended file
+    // and the seq sequence on the relay would reset to 0 (silently dropped).
     pause() {
         if (this.recorder && this.recorder.state === 'recording') {
+            try { this.recorder.pause(); } catch (e) {}
+        }
+        this.streamingActive = false;
+        console.log(`proctoring[${this.streamKey}] paused`);
+    }
+    resume() {
+        if (this.recorder && this.recorder.state === 'paused') {
+            try { this.recorder.resume(); } catch (e) {
+                console.warn(`proctoring[${this.streamKey}] resume failed`, e);
+                return false;
+            }
+            this.streamingActive = true;
+            console.log(`proctoring[${this.streamKey}] resumed`);
+            return true;
+        }
+        return false;
+    }
+    _teardownRecorder() {
+        if (this.recorder && this.recorder.state !== 'inactive') {
             try { this.recorder.requestData(); } catch (e) {}
             try { this.recorder.stop(); } catch (e) {}
         }
         this.recorder = null;
         this.streamingActive = false;
-        console.log(`proctoring[${this.streamKey}] paused`);
     }
-    async stop() {
-        this.pause();
+    _destroyPipeline() {
+        this._teardownRecorder();
         this._clearTrackListeners();
         if (this.drawTimer) { clearInterval(this.drawTimer); this.drawTimer = null; }
         if (this.canvasStream) {
@@ -498,6 +526,9 @@ class ProctoringManager {
         }
         this.canvas = null;
         this.canvasCtx = null;
+    }
+    async stop() {
+        this._destroyPipeline();
         if (this.seqStorageKey) {
             localStorage.removeItem(this.seqStorageKey);
             this.seqStorageKey = null;
@@ -534,6 +565,20 @@ class ProctoringSession {
         await Promise.all(ps);
     }
     pause() { for (const m of this.managers.values()) m.pause(); }
+    async resume(cfg) {
+        // For each manager: try MediaRecorder.resume() (cheap, keeps WebM stream).
+        // Fall back to a full start if the recorder was torn down (e.g. track
+        // ended during the pause, or this session is new).
+        const ps = [];
+        for (const [key, stream] of Object.entries(streams)) {
+            if (!stream.getVideoTracks().some(t => t.readyState === 'live')) continue;
+            const m = this._ensure(key);
+            const sameSession = m.cfg && cfg && m.cfg.sessionId === cfg.sessionId;
+            if (sameSession && m.resume()) continue;
+            ps.push(m.start(cfg, stream).catch(e => console.error(`proctoring[${key}] resume failed`, e)));
+        }
+        await Promise.all(ps);
+    }
     async stop() {
         const ps = [];
         for (const m of this.managers.values()) ps.push(m.stop());
@@ -545,7 +590,7 @@ const proctoringSession = new ProctoringSession();
 
 ipcRenderer.on('proctoring_start',  async (_, cfg) => { try { await proctoringSession.start(cfg); } catch (e) { console.error('proctoring start failed', e); } });
 ipcRenderer.on('proctoring_pause',  ()        => { proctoringSession.pause(); });
-ipcRenderer.on('proctoring_resume', async (_, cfg) => { try { await proctoringSession.start(cfg); } catch (e) { console.error('proctoring resume failed', e); } });
+ipcRenderer.on('proctoring_resume', async (_, cfg) => { try { await proctoringSession.resume(cfg); } catch (e) { console.error('proctoring resume failed', e); } });
 ipcRenderer.on('proctoring_stop',   async ()   => { try { await proctoringSession.stop();  } catch (e) { console.error('proctoring stop failed', e); } });
 
 console.log("Grabber version: 2024-12-14")

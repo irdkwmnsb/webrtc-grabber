@@ -123,6 +123,19 @@ func (s *Server) SetupWebSocketsAndApi() {
 
 	s.setupAdminApi()
 	s.setupAgentApi()
+	s.setupPublicApi()
+}
+
+func (s *Server) setupPublicApi() {
+	s.app.Get("/api/ui-config", func(c *fiber.Ctx) error {
+		title := s.config.Server.Title
+		if title == "" {
+			title = "webrtc-grabber"
+		}
+		return c.JSON(fiber.Map{
+			"title": title,
+		})
+	})
 }
 
 func (s *Server) isAdminIpAddr(addrPort string) (bool, error) {

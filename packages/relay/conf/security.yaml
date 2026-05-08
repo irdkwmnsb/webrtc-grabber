@@ -11,15 +11,33 @@
 # survive relay restarts. Use 32+ random bytes (e.g. `openssl rand -hex 32`).
 uploadSecret: "b378cf87386ecee47c77ad19e2fb75a9d0e7f7051f8b22427bab1d4fc3278c62"
 
+# Participants can be a plain string (just a peer name) or an object with
+# optional teamName/university metadata that will show up in the dashboard.
 participants:
-  - "001"
-  - "002"
-  - "003"
-  - "004"
-  - "005"
-  - "006"
-  - "007"
-  - "008"
+  - name: "001"
+    teamName: "Team 001"
+    university: "ITMO University"
+  - name: "002"
+    teamName: "Team 002"
+    university: "ITMO University"
+  - name: "003"
+    teamName: "Team 003"
+    university: "ITMO University"
+  - name: "004"
+    teamName: "Team 004"
+    university: "ITMO University"
+  - name: "005"
+    teamName: "Team 005"
+    university: "ITMO University"
+  - name: "006"
+    teamName: "Team 006"
+    university: "ITMO University"
+  - name: "007"
+    teamName: "Team 007"
+    university: "ITMO University"
+  - name: "008"
+    teamName: "Team 008"
+    university: "ITMO University"
 
 # adminsNetworks:
 #   - "0.0.0.0/0"

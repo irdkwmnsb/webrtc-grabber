@@ -5,20 +5,21 @@ import (
 	"time"
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 )
 
 type Storage struct {
 	peers        map[sockets.SocketID]api.Peer
-	participants []string
+	participants []config.ParticipantInfo
 	mutex        sync.RWMutex
 }
 
 func NewStorage() *Storage {
 	return &Storage{
 		peers:        make(map[sockets.SocketID]api.Peer),
-		participants: make([]string, 0),
+		participants: make([]config.ParticipantInfo, 0),
 	}
 }
 
@@ -104,10 +105,16 @@ func (s *Storage) getParticipantsStatus() []api.Peer {
 	defer s.mutex.RUnlock()
 	var peers []api.Peer
 	for _, participant := range s.participants {
-		if peer, ok := s.getPeerByNameLocked(participant); ok {
+		if peer, ok := s.getPeerByNameLocked(participant.Name); ok {
+			peer.TeamName = participant.TeamName
+			peer.University = participant.University
 			peers = append(peers, peer)
 		} else {
-			peers = append(peers, api.Peer{Name: participant})
+			peers = append(peers, api.Peer{
+				Name:       participant.Name,
+				TeamName:   participant.TeamName,
+				University: participant.University,
+			})
 		}
 	}
 	return peers
@@ -123,7 +130,7 @@ func (s *Storage) peerNamesBySocketId() map[sockets.SocketID]string {
 	return m
 }
 
-func (s *Storage) setParticipants(participants []string) {
+func (s *Storage) setParticipants(participants []config.ParticipantInfo) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.participants = participants
