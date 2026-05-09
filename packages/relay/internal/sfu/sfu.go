@@ -3,15 +3,27 @@ package sfu
 import (
 	"fmt"
 
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
-	"github.com/pion/webrtc/v4"
 )
 
-type Callback = func(pc *webrtc.PeerConnection) error
+type EventKind int
 
-type PublisherCallbacks struct {
-	OnOffer        func(offer webrtc.SessionDescription, publisherKey string)
-	OnICECandidate func(candidate webrtc.ICECandidateInit, publisherKey string)
+const (
+	EventPublisherOffer EventKind = iota + 1
+	EventPublisherICECandidate
+	EventSubscriberICECandidate
+)
+
+func (kind EventKind) Critical() bool { return kind == EventPublisherOffer }
+
+type Event struct {
+	Kind         EventKind
+	PublisherID  sockets.SocketID
+	StreamType   string
+	SubscriberID sockets.SocketID
+	SDP          *api.SDP
+	ICE          *api.ICECandidate
 }
 
 func PublisherKey(publisherSocketID sockets.SocketID, streamType string) string {
@@ -20,10 +32,19 @@ func PublisherKey(publisherSocketID sockets.SocketID, streamType string) string 
 
 type SFU interface {
 	Close()
-	DeleteSubscriber(id sockets.SocketID)
-	AddSubscriber(id, publisherSocketID sockets.SocketID, streamType string, callback Callback, publisherCallbacks PublisherCallbacks) error
-	SubscriberICE(id sockets.SocketID, candidate webrtc.ICECandidateInit)
-	DeletePublisher(id sockets.SocketID)
-	OfferAnswerPublisher(publisherKey string, answer webrtc.SessionDescription)
-	AddICECandidatePublisher(publisherKey string, candidate webrtc.ICECandidateInit)
+
+	Subscribe(
+		subscriberID, publisherID sockets.SocketID,
+		streamType string,
+		offer api.SDP,
+	) (api.SDP, error)
+	Unsubscribe(subscriberID sockets.SocketID)
+	SubscriberICE(subscriberID sockets.SocketID, candidate api.ICECandidate)
+
+	PublisherAnswer(publisherKey string, answer api.SDP)
+	PublisherICE(publisherKey string, candidate api.ICECandidate)
+	DropPublisher(publisherID sockets.SocketID)
+
+	NumEventShards() int
+	EventShard(index int) <-chan Event
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -20,8 +21,14 @@ const (
 
 var bufferPool = sync.Pool{
 	New: func() any {
-		return make([]byte, rtpBufferSize)
+		b := make([]byte, rtpBufferSize)
+		return &b
 	},
+}
+
+type rtpPacket struct {
+	buf *[]byte
+	n   int
 }
 
 type TrackBroadcaster struct {
@@ -33,7 +40,7 @@ type TrackBroadcaster struct {
 	cancel   context.CancelFunc
 	stopOnce sync.Once // TODO: Think about this (for now i want to fix double dec)
 
-	packetChan chan []byte
+	packetChan chan rtpPacket
 }
 
 func NewTrackBroadcaster(
@@ -57,7 +64,7 @@ func NewTrackBroadcaster(
 		remoteSSRC: uint32(remoteTrack.SSRC()),
 		ctx:        ctx,
 		cancel:     cancel,
-		packetChan: make(chan []byte, packetQueueSize),
+		packetChan: make(chan rtpPacket, packetQueueSize),
 	}
 
 	go broadcaster.readLoop(remoteTrack, publisherSocketID)
@@ -70,6 +77,7 @@ func NewTrackBroadcaster(
 
 func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, publisherSocketID sockets.SocketID) {
 	defer tb.Stop()
+	defer tb.drainPacketChan()
 
 	for {
 		select {
@@ -78,11 +86,12 @@ func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, publisherS
 		default:
 		}
 
-		buf := bufferPool.Get().([]byte)
-		buf = buf[:cap(buf)]
+		bufp := bufferPool.Get().(*[]byte)
+		buf := (*bufp)[:cap(*bufp)]
 
 		n, _, err := remoteTrack.Read(buf)
 		if err != nil {
+			bufferPool.Put(bufp)
 			if errors.Is(err, io.EOF) {
 				slog.Debug("publisher closed track", "publisherSocketID", publisherSocketID)
 			} else {
@@ -97,9 +106,9 @@ func (tb *TrackBroadcaster) readLoop(remoteTrack *webrtc.TrackRemote, publisherS
 		metrics.RTPBytesTotal.WithLabelValues("received").Add(float64(n))
 
 		select {
-		case tb.packetChan <- buf[:n]:
+		case tb.packetChan <- rtpPacket{buf: bufp, n: n}:
 		default:
-			bufferPool.Put(buf)
+			bufferPool.Put(bufp)
 		}
 	}
 }
@@ -109,19 +118,59 @@ func (tb *TrackBroadcaster) writeLoop() {
 		select {
 		case <-tb.ctx.Done():
 			return
-		case pkt := <-tb.packetChan:
-			if _, err := tb.localTrack.Write(pkt); err != nil {
+		case pkt, ok := <-tb.packetChan:
+			if !ok {
+				return
+			}
+			data := (*pkt.buf)[:pkt.n]
+			if _, err := tb.localTrack.Write(data); err != nil {
+				bufferPool.Put(pkt.buf)
 				if errors.Is(err, io.ErrClosedPipe) {
 					return
 				}
 				slog.Error("error writing to local track", "error", err)
 			} else {
 				metrics.SFUPacketsSent.Inc()
-				metrics.SFUBytesSent.Add(float64(len(pkt)))
+				metrics.SFUBytesSent.Add(float64(pkt.n))
 				metrics.RTPPacketsTotal.WithLabelValues("forwarded").Inc()
-				metrics.RTPBytesTotal.WithLabelValues("forwarded").Add(float64(len(pkt)))
+				metrics.RTPBytesTotal.WithLabelValues("forwarded").Add(float64(pkt.n))
+				bufferPool.Put(pkt.buf)
 			}
 		}
+	}
+}
+
+func (tb *TrackBroadcaster) RelayRTCP(sender *webrtc.RTPSender, publisherPC *webrtc.PeerConnection) {
+	rtcpBuf := make([]byte, BufferSize)
+	for {
+		n, _, err := sender.Read(rtcpBuf)
+		if err != nil {
+			return
+		}
+		packets, err := rtcp.Unmarshal(rtcpBuf[:n])
+		if err != nil {
+			continue
+		}
+		for _, pkt := range packets {
+			switch pkt.(type) {
+			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
+				metrics.PLIRequestsTotal.Inc()
+				if err := publisherPC.WriteRTCP([]rtcp.Packet{
+					&rtcp.PictureLossIndication{MediaSSRC: tb.remoteSSRC},
+				}); err != nil {
+					return
+				}
+			case *rtcp.TransportLayerNack:
+				metrics.NACKRequestsTotal.Inc()
+			}
+		}
+	}
+}
+
+func (tb *TrackBroadcaster) drainPacketChan() {
+	close(tb.packetChan)
+	for pkt := range tb.packetChan {
+		bufferPool.Put(pkt.buf)
 	}
 }
 

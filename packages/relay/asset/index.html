@@ -1,637 +1,1766 @@
+<!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>WebRTC grabber</title>
-    <style>
-        body {
-            margin: 0;
-        }
+<meta charset="UTF-8">
+<title>webrtc-grabber</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:   #f5f3ee;
+    --paper-2: #efece5;
+    --card:    #ffffff;
+    --ink:     #18160f;
+    --ink-2:   #2c2920;
+    --mute:    #807a6e;
+    --mute-2:  #b6afa1;
+    --rule:    #d8d2c4;
+    --rule-2:  #e6e1d5;
 
-        #main {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            padding: 4px 8px;
-        }
+    --ok:      oklch(58% 0.10 150);
+    --warn:    oklch(72% 0.13 75);
+    --alert:   oklch(56% 0.18 25);
+    --select:  oklch(45% 0.13 250);
+    --rec:     oklch(54% 0.20 18);
 
-        #participants {
-            margin-bottom: 4px;
-            grid-column-start: 1;
-            grid-column-end: 3;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 5px;
-        }
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    --sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
 
-        .peerInfo {
-            padding: 2px 8px;
-        }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--paper);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "ss01", "cv11";
+    overflow: hidden;
+  }
 
-        .peerInfo button, .participantStatus button {
-            margin-left: 4px;
-            padding: 2px 8px;
-        }
+  ::selection { background: var(--ink); color: var(--paper); }
 
-        .peerInfo a, .participantStatus a {
-            margin-left: 4px;
-        }
+  .m { font-family: var(--mono); }
+  .caps { text-transform: uppercase; letter-spacing: 0.08em; }
+  .tiny { font-size: 10px; }
+  .small { font-size: 11px; }
 
-        .participantStatus {
-            border: black 1px solid;
-        }
+  #root { height: 100vh; width: 100vw; }
+  .app {
+    display: grid;
+    grid-template-rows: 56px 1fr;
+    grid-template-columns: 1fr 440px;
+    height: 100%;
+    width: 100%;
+  }
 
-        #participants .participantStatus {
-            text-align: center;
-        }
+  /* HEADER */
+  .header {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 280px 1fr auto;
+    align-items: stretch;
+    border-bottom: 1px solid var(--ink);
+    background: var(--paper);
+  }
+  .brand {
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 18px;
+    border-right: 1px solid var(--rule);
+  }
+  .brand .mark {
+    width: 22px; height: 22px;
+    background: var(--ink); color: var(--paper);
+    display: grid; place-items: center;
+    font-family: var(--mono); font-weight: 600;
+    font-size: 11px; letter-spacing: 0.05em;
+  }
+  .brand .name {
+    font-weight: 600; font-size: 13px;
+    letter-spacing: -0.005em;
+  }
+  .brand .sub {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--mute); text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
 
-        .participantStatus.offline {
-            background: #ff7272;
-        }
+  .session-meta { display: flex; align-items: center; gap: 0; padding-left: 0; }
+  .session-meta .cell {
+    padding: 8px 18px;
+    display: flex; flex-direction: column; justify-content: center;
+    border-right: 1px solid var(--rule);
+    min-width: 92px;
+  }
+  .session-meta .cell .lbl {
+    font-family: var(--mono); font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--mute); margin-bottom: 2px;
+  }
+  .session-meta .cell .val {
+    font-family: var(--mono); font-size: 13px;
+    color: var(--ink); font-weight: 500; line-height: 1;
+  }
+  .session-meta .cell .val.lg { font-size: 16px; font-feature-settings: "tnum"; }
+  .session-meta .cell .val.alert { color: var(--alert); }
+  .session-meta .cell .val.ok    { color: var(--ok); }
 
-        .participantStatus.disconnected {
-            background: #ffff75;
-        }
+  .header-actions { display: flex; align-items: stretch; }
+  .pbtn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 0 18px;
+    border: 0; border-left: 1px solid var(--rule);
+    background: transparent; cursor: pointer;
+    font-family: var(--sans); font-size: 12px;
+    color: var(--ink); font-weight: 500; letter-spacing: 0;
+    transition: background .12s;
+  }
+  .pbtn:hover { background: var(--paper-2); }
+  .pbtn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .pbtn.primary {
+    background: var(--ink); color: var(--paper);
+    border-left: 1px solid var(--ink);
+  }
+  .pbtn.primary:hover { background: var(--ink-2); }
+  .pbtn.danger {
+    background: var(--alert); color: #fff;
+    border-left: 1px solid var(--alert);
+  }
+  .pbtn.danger:hover { filter: brightness(0.92); }
+  .pbtn .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: currentColor; opacity: 0.85;
+  }
 
-        .participantStatus.active {
-            background: #91ff54;
-        }
+  /* WALL */
+  .wall {
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: 38px 1fr 28px;
+    border-right: 1px solid var(--ink);
+    background: var(--paper);
+    min-width: 0;
+  }
+  .wall-toolbar {
+    display: flex; align-items: center;
+    border-bottom: 1px solid var(--rule);
+    padding: 0 14px; gap: 14px;
+    background: var(--paper);
+  }
+  .wall-toolbar .title {
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--ink); font-weight: 500;
+  }
+  .wall-toolbar .count {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--mute); letter-spacing: 0.05em;
+  }
+  .wall-toolbar .spacer { flex: 1; }
 
-        .participantStatus.viewed {
-            background: #e798ff;
-        }
+  .search {
+    display: flex; align-items: center;
+    border: 1px solid var(--rule);
+    background: var(--card);
+    padding: 0 8px; height: 24px;
+  }
+  .search input {
+    border: 0; outline: 0; background: transparent;
+    font-family: var(--mono); font-size: 11px;
+    width: 160px; color: var(--ink);
+  }
+  .search input::placeholder { color: var(--mute-2); }
+  .search .k {
+    font-family: var(--mono); font-size: 9px;
+    color: var(--mute); text-transform: uppercase; letter-spacing: 0.1em;
+  }
 
-        .participantStatus.selected {
-            background: #81b6ff;
-        }
+  .filter-tabs { display: flex; gap: 0; }
+  .filter-tabs button {
+    border: 0; background: transparent;
+    padding: 4px 10px;
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--mute); cursor: pointer;
+    border-bottom: 2px solid transparent;
+    height: 38px;
+  }
+  .filter-tabs button:hover { color: var(--ink); }
+  .filter-tabs button.active {
+    color: var(--ink); border-bottom-color: var(--ink);
+  }
+  .filter-tabs button .num {
+    margin-left: 6px; font-size: 9px; color: var(--mute-2);
+  }
+  .filter-tabs button.active .num { color: var(--ink); }
 
-        #selectedParticipant {
-            margin-bottom: 4px;
-            grid-column-start: 1;
-            grid-column-end: 3;
-        }
+  .wall-grid-wrap {
+    overflow: auto;
+    background:
+      linear-gradient(to right, var(--rule-2) 1px, transparent 1px) 0 0 / 100% 100%,
+      var(--paper);
+    position: relative;
+  }
+  .wall-grid {
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 12), 1fr);
+    gap: 0;
+    padding: 0;
+  }
+  .wall-empty {
+    padding: 40px 20px;
+    text-align: center;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--mute);
+    text-transform: uppercase; letter-spacing: 0.1em;
+  }
 
-        #video {
-            width: 100%;
-        }
+  .cell-p {
+    aspect-ratio: 1.55 / 1;
+    border-right: 1px solid var(--rule-2);
+    border-bottom: 1px solid var(--rule-2);
+    background: var(--card);
+    padding: 7px 8px 7px 10px;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 3px;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: background .1s, color .1s;
+  }
+  .cell-p::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--mute-2);
+  }
+  .cell-p.active::before       { background: var(--ok); }
+  .cell-p.disconnected::before { background: var(--warn); }
+  .cell-p.offline::before      { background: var(--rule); }
+  .cell-p.stalled::before      { background: var(--alert); }
 
-        #footer {
-            grid-column-start: 1;
-            grid-column-end: 3;
-        }
+  .cell-p:hover { background: var(--paper-2); }
+  .cell-p.selected {
+    background: var(--ink); color: var(--paper);
+    z-index: 2; box-shadow: 0 0 0 2px var(--ink);
+  }
+  .cell-p.selected .c-name { color: var(--paper); }
+  .cell-p.selected .c-team { color: var(--mute-2); }
+  .cell-p.selected .c-meta { color: var(--mute-2); }
 
-        .legend {
-            padding-inline-start: 0;
-            margin-block-start: 0;
-            margin-block-end: 0;
-        }
+  .cell-p.offline { background: var(--paper-2); opacity: 0.78; }
+  .cell-p.offline .c-name { color: var(--mute); }
 
-        .legend li {
-            list-style: none;
-            margin: 8px 0;
-        }
+  .cell-p.active        { background: oklch(98.5% 0.018 150); }
+  .cell-p.disconnected  { background: oklch(96% 0.045 75); }
+  .cell-p.stalled {
+    background: var(--alert) !important;
+    color: #fff;
+    z-index: 3;
+    animation: stallpulse 1.6s infinite;
+  }
+  .cell-p.stalled .c-name,
+  .cell-p.stalled .c-team,
+  .cell-p.stalled .c-meta { color: #fff; }
+  .cell-p.stalled .c-icon { border-color: rgba(255,255,255,0.5); color: #fff; }
+  .cell-p.stalled .c-icon.on { border-color: #fff; color: #fff; background: rgba(255,255,255,0.12); }
+  @keyframes stallpulse {
+    0%, 100% { box-shadow: 0 0 0 0 var(--alert), 0 0 0 1px var(--alert); }
+    50%      { box-shadow: 0 0 0 4px oklch(56% 0.18 25 / 0.35), 0 0 0 1px var(--alert); }
+  }
+  .cell-p.recording { box-shadow: inset 0 0 0 2px var(--rec); }
+  .cell-p.recording.selected { box-shadow: 0 0 0 2px var(--rec); }
+  .cell-p.viewed { box-shadow: inset 0 0 0 2px var(--select); }
+  .cell-p.viewed.recording { box-shadow: inset 0 0 0 2px var(--rec), inset 4px 0 0 0 var(--select); }
 
-        #proctoring {
-            grid-column-start: 1;
-            grid-column-end: 3;
-            margin-bottom: 8px;
-            padding: 8px 12px;
-            border: 1px solid #888;
-            border-radius: 4px;
-            background: #f5f5f5;
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 12px;
-        }
+  .c-top {
+    display: flex; justify-content: space-between;
+    align-items: flex-start; gap: 4px;
+  }
+  .c-name {
+    font-family: var(--mono); font-size: 11px;
+    font-weight: 500; color: var(--ink);
+    line-height: 1.1; letter-spacing: 0.01em;
+  }
+  .c-team {
+    font-family: var(--mono); font-size: 9px;
+    color: var(--mute); letter-spacing: 0.05em;
+    text-transform: uppercase; margin-top: 1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .c-status {
+    width: 6px; height: 6px; border-radius: 50%;
+    flex-shrink: 0; margin-top: 3px;
+  }
+  .c-status.s-active       { background: var(--ok); }
+  .c-status.s-disconnected { background: var(--warn); }
+  .c-status.s-offline      { background: var(--mute-2); }
+  .cell-p.stalled .c-status { background: #fff; }
+  .c-status.s-stalled      { background: #fff; }
 
-        #proctoring.idle    { background: #f5f5f5; }
-        #proctoring.active  { background: #c8f7c5; border-color: #2e8b2e; }
-        #proctoring.paused  { background: #fff3a3; border-color: #b89c00; }
+  .c-mid { display: flex; align-items: flex-end; gap: 4px; flex-wrap: wrap; }
+  .c-mid .conn-pill {
+    font-family: var(--mono); font-size: 9px;
+    background: var(--paper-2);
+    color: var(--mute);
+    padding: 1px 5px;
+    letter-spacing: 0.05em;
+  }
+  .c-univ {
+    font-family: var(--mono); font-size: 9px;
+    color: var(--mute);
+    letter-spacing: 0.04em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1 1 auto; min-width: 0;
+  }
+  .selected .c-univ { color: var(--mute-2); }
+  .cell-p.stalled .c-univ { color: #fff; }
+  .selected .c-mid .conn-pill { background: rgba(255,255,255,0.1); color: var(--mute-2); }
+  .cell-p.stalled .conn-pill { background: rgba(255,255,255,0.18); color: #fff; }
 
-        #proctoring .status-label {
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
+  .c-bot {
+    display: flex; justify-content: space-between;
+    align-items: center; gap: 6px;
+  }
+  .c-meta {
+    font-family: var(--mono); font-size: 9px;
+    color: var(--mute); letter-spacing: 0.02em;
+    font-feature-settings: "tnum";
+  }
+  .c-icons { display: flex; gap: 4px; }
+  .c-icon {
+    font-family: var(--mono); font-size: 9px;
+    width: 12px; height: 12px;
+    display: grid; place-items: center;
+    border: 1px solid var(--rule);
+    color: var(--mute); line-height: 1;
+    background: transparent;
+  }
+  .c-icon.on {
+    border-color: var(--ink); color: var(--ink);
+    background: transparent;
+  }
+  .selected .c-icon.on { border-color: var(--paper); color: var(--paper); }
+  .selected .c-icon { border-color: var(--mute); color: var(--mute-2); }
+  .c-icon.rec {
+    border-color: var(--rec); color: var(--rec);
+    background: oklch(95% 0.05 18);
+    animation: blink 1.2s infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.5} }
 
-        #proctoring .params input {
-            width: 90px;
-            margin-right: 6px;
-        }
+  .wall-status {
+    border-top: 1px solid var(--rule);
+    background: var(--paper);
+    display: flex; align-items: center;
+    padding: 0 14px; gap: 16px;
+  }
+  .wall-status .item {
+    font-family: var(--mono); font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--mute);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .wall-status .item .pip {
+    width: 6px; height: 6px; border-radius: 50%;
+  }
+  .wall-status .item b { color: var(--ink); font-weight: 500; }
 
-        #proctoring button {
-            padding: 4px 12px;
-        }
+  /* DETAIL RAIL */
+  .rail {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    background: var(--paper);
+    min-height: 0;
+    overflow: hidden;
+  }
+  .focus {
+    border-bottom: 1px solid var(--ink);
+    background: var(--card);
+  }
+  .focus-empty {
+    padding: 28px 22px;
+    color: var(--mute);
+    font-family: var(--mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    text-align: center;
+    border-bottom: 1px solid var(--ink);
+    background: var(--paper);
+  }
+  .video-frame {
+    aspect-ratio: 16 / 9;
+    background: #0a0a08;
+    color: #d8d2c4;
+    position: relative;
+    overflow: hidden;
+  }
+  .video-frame .stripes {
+    position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(135deg,
+      rgba(255,255,255,0.018) 0,
+      rgba(255,255,255,0.018) 8px,
+      rgba(255,255,255,0) 8px,
+      rgba(255,255,255,0) 16px);
+  }
+  .video-frame .scanline {
+    position: absolute; left: 0; right: 0; height: 1px;
+    background: rgba(255,255,255,0.06);
+    animation: scan 6s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes scan { 0% { top: 0; } 100% { top: 100%; } }
+  .video-frame .label-bl {
+    position: absolute; left: 12px; bottom: 10px;
+    font-family: var(--mono); font-size: 10px;
+    color: rgba(245,243,238,0.85);
+    letter-spacing: 0.1em; text-transform: uppercase;
+    pointer-events: none;
+  }
+  .video-frame .label-tr {
+    position: absolute; right: 12px; top: 10px;
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    display: flex; align-items: center; gap: 6px;
+    color: rgba(245,243,238,0.85);
+    pointer-events: none;
+  }
+  .video-frame .label-tr .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 6px var(--ok);
+  }
+  .video-frame .center-id {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    color: rgba(245,243,238,0.5);
+    font-family: var(--mono); font-size: 22px;
+    letter-spacing: 0.06em; font-weight: 500;
+    pointer-events: none;
+  }
+  .video-frame .ts {
+    position: absolute; left: 12px; top: 10px;
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.1em;
+    color: rgba(245,243,238,0.7);
+    pointer-events: none;
+  }
+  .video-frame .grid-overlay {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px);
+    background-size: 33.33% 33.33%, 33.33% 33.33%;
+    pointer-events: none;
+  }
+  .video-frame video {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: contain;
+    background: #000;
+  }
+  .video-frame .play-overlay {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: grid; place-items: center;
+    z-index: 5;
+  }
+  .video-frame .play-overlay button {
+    border: 0;
+    background: var(--paper); color: var(--ink);
+    font-family: var(--mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.14em;
+    padding: 10px 18px;
+    cursor: pointer;
+  }
+  .video-frame .play-overlay button:hover { background: var(--paper-2); }
 
-        #proctoring .meta {
-            color: #555;
-            font-size: 0.9em;
-        }
+  .focus-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-top: 1px solid var(--rule);
+  }
+  .focus-meta .cell {
+    padding: 10px 16px;
+    border-right: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+  .focus-meta .cell:nth-child(2n) { border-right: 0; }
+  .focus-meta .lbl {
+    font-family: var(--mono); font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--mute); margin-bottom: 3px;
+  }
+  .focus-meta .val {
+    font-family: var(--mono); font-size: 12px;
+    color: var(--ink); font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .focus-meta .val.alert { color: var(--alert); }
+  .focus-meta .val a {
+    color: var(--ink); text-decoration: underline;
+    text-decoration-color: var(--rule);
+    margin-right: 8px;
+  }
+  .focus-meta .val a:hover { text-decoration-color: var(--ink); }
 
-        #proctoring-details {
-            grid-column-start: 1;
-            grid-column-end: 3;
-            margin-bottom: 12px;
-        }
+  .focus-tabs {
+    display: flex;
+    border-top: 1px solid var(--rule);
+  }
+  .focus-tabs button {
+    flex: 1;
+    border: 0;
+    border-right: 1px solid var(--rule);
+    background: var(--card);
+    padding: 10px 12px;
+    font-family: var(--mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--mute);
+    cursor: pointer;
+    position: relative;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    transition: background .1s, color .1s;
+  }
+  .focus-tabs button:last-child { border-right: 0; }
+  .focus-tabs button:hover:not(:disabled) { background: var(--paper-2); color: var(--ink); }
+  .focus-tabs button.active { color: var(--ink); font-weight: 500; }
+  .focus-tabs button.active::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; bottom: -1px;
+    height: 2px;
+    background: var(--ink);
+  }
+  .focus-tabs button:disabled { color: var(--mute-2); cursor: not-allowed; }
+  .focus-tabs button .pip {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor;
+  }
 
-        #proctoring-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.9em;
-        }
+  .focus-actions {
+    display: flex;
+    border-top: 1px solid var(--rule);
+  }
+  .focus-actions button {
+    flex: 1;
+    border: 0;
+    border-right: 1px solid var(--rule);
+    background: var(--card);
+    padding: 10px 12px;
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--ink);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    transition: background .1s;
+    white-space: nowrap;
+  }
+  .focus-actions button:disabled { color: var(--mute-2); cursor: not-allowed; }
+  .focus-actions button:last-child { border-right: 0; }
+  .focus-actions button:hover:not(:disabled) { background: var(--paper-2); }
+  .focus-actions button.rec-btn { color: var(--rec); }
+  .focus-actions button.rec-btn.on { background: var(--rec); color: #fff; }
+  .focus-actions button.danger { color: var(--alert); }
+  .focus-actions button .pip {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor;
+  }
 
-        #proctoring-table th, #proctoring-table td {
-            padding: 4px 8px;
-            text-align: left;
-            border-bottom: 1px solid #e0e0e0;
-        }
+  /* sessions strip */
+  .sessions-strip {
+    border-bottom: 1px solid var(--rule);
+    background: var(--paper);
+    padding: 8px 14px;
+    display: flex; flex-wrap: wrap; gap: 6px;
+    align-items: center;
+  }
+  .sessions-strip .lbl {
+    font-family: var(--mono); font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--mute); margin-right: 4px;
+  }
+  .sess-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--rule);
+    background: var(--card);
+    padding: 2px 8px;
+    font-family: var(--mono); font-size: 10px;
+    color: var(--ink);
+    letter-spacing: 0.02em;
+  }
+  .sess-pill.active     { border-color: var(--ok); background: oklch(96% 0.04 150); }
+  .sess-pill.unfinalized { border-color: var(--warn); background: oklch(96% 0.06 75); }
+  .sess-pill button {
+    border: 0; background: transparent;
+    font-family: var(--mono); font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--ink); cursor: pointer;
+    padding: 0 4px;
+  }
+  .sess-pill button:hover { text-decoration: underline; }
 
-        #proctoring-table th {
-            background: #fafafa;
-        }
+  /* event feed */
+  .feed-wrap {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+    min-height: 0;
+  }
+  .feed-head {
+    display: flex; align-items: center;
+    border-bottom: 1px solid var(--rule);
+    padding: 0 14px;
+    height: 32px;
+    background: var(--paper);
+  }
+  .feed-head .title {
+    font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.14em;
+    font-weight: 500;
+  }
+  .feed-head .ct {
+    margin-left: auto;
+    font-family: var(--mono); font-size: 10px;
+    color: var(--mute); letter-spacing: 0.05em;
+  }
+  .feed { overflow: auto; background: var(--paper); }
+  .ev {
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    gap: 0;
+    border-bottom: 1px solid var(--rule-2);
+    padding: 8px 14px;
+    align-items: flex-start;
+  }
+  .ev .ts {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--mute); letter-spacing: 0.02em;
+    padding-top: 1px; font-feature-settings: "tnum";
+  }
+  .ev .body { display: flex; flex-direction: column; gap: 2px; }
+  .ev .lvl {
+    font-family: var(--mono); font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--mute);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .ev.alert .lvl { color: var(--alert); }
+  .ev.warn  .lvl { color: var(--warn); }
+  .ev.ok    .lvl { color: var(--ok); }
+  .ev .lvl .pip {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: currentColor;
+  }
+  .ev .msg { font-size: 12px; color: var(--ink); line-height: 1.35; }
+  .ev .msg b {
+    font-family: var(--mono); font-weight: 500;
+    background: var(--paper-2);
+    padding: 0 4px; margin: 0 1px;
+  }
+  .ev.alert { background: oklch(97% 0.025 25); }
+  .ev .actions {
+    margin-top: 4px;
+    display: flex; gap: 8px;
+  }
+  .ev .actions button {
+    border: 1px solid var(--rule);
+    background: transparent;
+    padding: 2px 8px;
+    font-family: var(--mono); font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    cursor: pointer; color: var(--ink);
+  }
+  .ev .actions button:hover { background: var(--paper-2); }
 
-        #proctoring-table tr.stalled  { background: #ffd6d6; }
-        #proctoring-table tr.gone     { background: #fff3a3; }
-        #proctoring-table tr.finalized { color: #777; }
+  /* tooltip */
+  .tooltip {
+    position: fixed;
+    pointer-events: none;
+    z-index: 9999;
+    background: var(--ink); color: var(--paper);
+    font-family: var(--mono); font-size: 10px;
+    padding: 6px 9px; line-height: 1.4;
+    letter-spacing: 0.02em;
+    transform: translate(8px, 8px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+    max-width: 260px;
+  }
+  .tooltip .lbl {
+    color: var(--mute-2);
+    text-transform: uppercase; letter-spacing: 0.1em;
+    font-size: 9px; margin-right: 6px;
+  }
 
-        #proctoring-table .pill {
-            display: inline-block;
-            padding: 1px 6px;
-            border-radius: 8px;
-            font-size: 0.85em;
-            background: #e0e0e0;
-        }
-        #proctoring-table .pill.live    { background: #c8f7c5; }
-        #proctoring-table .pill.offline { background: #ddd; }
-        #proctoring-table .pill.stale   { background: #ffaaaa; }
+  .clamp1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        #proctoring-table .dl {
-            font-size: 0.85em;
-            margin-right: 6px;
-        }
+  /* modal */
+  .modal-back {
+    position: fixed; inset: 0;
+    background: rgba(24,22,15,0.32);
+    display: grid; place-items: center;
+    z-index: 1000;
+  }
+  .modal {
+    width: 480px;
+    background: var(--card);
+    border: 1px solid var(--ink);
+    box-shadow: 0 16px 40px rgba(0,0,0,0.18);
+  }
+  .modal h2 {
+    margin: 0;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--rule);
+    font-size: 14px; font-weight: 600; letter-spacing: -0.005em;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .modal h2 .badge {
+    font-family: var(--mono); font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.14em;
+    background: var(--ink); color: var(--paper);
+    padding: 2px 6px;
+  }
+  .mform {
+    padding: 16px 20px;
+    display: grid; gap: 12px;
+    grid-template-columns: 1fr 1fr;
+  }
+  .mform label {
+    display: flex; flex-direction: column; gap: 4px;
+    font-family: var(--mono); font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--mute);
+  }
+  .mform input {
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    padding: 8px 10px;
+    font-family: var(--mono); font-size: 12px;
+    color: var(--ink); outline: 0;
+  }
+  .mform input:focus { border-color: var(--ink); }
+  .mform .full { grid-column: 1 / -1; }
+  .mfoot {
+    display: flex; justify-content: flex-end; gap: 0;
+    border-top: 1px solid var(--rule);
+  }
+  .mfoot button {
+    border: 0; border-left: 1px solid var(--rule);
+    background: transparent;
+    padding: 12px 18px;
+    font-family: var(--sans); font-size: 12px;
+    color: var(--ink); cursor: pointer; font-weight: 500;
+  }
+  .mfoot button.primary { background: var(--ink); color: var(--paper); }
+  .mfoot button:hover         { background: var(--paper-2); }
+  .mfoot button.primary:hover { background: var(--ink-2); }
 
-        #proctoring-sessions {
-            margin-top: 8px;
-            font-size: 0.9em;
-        }
-
-        #proctoring-sessions .session-row {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            margin: 2px 8px 2px 0;
-            padding: 2px 8px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            background: #fafafa;
-        }
-
-        #proctoring-sessions .session-row.unfinalized { background: #fff3a3; }
-        #proctoring-sessions .session-row.active { background: #c8f7c5; }
-    </style>
-    <script src="/sockets.js"></script>
-    <script src="/grabber_player.js"></script>
-    <script src="/grabber_admin_client.js"></script>
+  /* scrollbars */
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: var(--rule); }
+  *::-webkit-scrollbar-thumb:hover { background: var(--mute-2); }
+</style>
+<script src="/sockets.js"></script>
+<script src="/grabber_player.js"></script>
+<script src="/grabber_admin_client.js"></script>
 </head>
 <body>
-<div id="main">
-    <div id="proctoring" class="idle">
-        <span class="status-label">Proctoring: <span id="proctoring-state">idle</span></span>
-        <span class="meta" id="proctoring-meta"></span>
-        <span class="params" id="proctoring-params">
-            <label>chunk ms <input id="proctoring-chunk" type="number" value="5000" min="1000" step="1000"></label>
-            <label>fps <input id="proctoring-fps" type="number" value="1" min="1" max="30"></label>
-            <label>bitrate <input id="proctoring-bitrate" type="number" value="100000" min="10000" step="10000"></label>
-            <label>ends at <input id="proctoring-endsat" type="datetime-local"></label>
-        </span>
-        <span id="proctoring-buttons"></span>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+// ── auth bootstrap ──
+const requireAuth = () => {
+  const stored = localStorage.getItem("adminCredentials");
+  if (stored) return stored;
+  const cred = prompt("Admin credentials");
+  if (cred) localStorage.setItem("adminCredentials", cred);
+  return cred;
+};
+
+const client = new GrabberPlayerClient();
+const adminClient = new GrabberAdminClient("");
+client.target.addEventListener("auth:request", () => {
+  const cred = requireAuth();
+  client.authorize(cred);
+  adminClient.setCredential(cred);
+});
+client.target.addEventListener("auth:failed", ({ detail: [accessMessage] }) => {
+  localStorage.removeItem("adminCredentials");
+  alert(accessMessage);
+});
+
+const STALL_THRESHOLD_MS = 15000;
+const PING_LIVE_MS = 15000;
+
+// ── helpers ──
+function fmtAgo(ms) {
+  if (ms == null) return "—";
+  const s = Math.floor(ms / 1000);
+  if (s < 1) return "now";
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h`;
+}
+function fmtClock(d) {
+  if (!d) return "--:--:--";
+  return d.toTimeString().slice(0, 8);
+}
+function fmtClockShort(d) {
+  if (!d) return "--:--";
+  return d.toTimeString().slice(0, 5);
+}
+function fmtMSS(ms) {
+  if (ms == null || ms < 0) return "00:00";
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
+function fmtBytes(n) {
+  n = n || 0;
+  if (n < 1024) return `${n}B`;
+  if (n < 1024*1024) return `${(n/1024).toFixed(0)}KB`;
+  if (n < 1024*1024*1024) return `${(n/(1024*1024)).toFixed(1)}MB`;
+  return `${(n/(1024*1024*1024)).toFixed(2)}GB`;
+}
+function escHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+function lastPingMsAt(p, now) {
+  if (!p || !p.lastPing) return null;
+  return now - new Date(p.lastPing).getTime();
+}
+function lastPingMs(p) { return lastPingMsAt(p, Date.now()); }
+function isOnlineAt(p, now) {
+  const ms = lastPingMsAt(p, now);
+  return ms != null && ms < PING_LIVE_MS;
+}
+function isOnline(p) { return isOnlineAt(p, Date.now()); }
+function deriveLevelAt(p, stalled, now) {
+  if (stalled) return "stalled";
+  if (isOnlineAt(p, now)) return "active";
+  if (p.lastPing) return "disconnected";
+  return "offline";
+}
+
+// ── ParticipantCell ──
+function ParticipantCell({ p, peer, stalled, selected, now, onClick, onHover }) {
+  const cls = ["cell-p"];
+  const level = deriveLevelAt(p, stalled, now);
+  cls.push(level);
+  if (selected) cls.push("selected");
+  const isRecording = !!p.currentRecordId;
+  const isViewed = (p.connectionsCount || 0) > 0;
+  if (isRecording) cls.push("recording");
+  else if (isViewed) cls.push("viewed");
+
+  let dotCls = "s-offline";
+  if (level === "stalled") dotCls = "s-stalled";
+  else if (level === "active") dotCls = "s-active";
+  else if (level === "disconnected") dotCls = "s-disconnected";
+
+  const ms = lastPingMsAt(p, now);
+  const hasWebcam = (p.streamTypes || []).includes("webcam");
+  const hasDesktop = (p.streamTypes || []).includes("desktop");
+  const teamLine = p.teamName
+    || (peer?.id ? `id ${peer.id.slice(0, 6)}` : (p.streamTypes?.length ? p.streamTypes.join("·") : "no streams"));
+  const showUniv = !!p.university;
+
+  return (
+    <div
+      className={cls.join(" ")}
+      onClick={onClick}
+      onMouseEnter={(e) => onHover && onHover({ p, peer, stalled, x: e.clientX, y: e.clientY })}
+      onMouseLeave={() => onHover && onHover(null)}
+    >
+      <div className="c-top">
+        <div style={{ minWidth: 0 }}>
+          <div className="c-name clamp1">{p.name}</div>
+          <div className="c-team clamp1">{teamLine}</div>
+        </div>
+        <div className={`c-status ${dotCls}`}></div>
+      </div>
+      <div className="c-mid">
+        {showUniv && <span className="c-univ" title={p.university}>{p.university}</span>}
+        {isViewed && <span className="conn-pill">conn {p.connectionsCount}</span>}
+      </div>
+      <div className="c-bot">
+        <div className="c-meta">{fmtAgo(ms)}</div>
+        <div className="c-icons">
+          <div className={`c-icon ${hasWebcam ? "on" : ""}`} title="webcam">W</div>
+          <div className={`c-icon ${hasDesktop ? "on" : ""}`} title="desktop">D</div>
+          {isRecording && <div className="c-icon rec on" title={`recording ${p.currentRecordId}`}>●</div>}
+        </div>
+      </div>
     </div>
-    <div id="proctoring-details">
-        <table id="proctoring-table" hidden>
-            <thead>
-                <tr>
-                    <th>peer</th>
-                    <th>stream</th>
-                    <th>state</th>
-                    <th>committedSeq</th>
-                    <th>bytes</th>
-                    <th>last chunk</th>
-                    <th>files</th>
-                </tr>
-            </thead>
-            <tbody></tbody>
-        </table>
-        <div id="proctoring-sessions"></div>
+  );
+}
+
+// ── Tooltip ──
+function CellTooltip({ data }) {
+  if (!data) return null;
+  const { p, peer, stalled, x, y } = data;
+  const ms = lastPingMs(p);
+  return (
+    <div className="tooltip" style={{ left: x, top: y }}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>{p.name}</div>
+      {p.teamName && <div><span className="lbl">team</span>{p.teamName}</div>}
+      {p.university && <div><span className="lbl">univ</span>{p.university}</div>}
+      {peer?.id && <div><span className="lbl">peer</span>{peer.id}</div>}
+      <div><span className="lbl">ping</span>{fmtAgo(ms)}</div>
+      <div><span className="lbl">streams</span>{(p.streamTypes && p.streamTypes.join(",")) || "—"}</div>
+      <div><span className="lbl">conn</span>{p.connectionsCount || 0}</div>
+      {p.currentRecordId && <div><span className="lbl">rec</span>{p.currentRecordId}</div>}
+      {stalled && <div style={{ color: "oklch(85% 0.12 25)" }}><span className="lbl">!</span>STALLED</div>}
     </div>
-    <div id="participants"></div>
-    <div id="selectedParticipant"></div>
-    <div id="peers"></div>
-    <div id="videoContainer">
-        <video id="video"></video>
-        <audio id="audio"></audio>
+  );
+}
+
+// ── FocusPanel ──
+function FocusPanel({ p, peer, stalled, proctoringPeers, sessionId, streamType, setStreamType,
+                      videoRef, isLive, needsPlay, onPlayClick, onConnectStream, onCloseStream,
+                      onRecord, onStopRecord, onClearSelection, onDownload, onPlayersDisconnect, onPopOut }) {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (!p) {
+    return (
+      <div className="focus-empty">↳ select a participant from the wall to inspect their stream</div>
+    );
+  }
+
+  const ms = lastPingMs(p);
+  const online = isOnline(p);
+  const recording = !!p.currentRecordId;
+  const procRecord = proctoringPeers
+    ? proctoringPeers.find((x) => x.peerName === p.name && x.streamKey === streamType)
+    : null;
+  const lastChunkMs = procRecord && procRecord.lastChunkAt
+    ? Date.now() - new Date(procRecord.lastChunkAt).getTime() : null;
+
+  return (
+    <div className="focus">
+      <div className="video-frame">
+        <video ref={videoRef} autoPlay playsInline muted/>
+        {!isLive && <>
+          <div className="stripes"></div>
+          <div className="grid-overlay"></div>
+          <div className="scanline"></div>
+          <div className="center-id">{online ? p.name : "—"}</div>
+        </>}
+        <div className="ts">{fmtClock(now)} · {streamType.toUpperCase()}</div>
+        <div className="label-tr">
+          {isLive && <span className="dot"></span>}
+          {isLive ? "LIVE" : (online ? "READY" : "NO SIGNAL")}
+        </div>
+        <div className="label-bl">{p.name} · {peer?.id ? `id ${peer.id.slice(0, 8)}` : "no peer"}</div>
+        {needsPlay && (
+          <div className="play-overlay">
+            <button onClick={onPlayClick}>▶ Click to play</button>
+          </div>
+        )}
+      </div>
+
+      <div className="focus-meta">
+        <div className="cell">
+          <div className="lbl">Peer ID</div>
+          <div className="val clamp1">{peer?.id || "—"}</div>
+        </div>
+        <div className="cell">
+          <div className="lbl">Streams</div>
+          <div className="val">{(p.streamTypes && p.streamTypes.join(", ")) || "—"}</div>
+        </div>
+        {(p.teamName || p.university) && (
+          <>
+            <div className="cell">
+              <div className="lbl">Team</div>
+              <div className="val clamp1">{p.teamName || "—"}</div>
+            </div>
+            <div className="cell">
+              <div className="lbl">University</div>
+              <div className="val clamp1">{p.university || "—"}</div>
+            </div>
+          </>
+        )}
+        <div className="cell">
+          <div className="lbl">Last ping</div>
+          <div className={"val " + (stalled ? "alert" : "")}>{fmtAgo(ms)}{stalled ? " · STALLED" : ""}</div>
+        </div>
+        <div className="cell">
+          <div className="lbl">Connections</div>
+          <div className="val">{p.connectionsCount || 0}{recording ? "  · REC" : ""}</div>
+        </div>
+        {sessionId && (
+          <div className="cell" style={{ gridColumn: "1 / -1" }}>
+            <div className="lbl">Proctoring · {streamType}</div>
+            <div className="val">
+              {procRecord
+                ? <>
+                    seq {procRecord.committedSeq < 0 ? "—" : procRecord.committedSeq}
+                    {" · "}{fmtBytes(procRecord.totalBytes)}
+                    {" · "}last {fmtAgo(lastChunkMs)}
+                    {procRecord.committedSeq >= 0 && (
+                      <>
+                        {"  "}
+                        <a href="#" onClick={(e) => { e.preventDefault(); onDownload(sessionId, p.name, streamType, "full.webm"); }}>↓ raw</a>
+                        {procRecord.finalized && <a href="#" onClick={(e) => { e.preventDefault(); onDownload(sessionId, p.name, streamType, "full.remuxed.webm"); }}>↓ remuxed</a>}
+                      </>
+                    )}
+                  </>
+                : "no chunks"
+              }
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="focus-tabs">
+        {(() => {
+          const available = (p && p.streamTypes) || (peer && peer.streamTypes) || [];
+          const has = (k) => available.includes(k);
+          return (
+            <>
+              <button
+                className={streamType === "webcam" ? "active" : ""}
+                onClick={() => setStreamType("webcam")}
+                disabled={!has("webcam")}
+                title={has("webcam") ? "Stream webcam in this panel" : "Peer is not publishing webcam"}
+              >
+                <span className="pip"></span>Webcam{!has("webcam") ? " · n/a" : ""}
+              </button>
+              <button
+                className={streamType === "desktop" ? "active" : ""}
+                onClick={() => setStreamType("desktop")}
+                disabled={!has("desktop")}
+                title={has("desktop") ? "Stream desktop in this panel" : "Peer is not publishing desktop"}
+              >
+                <span className="pip"></span>Desktop{!has("desktop") ? " · n/a" : ""}
+              </button>
+            </>
+          );
+        })()}
+      </div>
+      <div className="focus-actions">
+        <button
+          className={"rec-btn " + (recording ? "on" : "")}
+          onClick={() => recording ? onStopRecord() : onRecord()}
+          disabled={!p || (!online && !recording)}
+          title={recording ? "Stop recording" : "Start recording"}
+        >
+          <span className="pip"></span>{recording ? "Stop Rec" : "Record"}
+        </button>
+        <button onClick={() => onPopOut(streamType)} disabled={!p} title={`Open ${streamType} in a new tab`}>
+          ↗ Open tab
+        </button>
+        <button className="danger" onClick={onPlayersDisconnect} disabled={!p} title="Disconnect all players from this peer">
+          Disconnect
+        </button>
+        <button onClick={() => { onCloseStream(); onClearSelection(); }}>Close</button>
+      </div>
     </div>
-    <div id="footer">
-        Legend:
-        <ul class="legend">
-            <li><span class="participantStatus offline">offline</span> no pings yet</li>
-            <li><span class="participantStatus disconnected">disconnected</span> last ping was 15 seconds ago</li>
-            <li><span class="participantStatus active">active</span> last ping was earlier than 15 seconds ago</li>
-            <li><span class="participantStatus viewed">viewed [connection count]</span> peer has at least one connection
-            </li>
-            <li><span class="participantStatus selected">selected</span> peer is selected</li>
-        </ul>
+  );
+}
+
+// ── EventFeed ──
+function EventFeed({ events, onJump }) {
+  return (
+    <div className="feed-wrap">
+      <div className="feed-head">
+        <div className="title">Event Feed</div>
+        <div className="ct">{events.length} events · live</div>
+      </div>
+      <div className="feed">
+        {events.length === 0 && (
+          <div style={{ padding: "20px 14px", color: "var(--mute)", fontFamily: "var(--mono)", fontSize: 11 }}>
+            ── waiting for events ──
+          </div>
+        )}
+        {events.map((e) => (
+          <div key={e.key} className={`ev ${e.level}`}>
+            <div className="ts">{fmtClock(new Date(e.t))}</div>
+            <div className="body">
+              <div className="lvl"><span className="pip"></span>{e.level}</div>
+              <div className="msg" dangerouslySetInnerHTML={{ __html: e.html }}/>
+              {e.peerName && (
+                <div className="actions">
+                  <button onClick={() => onJump(e.peerName)}>Inspect →</button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
-</div>
-<script>
-    const requireAuth = () => {
-        if (localStorage.getItem("adminCredentials")) {
-            return localStorage.getItem("adminCredentials");
-        }
-        const credentialInput = prompt("Admin credentials");
-        localStorage.setItem("adminCredentials", credentialInput);
-        return credentialInput;
+  );
+}
+
+// ── ProctoringDialog ──
+function ProctoringDialog({ open, onClose, onStart }) {
+  const [chunkMs, setChunkMs] = useState(5000);
+  const [fps, setFps] = useState(1);
+  const [bitrate, setBitrate] = useState(100000);
+  const [endsAt, setEndsAt] = useState("");
+  if (!open) return null;
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2><span className="badge">CFG</span>Start proctoring session</h2>
+        <div className="mform">
+          <label>Chunk duration (ms)
+            <input type="number" value={chunkMs} onChange={(e) => setChunkMs(+e.target.value)} step="1000" min="1000"/>
+          </label>
+          <label>FPS
+            <input type="number" value={fps} onChange={(e) => setFps(+e.target.value)} min="1" max="30"/>
+          </label>
+          <label>Video bitrate (bps)
+            <input type="number" value={bitrate} onChange={(e) => setBitrate(+e.target.value)} step="10000" min="10000"/>
+          </label>
+          <label>Ends at (optional)
+            <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)}/>
+          </label>
+        </div>
+        <div className="mfoot">
+          <button onClick={onClose}>Cancel</button>
+          <button className="primary" onClick={() => onStart({
+            chunkDurationMs: chunkMs,
+            fps,
+            videoBitrate: bitrate,
+            endsAt: endsAt ? new Date(endsAt).toISOString() : null,
+          })}>Start session</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── App ──
+function App() {
+  const [title, setTitle] = useState("webrtc-grabber");
+  const [participants, setParticipants] = useState([]);
+  const [peers, setPeers] = useState([]);
+  const [proctoringState, setProctoringState] = useState(null);
+  const [proctoringResp, setProctoringResp] = useState(null);
+  const [selected, setSelected] = useState(null);    // peer name
+  const [streamType, setStreamType] = useState("desktop");
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [tooltip, setTooltip] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [proctoringOpen, setProctoringOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const [isLive, setIsLive] = useState(false);
+  const [needsPlay, setNeedsPlay] = useState(false);
+
+  const videoRef = useRef(null);
+  const prevPartsRef = useRef(new Map());
+  const seenFirstUpdateRef = useRef(false);
+  const connectTokenRef = useRef(0);
+
+  // tick clock — drives all "ago"/online-derivations
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // fetch UI config (title)
+  useEffect(() => {
+    fetch("/api/ui-config")
+      .then((r) => r.ok ? r.json() : null)
+      .then((cfg) => { if (cfg && cfg.title) setTitle(cfg.title); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { document.title = title; }, [title]);
+
+  const brandMark = useMemo(() => {
+    const cleaned = title.replace(/[^A-Za-z0-9]+/g, " ").trim();
+    if (!cleaned) return "WG";
+    const parts = cleaned.split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return cleaned.slice(0, 2).toUpperCase();
+  }, [title]);
+
+  const pushEvent = useCallback((ev) => {
+    setEvents((prev) => {
+      const next = [{ ...ev, key: `${ev.t}-${Math.random().toString(36).slice(2, 7)}` }, ...prev];
+      return next.slice(0, 200);
+    });
+  }, []);
+
+  // proctoring peers map for stalled detection
+  const proctoringPeers = proctoringResp?.peers || [];
+  const sessionActive = !!(proctoringState && (proctoringState.active || proctoringState.paused));
+  const stalledByName = useMemo(() => {
+    const m = new Map();
+    if (!sessionActive) return m;
+    for (const pp of proctoringPeers) {
+      if (!pp.online || !pp.activelyStreaming) continue;
+      const lastMs = pp.lastChunkAt ? now - new Date(pp.lastChunkAt).getTime() : null;
+      if (lastMs != null && lastMs > STALL_THRESHOLD_MS) {
+        m.set(pp.peerName, true);
+      }
     }
+    return m;
+  }, [proctoringPeers, sessionActive, now]);
 
-    let curGrabberId = null;
-    let selectedParticipantName = null;
+  // ── peers WS handler ──
+  useEffect(() => {
+    const handler = ({ detail: [peersStatus, participantsStatus] }) => {
+      const next = participantsStatus || [];
+      const prev = prevPartsRef.current;
+      const nextMap = new Map(next.map((p) => [p.name, p]));
+      const isFirst = !seenFirstUpdateRef.current;
+      seenFirstUpdateRef.current = true;
 
-    const peerState = (peer) =>
-        peer.lastPing ? ((new Date() - new Date(peer.lastPing)) < 15000 ? "active" : "disconnected") : "offline";
+      if (isFirst) {
+        prevPartsRef.current = nextMap;
+        setParticipants(next);
+        setPeers(peersStatus || []);
+        return;
+      }
 
-    const client = new GrabberPlayerClient();
-    const adminClient = new GrabberAdminClient("");
-    client.target.addEventListener("auth:request", () => {
-        client.authorize(requireAuth());
-        adminClient.setCredential(requireAuth());
-    });
-    client.target.addEventListener("auth:failed", ({detail: [accessMessage]}) => {
-        localStorage.removeItem("adminCredentials");
-        alert(accessMessage);
-    });
-
-    let proctoringCountdownTimer = null;
-    const proctoringEl = {
-        root:    document.getElementById("proctoring"),
-        state:   document.getElementById("proctoring-state"),
-        meta:    document.getElementById("proctoring-meta"),
-        params:  document.getElementById("proctoring-params"),
-        buttons: document.getElementById("proctoring-buttons"),
-        chunk:   document.getElementById("proctoring-chunk"),
-        fps:     document.getElementById("proctoring-fps"),
-        bitrate: document.getElementById("proctoring-bitrate"),
-        endsAt:  document.getElementById("proctoring-endsat"),
-    };
-
-    const renderProctoring = (state) => {
-        const isIdle   = !state || !state.sessionId;
-        const isActive = !!state && state.active;
-        const isPaused = !!state && state.paused;
-
-        proctoringEl.root.classList.remove("idle", "active", "paused");
-        proctoringEl.root.classList.add(isIdle ? "idle" : isActive ? "active" : "paused");
-        proctoringEl.state.innerText = isIdle ? "idle" : isActive ? "active" : "paused";
-
-        proctoringEl.params.style.display = isIdle ? "" : "none";
-
-        const meta = [];
-        if (!isIdle) {
-            meta.push(`session=${state.sessionId}`);
-            meta.push(`fps=${state.fps}`, `chunk=${state.chunkDurationMs}ms`, `bitrate=${state.videoBitrate}`);
-            if (state.startedAt) meta.push(`started=${new Date(state.startedAt).toLocaleTimeString()}`);
-        }
-        proctoringEl.meta.innerText = meta.join("  ");
-
-        if (proctoringCountdownTimer) {
-            clearInterval(proctoringCountdownTimer);
-            proctoringCountdownTimer = null;
-        }
-        if (state && state.endsAt) {
-            const tick = () => {
-                const ms = new Date(state.endsAt) - new Date();
-                if (ms <= 0) { proctoringEl.meta.innerText = meta.join("  "); return; }
-                const s = Math.floor(ms / 1000);
-                const mm = String(Math.floor(s / 60)).padStart(2, "0");
-                const ss = String(s % 60).padStart(2, "0");
-                proctoringEl.meta.innerText = meta.concat([`ends in ${mm}:${ss}`]).join("  ");
-            };
-            tick();
-            proctoringCountdownTimer = setInterval(tick, 1000);
-        }
-
-        proctoringEl.buttons.innerHTML = "";
-        const mkBtn = (label, fn) => {
-            const b = document.createElement("button");
-            b.innerText = label;
-            b.onclick = async () => {
-                b.disabled = true;
-                try {
-                    const res = await fn();
-                    if (!res.ok) {
-                        alert(`${label} failed: ${res.status} ${await res.text()}`);
-                    }
-                } finally { b.disabled = false; }
-            };
-            proctoringEl.buttons.appendChild(b);
-        };
-        if (isIdle) {
-            mkBtn("Start", () => adminClient.proctoringStart({
-                chunkDurationMs: parseInt(proctoringEl.chunk.value, 10),
-                fps:             parseInt(proctoringEl.fps.value, 10),
-                videoBitrate:    parseInt(proctoringEl.bitrate.value, 10),
-                endsAt:          proctoringEl.endsAt.value ? new Date(proctoringEl.endsAt.value).toISOString() : null,
-            }));
-        } else if (isActive) {
-            mkBtn("Pause", () => adminClient.proctoringPause());
-            mkBtn("Stop",  () => adminClient.proctoringStop());
-        } else {
-            mkBtn("Resume", () => adminClient.proctoringResume());
-            mkBtn("Stop",   () => adminClient.proctoringStop());
-        }
-    };
-
-    const proctoringTable = document.getElementById("proctoring-table");
-    const proctoringTableBody = proctoringTable.querySelector("tbody");
-    const proctoringSessionsEl = document.getElementById("proctoring-sessions");
-    const STALL_THRESHOLD_MS = 15000;
-
-    const formatBytes = (n) => {
-        if (n < 1024) return `${n}B`;
-        if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
-        return `${(n / (1024 * 1024)).toFixed(1)}MB`;
-    };
-    const formatAgo = (iso) => {
-        if (!iso) return "—";
-        const ms = Date.now() - new Date(iso).getTime();
-        if (ms < 1000) return "now";
-        if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
-        if (ms < 3600_000) return `${Math.floor(ms / 60_000)}m ago`;
-        return `${Math.floor(ms / 3600_000)}h ago`;
-    };
-
-    const renderProctoringDetails = (resp, currentState) => {
-        const sessionId = currentState && currentState.sessionId;
-        const peers = (resp && resp.peers) || [];
-
-        if (peers.length === 0 && !sessionId) {
-            proctoringTable.hidden = true;
-        } else {
-            proctoringTable.hidden = false;
-            proctoringTableBody.innerHTML = "";
-            const sessionActive = currentState && (currentState.active || currentState.paused);
-            peers.sort((a, b) => a.peerName.localeCompare(b.peerName) || a.streamKey.localeCompare(b.streamKey));
-            for (const p of peers) {
-                const tr = document.createElement("tr");
-                let stateLabel = "idle";
-                let pillClass = "offline";
-                if (p.activelyStreaming) {
-                    stateLabel = "live";
-                    pillClass = "live";
-                } else if (p.online) {
-                    stateLabel = "online";
-                }
-
-                const lastMs = p.lastChunkAt ? Date.now() - new Date(p.lastChunkAt).getTime() : null;
-                const stalled = sessionActive && p.online && p.activelyStreaming && lastMs !== null && lastMs > STALL_THRESHOLD_MS;
-                const gone = sessionActive && !p.online && p.committedSeq >= 0;
-                if (p.finalized) tr.classList.add("finalized");
-                if (stalled) {
-                    tr.classList.add("stalled");
-                    pillClass = "stale";
-                    stateLabel = `stalled ${Math.floor(lastMs / 1000)}s`;
-                } else if (gone) {
-                    tr.classList.add("gone");
-                    stateLabel = "peer offline";
-                }
-
-                tr.innerHTML = `
-                    <td>${p.peerName}</td>
-                    <td>${p.streamKey}</td>
-                    <td><span class="pill ${pillClass}">${stateLabel}</span></td>
-                    <td>${p.committedSeq < 0 ? "—" : p.committedSeq}</td>
-                    <td>${formatBytes(p.totalBytes || 0)}</td>
-                    <td>${formatAgo(p.lastChunkAt)}</td>
-                    <td class="files"></td>
-                `;
-                const files = tr.querySelector(".files");
-                const sid = (resp && resp.state && resp.state.sessionId) || sessionId;
-                if (sid && p.committedSeq >= 0) {
-                    const mkDl = (label, file) => {
-                        const a = document.createElement("a");
-                        a.href = "#";
-                        a.className = "dl";
-                        a.innerText = label;
-                        a.onclick = async (ev) => {
-                            ev.preventDefault();
-                            try { await adminClient.proctoringDownload(sid, p.peerName, p.streamKey, file); }
-                            catch (e) { alert(`download failed: ${e}`); }
-                        };
-                        files.appendChild(a);
-                    };
-                    mkDl("↓ raw", "full.webm");
-                    if (p.finalized) mkDl("↓ remuxed", "full.remuxed.webm");
-                }
-                proctoringTableBody.appendChild(tr);
-            }
-        }
-
-        proctoringSessionsEl.innerHTML = "";
-        const sessions = ((resp && resp.sessions) || []).slice().sort((a, b) => b.sessionId.localeCompare(a.sessionId));
-        if (sessions.length > 0) {
-            const label = document.createElement("span");
-            label.innerText = "Sessions: ";
-            label.style.color = "#555";
-            proctoringSessionsEl.appendChild(label);
-            for (const s of sessions) {
-                const row = document.createElement("span");
-                row.className = "session-row" + (s.isActive ? " active" : (s.finalized ? "" : " unfinalized"));
-                row.innerText = s.sessionId + (s.isActive ? " (active)" : (s.finalized ? "" : " ⚠ unfinalized"));
-                if (!s.finalized && !s.isActive) {
-                    const btn = document.createElement("button");
-                    btn.innerText = "Finalize";
-                    btn.style.padding = "0 6px";
-                    btn.onclick = async () => {
-                        btn.disabled = true;
-                        try {
-                            const r = await adminClient.proctoringFinalize(s.sessionId);
-                            if (!r.ok) alert(`finalize failed: ${r.status} ${await r.text()}`);
-                            await refreshProctoringDetails();
-                        } finally { btn.disabled = false; }
-                    };
-                    row.appendChild(btn);
-                }
-                proctoringSessionsEl.appendChild(row);
-            }
-        }
-    };
-
-    let proctoringPollTimer = null;
-    let lastProctoringResp = null;
-    let lastProctoringState = null;
-    const refreshProctoringDetails = async () => {
-        try {
-            const resp = await adminClient.proctoringGet();
-            lastProctoringResp = resp;
-            renderProctoringDetails(resp, resp ? resp.state : null);
-        } catch (e) { console.warn("proctoring poll failed", e); }
-    };
-    const updatePolling = (state) => {
-        const shouldPoll = !!(state && state.sessionId);
-        if (shouldPoll && !proctoringPollTimer) {
-            proctoringPollTimer = setInterval(refreshProctoringDetails, 3000);
-        } else if (!shouldPoll && proctoringPollTimer) {
-            clearInterval(proctoringPollTimer);
-            proctoringPollTimer = null;
-        }
-    };
-
-    client.target.addEventListener("proctoring", ({detail: [state]}) => {
-        lastProctoringState = state;
-        renderProctoring(state);
-        renderProctoringDetails(lastProctoringResp, state);
-        updatePolling(state);
-        // After state transitions, fetch immediately so the table catches up.
-        refreshProctoringDetails();
-    });
-    client.target.addEventListener("initialized", async () => {
-        try {
-            const resp = await adminClient.proctoringGet();
-            lastProctoringResp = resp;
-            const state = resp ? resp.state : null;
-            lastProctoringState = state;
-            renderProctoring(state);
-            renderProctoringDetails(resp, state);
-            updatePolling(state);
-        } catch (e) { console.warn("failed to load initial proctoring state", e); }
-    });
-    renderProctoring(null);
-
-    const renderParticipants = (peers, participantsStatus) => {
-        const allPeersAnchor = document.getElementById("peers");
-        allPeersAnchor.innerHTML = "";
-        if (peers) {
-            peers.sort((a, b) => a.name.localeCompare(b.name));
-            peers.forEach((peer) => {
-                allPeersAnchor.appendChild(renderPeerInfo(peer));
+      // diff for events
+      for (const p of next) {
+        const old = prev.get(p.name);
+        const wasOnline = old ? isOnline(old) : false;
+        const nowOnline = isOnline(p);
+        if (!old) {
+          if (nowOnline) {
+            pushEvent({
+              t: Date.now(), level: "ok", peerName: p.name,
+              html: `<b>${escHtml(p.name)}</b> connected · ${escHtml((p.streamTypes||[]).join(", ")) || "no streams"}`,
             });
+          }
+        } else {
+          if (!wasOnline && nowOnline) {
+            pushEvent({
+              t: Date.now(), level: "ok", peerName: p.name,
+              html: `<b>${escHtml(p.name)}</b> reconnected`,
+            });
+          } else if (wasOnline && !nowOnline) {
+            pushEvent({
+              t: Date.now(), level: "warn", peerName: p.name,
+              html: `<b>${escHtml(p.name)}</b> ping timeout`,
+            });
+          }
+          if (!old.currentRecordId && p.currentRecordId) {
+            pushEvent({
+              t: Date.now(), level: "ok", peerName: p.name,
+              html: `<b>${escHtml(p.name)}</b> recording started · ${escHtml(p.currentRecordId)}`,
+            });
+          } else if (old.currentRecordId && !p.currentRecordId) {
+            pushEvent({
+              t: Date.now(), level: "ok", peerName: p.name,
+              html: `<b>${escHtml(p.name)}</b> recording stopped`,
+            });
+          }
         }
+      }
+      // dropped peers
+      for (const [name, old] of prev.entries()) {
+        if (!nextMap.has(name) && isOnline(old)) {
+          pushEvent({
+            t: Date.now(), level: "warn", peerName: name,
+            html: `<b>${escHtml(name)}</b> removed from peer list`,
+          });
+        }
+      }
 
-        const participantsStatusAnchor = document.getElementById("participants");
-        participantsStatusAnchor.innerHTML = "";
-        participantsStatus && participantsStatus.forEach((peer) => {
-            const pStatus = document.createElement('div');
-            pStatus.className = "participantStatus " + peerState(peer);
-            pStatus.innerText = peer.name;
-            if (peer.connectionsCount > 0) {
-                pStatus.className += " viewed";
-                pStatus.innerText += ` [${peer.connectionsCount}]`
-            }
-            if (peer.streamTypes) {
-                pStatus.innerText += " " + peer.streamTypes.map(t => t.slice(0, 1).toUpperCase()).join("");
-            }
-            if (peer.currentRecordId) {
-                pStatus.innerText += " ⦿";
-            }
-            if (peer.name === selectedParticipantName) {
-                renderSelectedPeer(peer);
-                pStatus.classList.add("selected");
-            }
-            pStatus.onclick = () => {
-                if (selectedParticipantName === peer.name) {
-                    selectedParticipantName = null;
-                    pStatus.classList.remove("selected");
-                    renderSelectedPeer(null);
-                } else {
-                    selectedParticipantName = peer.name;
-                    pStatus.classList.add("selected");
-                    renderSelectedPeer(peer);
-                }
-                renderParticipants(client.peersStatus, client.participantsStatus);
-            };
-            pStatus.style.cursor = "pointer";
-            participantsStatusAnchor.appendChild(pStatus);
-        });
-    }
-    const renderSelectedPeer = (peer) => {
-        const anchor = document.getElementById("selectedParticipant");
-        anchor.innerText = "";
-        if (!peer) {
-            return;
-        }
-        anchor.appendChild(renderPeerInfo(peer, true));
-    }
-    client.target.addEventListener("peers", ({detail: [peersStatus, participantsStatus]}) => {
-        renderParticipants(peersStatus, participantsStatus);
-    });
-
-    const onPeerTrack = (track, peerId, streamType) => {
-        console.log("got video track");
-        const remoteVideo = document.getElementById("video");
-        if (remoteVideo.srcObject !== track) {
-            remoteVideo.srcObject = null;
-            remoteVideo.srcObject = track;
-            remoteVideo.play();
-            console.log(`pc2 received remote stream (peerId ${peerId}) `, track);
-        }
+      prevPartsRef.current = nextMap;
+      setParticipants(next);
+      setPeers(peersStatus || []);
     };
+    client.target.addEventListener("peers", handler);
+    return () => client.target.removeEventListener("peers", handler);
+  }, [pushEvent]);
 
-    function renderPeerInfo(peer, isSelected) {
-        const lastPingStr = peer.lastPing ? (new Date(peer.lastPing)).toLocaleString() : "never";
-        const pStatus = document.createElement('div');
-        if (isSelected) {
-            pStatus.className += "peerInfo participantStatus " + peerState(peer);
-        } else {
-            pStatus.className += "peerInfo " + peerState(peer);
+  // ── proctoring state from WS ──
+  useEffect(() => {
+    const handler = ({ detail: [state] }) => {
+      setProctoringState((prev) => {
+        if (!prev && state && state.sessionId) {
+          pushEvent({ t: Date.now(), level: "ok",
+            html: `Proctoring session <b>${escHtml(state.sessionId)}</b> started · fps ${state.fps} · chunk ${state.chunkDurationMs}ms` });
+        } else if (prev && !state?.sessionId) {
+          pushEvent({ t: Date.now(), level: "ok",
+            html: `Proctoring session <b>${escHtml(prev.sessionId)}</b> stopped` });
+        } else if (prev && state && prev.paused !== state.paused) {
+          pushEvent({ t: Date.now(), level: "warn",
+            html: state.paused ? "Proctoring paused" : "Proctoring resumed" });
         }
-        pStatus.innerText = `${peer.id ?? "???"} [${peer.name}] last ping: ${lastPingStr}`;
+        return state;
+      });
+      // refresh peers list immediately
+      adminClient.proctoringGet().then(setProctoringResp).catch(() => {});
+    };
+    client.target.addEventListener("proctoring", handler);
+    return () => client.target.removeEventListener("proctoring", handler);
+  }, [pushEvent]);
 
-        const connectStreamButton = (streamType, isSpirit) => {
-            const connectButton = document.createElement('button');
-            connectButton.innerText = (isSpirit && "?" || "") + streamType;
-            connectButton.onclick = () => client.connect({peerId: peer.id}, streamType, onPeerTrack);
-            pStatus.appendChild(connectButton);
-            const playerLink = document.createElement('a');
-            playerLink.innerText = "" + (isSpirit && "?" || "") + streamType;
-            playerLink.href = `${window.location}player?` +
-                `peerName=${peer.name}&streamType=${streamType}&credential=${localStorage.getItem("adminCredentials")}`
-            pStatus.appendChild(playerLink);
-        }
-        if (peer.streamTypes && peer.streamTypes.length > 0) {
-            for (const streamType of peer.streamTypes) {
-                connectStreamButton(streamType);
-            }
+  // ── poll proctoring details when session active ──
+  useEffect(() => {
+    if (!proctoringState || !proctoringState.sessionId) return;
+    const id = setInterval(() => {
+      adminClient.proctoringGet().then(setProctoringResp).catch(() => {});
+    }, 3000);
+    return () => clearInterval(id);
+  }, [proctoringState && proctoringState.sessionId]);
 
-            if (isSelected) {
-                const recordButton = document.createElement('button');
-                recordButton.innerText = "Record";
-                recordButton.onclick = () => {
-                    let recordId = prompt("Please enter record id", peer.name + "_test");
-                    adminClient.recordStart(peer.name, recordId, 30 * 1000);
-                }
-                pStatus.appendChild(recordButton);
+  // initial fetch on init
+  useEffect(() => {
+    const handler = async () => {
+      try {
+        const resp = await adminClient.proctoringGet();
+        setProctoringResp(resp);
+        setProctoringState(resp ? resp.state : null);
+      } catch (e) { /* noop */ }
+    };
+    client.target.addEventListener("initialized", handler);
+    return () => client.target.removeEventListener("initialized", handler);
+  }, []);
 
-                if (peer.currentRecordId) {
-                    const recordStopButton = document.createElement('button');
-                    recordStopButton.innerText = "Stop Record";
-                    recordStopButton.onclick = () => {
-                        adminClient.recordStop(peer.name, peer.currentRecordId);
-                    }
-                    pStatus.appendChild(recordStopButton);
-                }
-
-                const recordUploadButton = document.createElement('button');
-                recordUploadButton.innerText = "Record upload";
-                recordUploadButton.onclick = () => {
-                    let recordId = prompt("Please enter record id", peer.name + "_test");
-                    adminClient.recordUpload(peer.name, recordId);
-                }
-                pStatus.appendChild(recordUploadButton);
-            }
-        } else {
-            connectStreamButton("desktop", true);
-            connectStreamButton("webcam", true);
-        }
-        return pStatus;
+  // ── stall detection events ──
+  const prevStalledRef = useRef(new Set());
+  useEffect(() => {
+    const cur = new Set(stalledByName.keys());
+    const prev = prevStalledRef.current;
+    for (const name of cur) {
+      if (!prev.has(name)) {
+        pushEvent({ t: Date.now(), level: "alert", peerName: name,
+          html: `<b>${escHtml(name)}</b> proctoring stream stalled — chunks not advancing` });
+      }
     }
+    for (const name of prev) {
+      if (!cur.has(name)) {
+        pushEvent({ t: Date.now(), level: "ok", peerName: name,
+          html: `<b>${escHtml(name)}</b> stream recovered` });
+      }
+    }
+    prevStalledRef.current = cur;
+  }, [stalledByName, pushEvent]);
 
-    window.addEventListener("close", () => client.close());
+  // ── stats ──
+  const stats = useMemo(() => {
+    let online = 0, offline = 0, disconnected = 0, stalled = 0, recording = 0;
+    for (const p of participants) {
+      if (stalledByName.get(p.name)) stalled++;
+      if (p.currentRecordId) recording++;
+      if (isOnlineAt(p, now)) online++;
+      else if (p.lastPing) disconnected++;
+      else offline++;
+    }
+    return { online, offline, disconnected, stalled, recording, total: participants.length };
+  }, [participants, stalledByName, now]);
+
+  // ── filter / search ──
+  const filteredParts = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return participants.filter((p) => {
+      const stalled = !!stalledByName.get(p.name);
+      const online = isOnlineAt(p, now);
+      if (filter === "online" && !online) return false;
+      if (filter === "offline" && (online || p.lastPing)) return false;
+      if (filter === "alert" && !stalled) return false;
+      if (filter === "rec" && !p.currentRecordId) return false;
+      if (q) {
+        const hay = [
+          p.name,
+          p.teamName || "",
+          p.university || "",
+          (p.streamTypes || []).join(" "),
+        ].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [participants, filter, search, stalledByName, now]);
+
+  const peerByName = useMemo(() => {
+    const m = new Map();
+    for (const p of peers) m.set(p.name, p);
+    return m;
+  }, [peers]);
+
+  const selectedPart = selected ? participants.find((p) => p.name === selected) : null;
+  const selectedPeer = selected ? peerByName.get(selected) : null;
+  const selectedStalled = selected ? !!stalledByName.get(selected) : false;
+
+  // ── stream connection ──
+  const attachTrack = useCallback((track) => {
+    setIsLive(true);
+    // attach in next tick so the <video> element is laid out (overlay gone)
+    requestAnimationFrame(() => {
+      const v = videoRef.current;
+      if (!v) return;
+      v.srcObject = null;
+      v.srcObject = track;
+      const p = v.play();
+      if (p && typeof p.catch === "function") {
+        p.then(() => setNeedsPlay(false)).catch((err) => {
+          console.warn("autoplay blocked, showing play button:", err);
+          setNeedsPlay(true);
+        });
+      }
+    });
+  }, []);
+
+  const onPlayClick = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.play().then(() => setNeedsPlay(false)).catch((e) => console.error("play failed:", e));
+  }, []);
+
+  const clearVideoElement = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    try { v.pause(); } catch (e) {}
+    v.srcObject = null;
+  }, []);
+
+  const onConnectStream = useCallback((st) => {
+    const name = selectedPart?.name || selectedPeer?.name;
+    if (!name) return;
+    // Tear down the previous WebRTC pc and clear the <video> immediately so
+    // we don't keep displaying the previous peer's stream while the new one
+    // negotiates. A monotonically increasing token makes any late "track"
+    // callbacks from the old pc no-ops.
+    const token = ++connectTokenRef.current;
+    client.close();
+    clearVideoElement();
+    setIsLive(false);
+    setNeedsPlay(false);
+
+    // If the peer isn't publishing this streamType right now, skip the offer.
+    // Otherwise the relay's SFU spawns a publisher that waits 20s for a track
+    // that never arrives, blocking the next offer behind it.
+    const available = selectedPart?.streamTypes || selectedPeer?.streamTypes || [];
+    if (!available.includes(st)) return;
+
+    client.connect({ peerId: selectedPeer?.id, peerName: name }, st, (track) => {
+      if (token !== connectTokenRef.current) return; // stale (peer/stream changed)
+      attachTrack(track);
+    });
+  }, [selectedPart, selectedPeer, attachTrack, clearVideoElement]);
+
+  const onCloseStream = useCallback(() => {
+    connectTokenRef.current++; // invalidate any in-flight callback
+    client.close();
+    clearVideoElement();
+    setIsLive(false);
+    setNeedsPlay(false);
+  }, [clearVideoElement]);
+
+  const onPopOut = useCallback((st) => {
+    if (!selectedPart) return;
+    const cred = encodeURIComponent(localStorage.getItem("adminCredentials") || "");
+    const name = encodeURIComponent(selectedPart.name);
+    const stream = encodeURIComponent(st);
+    const url = `/player?peerName=${name}&streamType=${stream}&credential=${cred}`;
+    window.open(url, "_blank", "noopener");
+  }, [selectedPart]);
+
+  // auto-stream on selection / stream-type change
+  useEffect(() => {
+    if (!selected) {
+      onCloseStream();
+      return;
+    }
+    const available = selectedPart?.streamTypes || selectedPeer?.streamTypes || [];
+    if (!available.includes(streamType)) {
+      // Current streamType isn't published by this peer. Switch to one that
+      // is rather than firing a doomed offer (which makes the relay's SFU
+      // wait 20s for a track that never arrives).
+      if (available.length > 0) {
+        setStreamType(available[0]);
+        return; // re-runs once streamType updates
+      }
+      onCloseStream();
+      return;
+    }
+    onConnectStream(streamType);
+    // intentionally not depending on onConnectStream/onCloseStream identity
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, streamType]);
+
+  // ── handlers ──
+  const onStartProctoring = async (params) => {
+    setProctoringOpen(false);
+    try {
+      const r = await adminClient.proctoringStart(params);
+      if (!r.ok) alert(`Start failed: ${r.status} ${await r.text()}`);
+    } catch (e) { alert(`Start failed: ${e}`); }
+  };
+  const onPauseResume = async () => {
+    const fn = proctoringState && proctoringState.paused ? adminClient.proctoringResume() : adminClient.proctoringPause();
+    try {
+      const r = await fn;
+      if (!r.ok) alert(`pause/resume failed: ${r.status}`);
+    } catch (e) { alert(`pause/resume failed: ${e}`); }
+  };
+  const onStopProctoring = async () => {
+    if (!confirm("Stop proctoring session?")) return;
+    try {
+      const r = await adminClient.proctoringStop();
+      if (!r.ok) alert(`Stop failed: ${r.status}`);
+    } catch (e) { alert(`Stop failed: ${e}`); }
+  };
+  const onRecord = async () => {
+    if (!selectedPart) return;
+    const id = prompt("Record id", `${selectedPart.name}_${Date.now().toString(36)}`);
+    if (!id) return;
+    try {
+      const r = await adminClient.recordStart(selectedPart.name, id, 30 * 1000);
+      if (!r.ok) alert(`record start failed: ${r.status} ${await r.text()}`);
+    } catch (e) { alert(`record start failed: ${e}`); }
+  };
+  const onStopRecord = async () => {
+    if (!selectedPart || !selectedPart.currentRecordId) return;
+    try {
+      const r = await adminClient.recordStop(selectedPart.name, selectedPart.currentRecordId);
+      if (!r.ok) alert(`record stop failed: ${r.status} ${await r.text()}`);
+    } catch (e) { alert(`record stop failed: ${e}`); }
+  };
+  const onPlayersDisconnect = async () => {
+    if (!selectedPart) return;
+    if (!confirm(`Disconnect all players from ${selectedPart.name}?`)) return;
+    try {
+      const r = await adminClient.playersDisconnect(selectedPart.name);
+      if (!r.ok) alert(`disconnect failed: ${r.status}`);
+    } catch (e) { alert(`disconnect failed: ${e}`); }
+  };
+  const onDownload = async (sessionId, peerName, streamKey, file) => {
+    try { await adminClient.proctoringDownload(sessionId, peerName, streamKey, file); }
+    catch (e) { alert(`download failed: ${e}`); }
+  };
+  const onFinalize = async (sessionId) => {
+    try {
+      const r = await adminClient.proctoringFinalize(sessionId);
+      if (!r.ok) alert(`finalize failed: ${r.status} ${await r.text()}`);
+      else {
+        const resp = await adminClient.proctoringGet();
+        setProctoringResp(resp);
+      }
+    } catch (e) { alert(`finalize failed: ${e}`); }
+  };
+
+  const onCellHover = useCallback((data) => setTooltip(data), []);
+
+  // keyboard shortcuts
+  useEffect(() => {
+    const h = (e) => {
+      if (e.key === "/" && document.activeElement.tagName !== "INPUT") {
+        e.preventDefault();
+        document.getElementById("search-input")?.focus();
+      } else if (e.key === "Escape") {
+        setSelected(null);
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
+  // grid columns based on count
+  const cols = Math.min(14, Math.max(6, Math.round(Math.sqrt((participants.length || 1) * 1.1))));
+
+  const filterCounts = {
+    all:     participants.length,
+    online:  stats.online,
+    offline: stats.offline + stats.disconnected,
+    alert:   stats.stalled,
+    rec:     stats.recording,
+  };
+
+  const sessionRemainMs = proctoringState && proctoringState.endsAt
+    ? new Date(proctoringState.endsAt).getTime() - Date.now() : null;
+
+  const sessions = (proctoringResp && proctoringResp.sessions) || [];
+  const sessionsToShow = sessions
+    .slice()
+    .sort((a, b) => b.sessionId.localeCompare(a.sessionId))
+    .filter((s) => s.isActive || !s.finalized)
+    .slice(0, 6);
+
+  return (
+    <div className="app">
+      {/* HEADER */}
+      <div className="header">
+        <div className="brand">
+          <div className="mark">{brandMark}</div>
+          <div>
+            <div className="name">{title}</div>
+            <div className="sub">Proctoring Station · {fmtClockShort(new Date())}</div>
+          </div>
+        </div>
+        <div className="session-meta">
+          <div className="cell">
+            <div className="lbl">Online</div>
+            <div className="val lg ok">{stats.online}<span style={{ color: "var(--mute)", fontSize: 11 }}> / {stats.total}</span></div>
+          </div>
+          <div className="cell">
+            <div className="lbl">Offline</div>
+            <div className="val lg">{stats.offline + stats.disconnected}</div>
+          </div>
+          <div className="cell">
+            <div className="lbl">Alerts</div>
+            <div className={"val lg " + (stats.stalled > 0 ? "alert" : "")}>{stats.stalled}</div>
+          </div>
+          <div className="cell">
+            <div className="lbl">Recording</div>
+            <div className="val lg">{stats.recording}</div>
+          </div>
+          <div className="cell" style={{ minWidth: 180 }}>
+            <div className="lbl">Session</div>
+            <div className="val">
+              {proctoringState && proctoringState.sessionId
+                ? <span className={proctoringState.paused ? "" : "ok"}>
+                    ● {proctoringState.sessionId} · {proctoringState.paused ? "PAUSED" : (sessionRemainMs != null ? fmtMSS(sessionRemainMs) : "live")}
+                  </span>
+                : <span style={{ color: "var(--mute)" }}>idle</span>}
+            </div>
+          </div>
+        </div>
+        <div className="header-actions">
+          {!(proctoringState && proctoringState.sessionId) && (
+            <button className="pbtn primary" onClick={() => setProctoringOpen(true)}>
+              <span className="dot"></span>Start proctoring
+            </button>
+          )}
+          {proctoringState && proctoringState.sessionId && !proctoringState.paused && (
+            <button className="pbtn" onClick={onPauseResume}>Pause</button>
+          )}
+          {proctoringState && proctoringState.paused && (
+            <button className="pbtn primary" onClick={onPauseResume}>Resume</button>
+          )}
+          {proctoringState && proctoringState.sessionId && (
+            <button className="pbtn danger" onClick={onStopProctoring}>Stop</button>
+          )}
+        </div>
+      </div>
+
+      {/* WALL */}
+      <div className="wall">
+        <div className="wall-toolbar">
+          <div className="title">Participant Wall</div>
+          <div className="count">{filteredParts.length} / {participants.length}</div>
+          <div className="filter-tabs">
+            {[["all","All"],["online","Online"],["offline","Offline"],["alert","Alert"],["rec","Recording"]].map(([k, label]) => (
+              <button key={k} className={filter === k ? "active" : ""} onClick={() => setFilter(k)}>
+                {label}<span className="num">{filterCounts[k]}</span>
+              </button>
+            ))}
+          </div>
+          <div className="spacer"></div>
+          <div className="search">
+            <input id="search-input" placeholder="search peer / team / university…"
+              value={search} onChange={(e) => setSearch(e.target.value)}/>
+            <span className="k">/</span>
+          </div>
+        </div>
+        <div className="wall-grid-wrap">
+          {filteredParts.length === 0 ? (
+            <div className="wall-empty">
+              {participants.length === 0 ? "── waiting for participants ──" : "── no peers match this filter ──"}
+            </div>
+          ) : (
+            <div className="wall-grid" style={{ "--cols": cols }}>
+              {filteredParts.map((p) => (
+                <ParticipantCell
+                  key={p.name}
+                  p={p}
+                  peer={peerByName.get(p.name)}
+                  stalled={!!stalledByName.get(p.name)}
+                  selected={p.name === selected}
+                  now={now}
+                  onClick={() => setSelected(p.name === selected ? null : p.name)}
+                  onHover={onCellHover}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="wall-status">
+          <div className="item"><span className="pip" style={{ background: "var(--ok)" }}></span>active <b>{stats.online}</b></div>
+          <div className="item"><span className="pip" style={{ background: "var(--warn)" }}></span>disconnected <b>{stats.disconnected}</b></div>
+          <div className="item"><span className="pip" style={{ background: "var(--mute-2)" }}></span>offline <b>{stats.offline}</b></div>
+          <div className="item"><span className="pip" style={{ background: "var(--alert)" }}></span>stalled <b>{stats.stalled}</b></div>
+          <div className="item" style={{ marginLeft: "auto" }}>cols <b>{cols}</b> · grid <b>{participants.length}</b></div>
+        </div>
+      </div>
+
+      {/* DETAIL RAIL */}
+      <div className="rail">
+        <FocusPanel
+          p={selectedPart}
+          peer={selectedPeer}
+          stalled={selectedStalled}
+          proctoringPeers={proctoringPeers}
+          sessionId={proctoringState && proctoringState.sessionId}
+          streamType={streamType}
+          setStreamType={setStreamType}
+          videoRef={videoRef}
+          isLive={isLive}
+          needsPlay={needsPlay}
+          onPlayClick={onPlayClick}
+          onConnectStream={onConnectStream}
+          onCloseStream={onCloseStream}
+          onRecord={onRecord}
+          onStopRecord={onStopRecord}
+          onClearSelection={() => setSelected(null)}
+          onDownload={onDownload}
+          onPlayersDisconnect={onPlayersDisconnect}
+          onPopOut={onPopOut}
+        />
+        {sessionsToShow.length > 0 && (
+          <div className="sessions-strip">
+            <span className="lbl">Sessions</span>
+            {sessionsToShow.map((s) => (
+              <span key={s.sessionId}
+                className={"sess-pill " + (s.isActive ? "active" : (s.finalized ? "" : "unfinalized"))}>
+                {s.sessionId}
+                {s.isActive ? " · live" : (s.finalized ? "" : " · ⚠")}
+                {!s.finalized && !s.isActive && (
+                  <button onClick={() => onFinalize(s.sessionId)}>finalize</button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+        <EventFeed
+          events={events}
+          onJump={(name) => setSelected(name)}
+        />
+      </div>
+
+      <CellTooltip data={tooltip}/>
+
+      <ProctoringDialog
+        open={proctoringOpen}
+        onClose={() => setProctoringOpen(false)}
+        onStart={onStartProctoring}
+      />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+window.addEventListener("close", () => client.close());
 </script>
 </body>
 </html>

@@ -8,6 +8,7 @@ import (
 
 	"github.com/fasthttp/websocket"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sdpconv"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"github.com/pion/webrtc/v4"
 )
@@ -32,7 +33,7 @@ func (ctx *ConnectionCtx) SendICECandidate(candidate *webrtc.ICECandidate) error
 		Event: api.PlayerMessageEventPlayerIce,
 		Ice: &api.IceMessage{
 			PeerName:  &ctx.config.PeerName,
-			Candidate: candidate.ToJSON(),
+			Candidate: sdpconv.FromPionICE(candidate.ToJSON()),
 		},
 	})
 }
@@ -97,7 +98,11 @@ func (g *grabberPlayerClient) ConnectToPeer(ctx_ context.Context, cfg Connection
 
 	if err := ws.WriteJSON(api.PlayerMessage{
 		Event: api.PlayerMessageEventOffer,
-		Offer: &api.OfferMessage{Offer: webrtcOffer, PeerName: &cfg.PeerName, StreamType: cfg.StreamType},
+		Offer: &api.OfferMessage{
+			Offer:      sdpconv.FromPionSDP(webrtcOffer),
+			PeerName:   &cfg.PeerName,
+			StreamType: cfg.StreamType,
+		},
 	}); err != nil {
 		return err
 	}
@@ -110,11 +115,11 @@ func (g *grabberPlayerClient) ConnectToPeer(ctx_ context.Context, cfg Connection
 
 		switch {
 		case message.Event == api.PlayerMessageEventOfferAnswer && message.OfferAnswer != nil:
-			if err = cfg.OnOfferAnswer(ctx, message.OfferAnswer.Answer); err != nil {
+			if err = cfg.OnOfferAnswer(ctx, sdpconv.ToPionSDP(message.OfferAnswer.Answer)); err != nil {
 				return err
 			}
 		case message.Event == api.PlayerMessageEventGrabberIce && message.Ice != nil:
-			if err = cfg.OnGrabberIce(ctx, message.Ice.Candidate); err != nil {
+			if err = cfg.OnGrabberIce(ctx, sdpconv.ToPionICE(message.Ice.Candidate)); err != nil {
 				return err
 			}
 		}

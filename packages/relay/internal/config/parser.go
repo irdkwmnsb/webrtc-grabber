@@ -1,11 +1,14 @@
 package config
 
 import (
+	"encoding/json"
+	"errors"
 	"net/netip"
 	"os"
 	"strings"
 
 	"github.com/pion/webrtc/v4"
+	"gopkg.in/yaml.v3"
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 )
@@ -15,6 +18,7 @@ type RawServerConfig struct {
 	Port                *int    `yaml:"port" json:"port"`
 	PublicIP            *string `yaml:"publicIp" json:"publicIp"`
 	GrabberPingInterval *int    `yaml:"grabberPingInterval" json:"grabberPingInterval"`
+	Title               *string `yaml:"title" json:"title"`
 }
 
 func (r RawServerConfig) ToDomain() ServerConfig {
@@ -31,16 +35,49 @@ func (r RawServerConfig) ToDomain() ServerConfig {
 	if r.GrabberPingInterval != nil {
 		cfg.GrabberPingInterval = *r.GrabberPingInterval
 	}
+	if r.Title != nil {
+		cfg.Title = *r.Title
+	}
 	return cfg
 }
 
+type RawParticipantInfo struct {
+	Name       string `yaml:"name" json:"name"`
+	TeamName   string `yaml:"teamName" json:"teamName"`
+	University string `yaml:"university" json:"university"`
+}
+
+func (r *RawParticipantInfo) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		return node.Decode(&r.Name)
+	}
+	type plain RawParticipantInfo
+	return node.Decode((*plain)(r))
+}
+
+func (r *RawParticipantInfo) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		r.Name = s
+		return nil
+	}
+	type plain RawParticipantInfo
+	if err := json.Unmarshal(data, (*plain)(r)); err != nil {
+		return err
+	}
+	if r.Name == "" {
+		return errors.New("participant entry must specify a name")
+	}
+	return nil
+}
+
 type RawSecurityConfig struct {
-	PlayerCredential  *string   `yaml:"adminCredential" json:"adminCredential"`
-	TLSCrtFile        *string   `yaml:"tlsCrtFile" json:"tlsCrtFile"`
-	TLSKeyFile        *string   `yaml:"tlsKeyFile" json:"tlsKeyFile"`
-	UploadSecret      *string   `yaml:"uploadSecret" json:"uploadSecret"`
-	Participants      *[]string `yaml:"participants" json:"participants"`
-	AdminsRawNetworks *[]string `yaml:"adminsNetworks" json:"adminsNetworks"`
+	PlayerCredential  *string               `yaml:"adminCredential" json:"adminCredential"`
+	TLSCrtFile        *string               `yaml:"tlsCrtFile" json:"tlsCrtFile"`
+	TLSKeyFile        *string               `yaml:"tlsKeyFile" json:"tlsKeyFile"`
+	UploadSecret      *string               `yaml:"uploadSecret" json:"uploadSecret"`
+	Participants      *[]RawParticipantInfo `yaml:"participants" json:"participants"`
+	AdminsRawNetworks *[]string             `yaml:"adminsNetworks" json:"adminsNetworks"`
 }
 
 func (r RawSecurityConfig) ToDomain() (SecurityConfig, error) {
@@ -51,7 +88,18 @@ func (r RawSecurityConfig) ToDomain() (SecurityConfig, error) {
 	cfg.UploadSecret = r.UploadSecret
 
 	if r.Participants != nil {
-		cfg.Participants = *r.Participants
+		out := make([]ParticipantInfo, 0, len(*r.Participants))
+		for _, p := range *r.Participants {
+			if p.Name == "" {
+				return SecurityConfig{}, errors.New("participant entry must specify a name")
+			}
+			out = append(out, ParticipantInfo{
+				Name:       p.Name,
+				TeamName:   p.TeamName,
+				University: p.University,
+			})
+		}
+		cfg.Participants = out
 	}
 
 	if r.AdminsRawNetworks != nil {

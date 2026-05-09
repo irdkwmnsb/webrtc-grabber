@@ -5,20 +5,21 @@ import (
 	"time"
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 )
 
 type Storage struct {
 	peers        map[sockets.SocketID]api.Peer
-	participants []string
+	participants []config.ParticipantInfo
 	mutex        sync.RWMutex
 }
 
 func NewStorage() *Storage {
 	return &Storage{
 		peers:        make(map[sockets.SocketID]api.Peer),
-		participants: make([]string, 0),
+		participants: make([]config.ParticipantInfo, 0),
 	}
 }
 
@@ -102,15 +103,40 @@ func (s *Storage) getAll() []api.Peer {
 func (s *Storage) getParticipantsStatus() []api.Peer {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
-	var peers []api.Peer
+	listed := make(map[string]struct{}, len(s.participants))
+	result := make([]api.Peer, 0, len(s.participants))
+
 	for _, participant := range s.participants {
-		if peer, ok := s.getPeerByNameLocked(participant); ok {
-			peers = append(peers, peer)
+		listed[participant.Name] = struct{}{}
+		if peer, ok := s.getPeerByNameLocked(participant.Name); ok {
+			peer.TeamName = participant.TeamName
+			peer.University = participant.University
+			result = append(result, peer)
 		} else {
-			peers = append(peers, api.Peer{Name: participant})
+			result = append(result, api.Peer{
+				Name:       participant.Name,
+				TeamName:   participant.TeamName,
+				University: participant.University,
+			})
 		}
 	}
-	return peers
+
+	unlisted := make(map[string]api.Peer)
+	for _, peer := range s.peers {
+		if _, ok := listed[peer.Name]; ok {
+			continue
+		}
+		if existing, ok := unlisted[peer.Name]; ok {
+			if existing.LastPing != nil && (peer.LastPing == nil || existing.LastPing.After(*peer.LastPing)) {
+				continue
+			}
+		}
+		unlisted[peer.Name] = peer
+	}
+	for _, peer := range unlisted {
+		result = append(result, peer)
+	}
+	return result
 }
 
 func (s *Storage) peerNamesBySocketId() map[sockets.SocketID]string {
@@ -123,7 +149,7 @@ func (s *Storage) peerNamesBySocketId() map[sockets.SocketID]string {
 	return m
 }
 
-func (s *Storage) setParticipants(participants []string) {
+func (s *Storage) setParticipants(participants []config.ParticipantInfo) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.participants = participants
