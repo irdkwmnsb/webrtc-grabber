@@ -1,25 +1,52 @@
 package sfu
 
 import (
+	"context"
 	"sync"
+	"time"
 
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 	"github.com/pion/webrtc/v4"
 )
 
 type Publisher struct {
-	subscribers     map[*webrtc.PeerConnection]struct{}
-	broadcasters    []*TrackBroadcaster
-	pc              *webrtc.PeerConnection
-	setupChan       chan struct{} // TODO: think about this field and about setupInProgress field (atomic)
-	setupInProgress int32
-	mu              sync.RWMutex
+	ID         sockets.SocketID
+	StreamType string
+	Key        string
+
+	subscribers  map[*webrtc.PeerConnection]struct{}
+	broadcasters []*TrackBroadcaster
+	pc           *webrtc.PeerConnection
+
+	setupChan chan struct{}
+	setupOnce sync.Once
+
+	mu sync.RWMutex
 }
 
-func NewPublisher() *Publisher {
+func NewPublisher(id sockets.SocketID, streamType string) *Publisher {
 	return &Publisher{
+		ID:           id,
+		StreamType:   streamType,
+		Key:          PublisherKey(id, streamType),
 		subscribers:  make(map[*webrtc.PeerConnection]struct{}),
 		broadcasters: make([]*TrackBroadcaster, 0),
 		setupChan:    make(chan struct{}),
+	}
+}
+
+func (p *Publisher) FinishSetup() {
+	p.setupOnce.Do(func() { close(p.setupChan) })
+}
+
+func (p *Publisher) WaitSetup(ctx context.Context, timeout time.Duration) bool {
+	select {
+	case <-p.setupChan:
+		return true
+	case <-time.After(timeout):
+		return false
+	case <-ctx.Done():
+		return false
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -134,6 +135,33 @@ func (tb *TrackBroadcaster) writeLoop() {
 				metrics.RTPPacketsTotal.WithLabelValues("forwarded").Inc()
 				metrics.RTPBytesTotal.WithLabelValues("forwarded").Add(float64(pkt.n))
 				bufferPool.Put(pkt.buf)
+			}
+		}
+	}
+}
+
+func (tb *TrackBroadcaster) RelayRTCP(sender *webrtc.RTPSender, publisherPC *webrtc.PeerConnection) {
+	rtcpBuf := make([]byte, BufferSize)
+	for {
+		n, _, err := sender.Read(rtcpBuf)
+		if err != nil {
+			return
+		}
+		packets, err := rtcp.Unmarshal(rtcpBuf[:n])
+		if err != nil {
+			continue
+		}
+		for _, pkt := range packets {
+			switch pkt.(type) {
+			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
+				metrics.PLIRequestsTotal.Inc()
+				if err := publisherPC.WriteRTCP([]rtcp.Packet{
+					&rtcp.PictureLossIndication{MediaSSRC: tb.remoteSSRC},
+				}); err != nil {
+					return
+				}
+			case *rtcp.TransportLayerNack:
+				metrics.NACKRequestsTotal.Inc()
 			}
 		}
 	}

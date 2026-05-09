@@ -103,21 +103,40 @@ func (s *Storage) getAll() []api.Peer {
 func (s *Storage) getParticipantsStatus() []api.Peer {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
-	var peers []api.Peer
+	listed := make(map[string]struct{}, len(s.participants))
+	result := make([]api.Peer, 0, len(s.participants))
+
 	for _, participant := range s.participants {
+		listed[participant.Name] = struct{}{}
 		if peer, ok := s.getPeerByNameLocked(participant.Name); ok {
 			peer.TeamName = participant.TeamName
 			peer.University = participant.University
-			peers = append(peers, peer)
+			result = append(result, peer)
 		} else {
-			peers = append(peers, api.Peer{
+			result = append(result, api.Peer{
 				Name:       participant.Name,
 				TeamName:   participant.TeamName,
 				University: participant.University,
 			})
 		}
 	}
-	return peers
+
+	unlisted := make(map[string]api.Peer)
+	for _, peer := range s.peers {
+		if _, ok := listed[peer.Name]; ok {
+			continue
+		}
+		if existing, ok := unlisted[peer.Name]; ok {
+			if existing.LastPing != nil && (peer.LastPing == nil || existing.LastPing.After(*peer.LastPing)) {
+				continue
+			}
+		}
+		unlisted[peer.Name] = peer
+	}
+	for _, peer := range unlisted {
+		result = append(result, peer)
+	}
+	return result
 }
 
 func (s *Storage) peerNamesBySocketId() map[sockets.SocketID]string {

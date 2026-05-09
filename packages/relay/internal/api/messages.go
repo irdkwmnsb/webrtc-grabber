@@ -2,7 +2,6 @@ package api
 
 import (
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/proctoring"
-	"github.com/pion/webrtc/v4"
 )
 
 type PlayerMessageEvent string
@@ -40,6 +39,18 @@ const (
 	GrabberMessageEventProctoringResume  = GrabberMessageEvent("proctoring_resume")
 	GrabberMessageEventProctoringStop    = GrabberMessageEvent("proctoring_stop")
 )
+
+type SDP struct {
+	Type string `json:"type"`
+	SDP  string `json:"sdp"`
+}
+
+type ICECandidate struct {
+	Candidate        string  `json:"candidate"`
+	SDPMid           *string `json:"sdpMid,omitempty"`
+	SDPMLineIndex    *uint16 `json:"sdpMLineIndex,omitempty"`
+	UsernameFragment *string `json:"usernameFragment,omitempty"`
+}
 
 type PingMessage struct {
 	Timestamp int64 `json:"timestamp"`
@@ -95,21 +106,21 @@ type PcConfigMessage struct {
 }
 
 type OfferMessage struct {
-	PeerId     *string                   `json:"peerId"`
-	PeerName   *string                   `json:"peerName"`
-	Offer      webrtc.SessionDescription `json:"offer"`
-	StreamType string                    `json:"streamType"`
+	PeerId     *string `json:"peerId"`
+	PeerName   *string `json:"peerName"`
+	Offer      SDP     `json:"offer"`
+	StreamType string  `json:"streamType"`
 }
 
 type OfferAnswerMessage struct {
-	PeerId string                    `json:"peerId"`
-	Answer webrtc.SessionDescription `json:"answer"`
+	PeerId string `json:"peerId"`
+	Answer SDP    `json:"answer"`
 }
 
 type IceMessage struct {
-	PeerId    *string                 `json:"peerId"`
-	PeerName  *string                 `json:"peerName"`
-	Candidate webrtc.ICECandidateInit `json:"candidate"`
+	PeerId    *string      `json:"peerId"`
+	PeerName  *string      `json:"peerName"`
+	Candidate ICECandidate `json:"candidate"`
 }
 
 type RecordStartMessage struct {

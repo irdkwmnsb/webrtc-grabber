@@ -43,7 +43,7 @@ func NewServer(parent context.Context, cfg *config.AppConfig, app *fiber.App) (*
 
 	ctx, cancel := context.WithCancel(parent)
 
-	sfu, err := sfu.NewLocalSFU(ctx, &cfg.WebRTC, cfg.Server.PublicIP)
+	sfu, err := sfu.NewLocalSFU(ctx, &cfg.WebRTC, cfg.Server.PublicIP, 0)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -84,7 +84,56 @@ func NewServer(parent context.Context, cfg *config.AppConfig, app *fiber.App) (*
 
 	metrics.StartTime.Set(float64(time.Now().Unix()))
 
+	for i := range sfu.NumEventShards() {
+		go server.runEventConsumer(sfu.EventShard(i))
+	}
+
 	return server, nil
+}
+
+func (s *Server) runEventConsumer(events <-chan sfu.Event) {
+	for event := range events {
+		s.dispatchEvent(event)
+	}
+}
+
+func (s *Server) dispatchEvent(event sfu.Event) {
+	switch event.Kind {
+	case sfu.EventPublisherOffer:
+		sock := s.grabberSockets.GetSocket(event.PublisherID)
+		if sock == nil {
+			return
+		}
+		key := sfu.PublisherKey(event.PublisherID, event.StreamType)
+		_ = sock.WriteJSON(api.GrabberMessage{
+			Event: api.GrabberMessageEventOffer,
+			Offer: &api.OfferMessage{
+				Offer:      *event.SDP,
+				PeerId:     &key,
+				StreamType: event.StreamType,
+			},
+		})
+	case sfu.EventPublisherICECandidate:
+		sock := s.grabberSockets.GetSocket(event.PublisherID)
+		if sock == nil {
+			return
+		}
+		key := sfu.PublisherKey(event.PublisherID, event.StreamType)
+		_ = sock.WriteJSON(api.GrabberMessage{
+			Event: api.GrabberMessageEventPlayerIce,
+			Ice:   &api.IceMessage{PeerId: &key, Candidate: *event.ICE},
+		})
+	case sfu.EventSubscriberICECandidate:
+		sock := s.playersSockets.GetSocket(event.SubscriberID)
+		if sock == nil {
+			return
+		}
+		key := sfu.PublisherKey(event.PublisherID, event.StreamType)
+		_ = sock.WriteJSON(api.PlayerMessage{
+			Event: api.PlayerMessageEventGrabberIce,
+			Ice:   &api.IceMessage{PeerId: &key, Candidate: *event.ICE},
+		})
+	}
 }
 
 func (s *Server) Close() {
@@ -303,7 +352,7 @@ func (s *Server) listenPlayerSocket(c *websocket.Conn, createCallback func(socke
 	defer func() {
 		s.playersSockets.CloseSocket(socketID)
 		timer.Stop()
-		s.sfu.DeleteSubscriber(socketID)
+		s.sfu.Unsubscribe(socketID)
 		metrics.ActivePlayers.Dec()
 		metrics.ActiveWebSocketConnections.Dec()
 		metrics.WebSocketDisconnectionsTotal.Inc()
@@ -340,46 +389,42 @@ func (s *Server) processPlayerMessage(c sockets.Socket, id sockets.SocketID,
 		if m.Offer == nil {
 			return nil
 		}
-		slog.Debug("playerMessage", "streamType", m.Offer.StreamType)
+
 		var grabberSocketID sockets.SocketID
 		if m.Offer.PeerId != nil {
 			grabberSocketID = sockets.SocketID(*m.Offer.PeerId)
 		} else if m.Offer.PeerName != nil {
-			if peer, ok := s.storage.getPeerByName(*m.Offer.PeerName); ok {
-				slog.Debug("stream type", "streamType", m.Offer.StreamType)
-				if !slices.Contains(peer.StreamTypes, api.StreamType(m.Offer.StreamType)) {
-					_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
-					slog.Warn("no such stream type in grabber", "streamType", m.Offer.StreamType, "peerName", *m.Offer.PeerName)
-					return nil
-				}
-				grabberSocketID = peer.SocketId
+			peer, ok := s.storage.getPeerByName(*m.Offer.PeerName)
+			if !ok {
+				_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
+				return nil
 			}
+			if !slices.Contains(peer.StreamTypes, api.StreamType(m.Offer.StreamType)) {
+				_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
+				slog.Warn("no such stream type in grabber", "streamType", m.Offer.StreamType, "peerName", *m.Offer.PeerName)
+				return nil
+			}
+			grabberSocketID = peer.SocketId
 		} else {
 			_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
-			slog.Warn("offer missing PeerId or PeerName")
 			return nil
 		}
 
-		streamType := m.Offer.StreamType
-
-		grabberConn := s.grabberSockets.GetSocket(grabberSocketID)
-		if grabberConn == nil {
+		if s.grabberSockets.GetSocket(grabberSocketID) == nil {
 			_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
 			return nil
 		}
 
-		publisherKey := sfu.PublisherKey(grabberSocketID, streamType)
-
-		subscriberCallback := createSubscriberCallback(m, id, c, streamType, publisherKey)
-
-		publisherCallbacks := sfu.PublisherCallbacks{
-			OnOffer:        createOnOfferCallback(grabberConn, streamType),
-			OnICECandidate: createOnICECandidateCallback(grabberConn),
-		}
-
-		if err := s.sfu.AddSubscriber(id, grabberSocketID, streamType, subscriberCallback, publisherCallbacks); err != nil {
+		answer, err := s.sfu.Subscribe(id, grabberSocketID, m.Offer.StreamType, m.Offer.Offer)
+		if err != nil {
 			_ = c.WriteJSON(api.PlayerMessage{Event: api.PlayerMessageEventOfferFailed})
+			return nil
 		}
+		publisherKey := sfu.PublisherKey(grabberSocketID, m.Offer.StreamType)
+		_ = c.WriteJSON(api.PlayerMessage{
+			Event:       api.PlayerMessageEventOfferAnswer,
+			OfferAnswer: &api.OfferAnswerMessage{PeerId: publisherKey, Answer: answer},
+		})
 	case api.PlayerMessageEventPlayerIce:
 		if m.Ice == nil {
 			return nil
@@ -421,7 +466,7 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn, peerName string) {
 	metrics.WebSocketConnectionsTotal.Inc()
 	defer func() {
 		s.grabberSockets.CloseSocket(socketID)
-		s.sfu.DeletePublisher(socketID)
+		s.sfu.DropPublisher(socketID)
 		s.storage.removePeer(socketID)
 		metrics.ActiveAgents.Dec()
 		metrics.ActiveWebSocketConnections.Dec()
@@ -498,16 +543,13 @@ func (s *Server) processGrabberMessage(id sockets.SocketID, m api.GrabberMessage
 		if m.OfferAnswer == nil || m.OfferAnswer.PeerId == "" {
 			return nil
 		}
-		grabberKey := m.OfferAnswer.PeerId
-		s.sfu.OfferAnswerPublisher(grabberKey, m.OfferAnswer.Answer)
+		s.sfu.PublisherAnswer(m.OfferAnswer.PeerId, m.OfferAnswer.Answer)
 
 	case api.GrabberMessageEventGrabberIce:
 		if m.Ice == nil || m.Ice.PeerId == nil {
-			slog.Warn("invalid IceMessage: missing data")
 			return nil
 		}
-		grabberKey := *m.Ice.PeerId
-		s.sfu.AddICECandidatePublisher(grabberKey, m.Ice.Candidate)
+		s.sfu.PublisherICE(*m.Ice.PeerId, m.Ice.Candidate)
 	}
 	return nil
 }
