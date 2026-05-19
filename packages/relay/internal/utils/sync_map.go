@@ -37,14 +37,14 @@ func (sw *SyncMapWrapper[K, V]) Delete(key K) {
 }
 
 func (sw *SyncMapWrapper[K, V]) Range(f func(key K, value V) bool) {
-	sw.sm.Range(func(key, value interface{}) bool {
+	sw.sm.Range(func(key, value any) bool {
 		return f(key.(K), value.(V))
 	})
 }
 
 func (sw *SyncMapWrapper[K, V]) Len() int {
 	count := 0
-	sw.sm.Range(func(key, value interface{}) bool {
+	sw.sm.Range(func(key, value any) bool {
 		count++
 		return true
 	})
@@ -52,7 +52,7 @@ func (sw *SyncMapWrapper[K, V]) Len() int {
 }
 
 func (sw *SyncMapWrapper[K, V]) Clear() {
-	sw.sm.Range(func(key, value interface{}) bool {
+	sw.sm.Range(func(key, value any) bool {
 		sw.sm.Delete(key)
 		return true
 	})

@@ -180,10 +180,7 @@ func setupPublisherPC(
 
 func feedSyntheticVP8(ctx context.Context, track *webrtc.TrackLocalStaticSample, peerName string) {
 	frameInterval := time.Second / time.Duration(*fps)
-	bytesPerFrame := (*videoKbps * 1000) / (8 * *fps)
-	if bytesPerFrame < 64 {
-		bytesPerFrame = 64
-	}
+	bytesPerFrame := max((*videoKbps*1000)/(8**fps), 64)
 	buf := make([]byte, bytesPerFrame)
 
 	t := time.NewTicker(frameInterval)

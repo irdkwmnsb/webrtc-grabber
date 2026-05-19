@@ -82,14 +82,12 @@ func main() {
 	pubReady := make(chan string, *numPublishers)
 	for i := 0; i < *numPublishers; i++ {
 		peerName := fmt.Sprintf("loadbot-%d", i)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			err := runPublisher(rootCtx, wsBase, peerName, pubReady)
 			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 				slog.Error("publisher exited", "peer", peerName, "error", err)
 			}
-		}()
+		})
 	}
 
 	readyPeers, ok := waitForPublishers(rootCtx, pubReady, *numPublishers)
@@ -112,14 +110,12 @@ func main() {
 		}
 		peerName := readyPeers[i%len(readyPeers)]
 		idx := i
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			err := runSubscriber(rootCtx, wsBase, idx, peerName)
 			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 				slog.Debug("subscriber exited", "id", idx, "peer", peerName, "error", err)
 			}
-		}()
+		})
 		if *rampDelay > 0 {
 			select {
 			case <-time.After(*rampDelay):

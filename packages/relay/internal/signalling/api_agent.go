@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,12 +47,7 @@ func proctoringLockKey(sessionId, peerName, streamKey string) string {
 }
 
 func isProctoringStreamKey(s string) bool {
-	for _, k := range proctoringStreamKeys() {
-		if s == k {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(proctoringStreamKeys(), s)
 }
 
 func proctoringLock(key string) *sync.Mutex {

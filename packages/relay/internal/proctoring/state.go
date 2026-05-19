@@ -234,10 +234,7 @@ func (m *Manager) scheduleAutoStopLocked() {
 	if m.state.SessionId == "" || m.state.EndsAt == nil {
 		return
 	}
-	delay := time.Until(*m.state.EndsAt)
-	if delay < 0 {
-		delay = 0
-	}
+	delay := max(time.Until(*m.state.EndsAt), 0)
 	pinned := m.state.SessionId
 	m.autoStopTimer = time.AfterFunc(delay, func() {
 		m.mu.RLock()

@@ -46,7 +46,7 @@ func LoadAppConfig(dir string) (*AppConfig, error) {
 	return &cfg, nil
 }
 
-func loadFileInto(dir, filenameBase string, target interface{}) error {
+func loadFileInto(dir, filenameBase string, target any) error {
 	basePath := filepath.Join(dir, filenameBase)
 
 	if f, err := os.Open(basePath + ".yaml"); err == nil {
@@ -76,7 +76,7 @@ func loadFileInto(dir, filenameBase string, target interface{}) error {
 	return nil
 }
 
-func mergeInto(dst, src interface{}) {
+func mergeInto(dst, src any) {
 	dstVal := reflect.ValueOf(dst).Elem()
 	srcVal := reflect.ValueOf(src)
 
