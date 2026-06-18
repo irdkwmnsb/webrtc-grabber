@@ -1038,6 +1038,40 @@ function FocusPanel({ p, peer, stalled, proctoringPeers, sessionId, streamType, 
                 : "no chunks"
               }
             </div>
+            {procRecord && procRecord.segmentCount > 0 && (() => {
+              const segCount = procRecord.segmentCount;
+              const indices = Array.from({ length: segCount }, (_, i) => i);
+              return (
+                <div className="val" style={{ marginTop: 6 }}>
+                  <video
+                    ref={procVideoRef}
+                    onEnded={onProcVideoEnded}
+                    controls
+                    playsInline
+                    style={{ width: '100%', maxHeight: 220, background: '#000', borderRadius: 4, display: 'block' }}
+                  />
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6, alignItems: 'center' }}>
+                    <button
+                      onClick={() => playProctoringSegment(sessionId, p.name, streamType, 0, segCount)}
+                      style={{ padding: '2px 10px', cursor: 'pointer' }}
+                      title="Play all segments in order"
+                    >▶ all</button>
+                    {indices.map(i => (
+                      <a
+                        key={i}
+                        href="#"
+                        onClick={(e) => { e.preventDefault(); playProctoringSegment(sessionId, p.name, streamType, i, segCount); }}
+                        style={{ padding: '1px 6px' }}
+                        title={`Play segment ${i}`}
+                      >{i}</a>
+                    ))}
+                    <span style={{ marginLeft: 'auto', opacity: 0.6 }}>
+                      {procRecord.finalized ? "finalized" : "live (segments still being written)"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
@@ -1180,9 +1214,48 @@ function App() {
   const [needsPlay, setNeedsPlay] = useState(false);
 
   const videoRef = useRef(null);
+  const procVideoRef = useRef(null);
+  const procPlaylistRef = useRef(null);   // [{sessionId, peerName, streamKey, segIndex, label}, ...]
   const prevPartsRef = useRef(new Map());
   const seenFirstUpdateRef = useRef(false);
   const connectTokenRef = useRef(0);
+
+  // Stop the proctoring player and clear its playlist when the selected
+  // participant / stream changes; otherwise stale auto-advance handlers
+  // could fire against a now-hidden peer.
+  useEffect(() => {
+    const v = procVideoRef.current;
+    if (!v) return;
+    v.pause();
+    v.removeAttribute('src');
+    v.load();
+    procPlaylistRef.current = null;
+  }, [selected, streamType]);
+
+  const proctoringSegmentUrl = (sessionId, peerName, streamKey, segIndex) => {
+    const file = 'segment_' + String(segIndex).padStart(6, '0') + '.webm';
+    return `/api/admin/proctoring/file/${encodeURIComponent(sessionId)}/${encodeURIComponent(peerName)}/${encodeURIComponent(streamKey)}/${encodeURIComponent(file)}`;
+  };
+
+  const playProctoringSegment = (sessionId, peerName, streamKey, segIndex, totalSegments) => {
+    const v = procVideoRef.current;
+    if (!v) return;
+    procPlaylistRef.current = {
+      sessionId, peerName, streamKey,
+      segIndex, totalSegments,
+    };
+    const url = proctoringSegmentUrl(sessionId, peerName, streamKey, segIndex);
+    v.src = url;
+    v.play().catch(err => console.warn('proctoring playback blocked', err));
+  };
+
+  const onProcVideoEnded = () => {
+    const pl = procPlaylistRef.current;
+    if (!pl) return;
+    if (pl.segIndex + 1 < pl.totalSegments) {
+      playProctoringSegment(pl.sessionId, pl.peerName, pl.streamKey, pl.segIndex + 1, pl.totalSegments);
+    }
+  };
 
   // tick clock — drives all "ago"/online-derivations
   useEffect(() => {

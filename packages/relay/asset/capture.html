@@ -722,7 +722,7 @@
     }
 
     class ProctoringManager {
-        constructor({ signallingUrl, peerName, streamKey }) {
+        constructor({ signallingUrl, peerName, streamKey, onSourceLost }) {
             this.peerName = peerName;
             this.streamKey = streamKey;
             this.queue = new ProctoringQueue(`webrtc-grabber-proctoring-${peerName}-${streamKey}`);
@@ -749,6 +749,8 @@
             this.segmentStartedAt = 0;
             this.segmentRotateTimer = null;
             this.segmentRotateMs = 10 * 60 * 1000;
+            this.onSourceLost = onSourceLost || null;
+            this.waitingForSource = false;
             this.uploader.kick();
         }
 
@@ -985,9 +987,14 @@
             if (this.restartInFlight) return;
             const videoTrack = this.sourceStream && this.sourceStream.getVideoTracks().find(t => t.readyState === 'live');
             if (!videoTrack) {
-                console.warn(`proctoring[${this.streamKey}] restart skipped: source video track not live (reason: ${reason})`);
-                this.health.recordError(`restart skipped (${reason}): no live source track`);
+                console.warn(`proctoring[${this.streamKey}] source video track not live (reason: ${reason})`);
+                this.health.recordError(`source lost (${reason})`);
                 this.streamingActive = false;
+                this.waitingForSource = true;
+                if (this.onSourceLost) {
+                    try { this.onSourceLost(this.streamKey, reason); }
+                    catch (e) { console.error(`proctoring[${this.streamKey}] onSourceLost handler failed`, e); }
+                }
                 return;
             }
             this.restartInFlight = true;
@@ -1002,21 +1009,56 @@
                 .finally(() => { this.restartInFlight = false; });
         }
 
+        // Replace the underlying source stream after the previous one died
+        // (e.g. webcam unplugged, screen-share revoked). The pipeline is
+        // rebuilt with the new stream; sessionId and seq counter survive.
+        async replaceSource(newStream) {
+            if (!newStream || !newStream.getVideoTracks().some(t => t.readyState === 'live')) {
+                console.warn(`proctoring[${this.streamKey}] replaceSource: new stream has no live video track`);
+                return false;
+            }
+            const cfg = this.cfg;
+            if (!cfg) {
+                console.warn(`proctoring[${this.streamKey}] replaceSource: no active cfg`);
+                return false;
+            }
+            this.restartInFlight = true;
+            try {
+                this._destroyPipeline();
+                this.sourceStream = newStream;
+                this.waitingForSource = false;
+                await this._rotateSegmentIndexAndInit(newStream);
+                console.log(`proctoring[${this.streamKey}] source replaced, pipeline rebuilt`);
+                return true;
+            } catch (e) {
+                console.error(`proctoring[${this.streamKey}] replaceSource failed`, e);
+                this.health.recordError(`replaceSource failed: ${e.message || e}`);
+                return false;
+            } finally {
+                this.restartInFlight = false;
+            }
+        }
+
         async _restart() {
             // Rebuild the recorder/canvas pipeline using the same session and
             // seq counter. The source stream is *not* re-acquired here — that
-            // is the responsibility of upstream (track-ended recovery, future
-            // work) so we only act when the source is still live.
+            // is the responsibility of upstream (track-ended recovery, see
+            // replaceSource) so we only act when the source is still live.
             const sourceStream = this.sourceStream;
             const cfg = this.cfg;
             if (!sourceStream || !cfg) return;
             this._destroyPipeline();
-            // Rotate the segment on every recorder rebuild — a fresh
-            // MediaRecorder emits a brand-new WebM EBML header that cannot be
-            // appended to the previous segment file (the resulting file would
-            // be unplayable). The seq counter continues uninterrupted, so the
-            // server keeps ordering across segments.
-            this._rotateSegmentIndex('restart');
+            await this._rotateSegmentIndexAndInit(sourceStream, 'restart');
+        }
+
+        // Shared rebuild routine: rotates the segment index (mandatory on
+        // every recorder rebuild — a fresh MediaRecorder emits a new WebM
+        // EBML header that cannot be appended to the previous segment) and
+        // re-initialises the canvas+recorder pipeline. The seq counter is
+        // left untouched, so the server keeps strict in-order delivery
+        // across segments.
+        async _rotateSegmentIndexAndInit(sourceStream, reason) {
+            this._rotateSegmentIndex(reason);
             await new Promise(r => setTimeout(r, 500));
             await this._initPipeline(sourceStream);
         }
@@ -1102,16 +1144,24 @@
     }
 
     class ProctoringSession {
-        constructor({ signallingUrl, peerName }) {
+        constructor({ signallingUrl, peerName, onSourceLost }) {
             this.signallingUrl = signallingUrl;
             this.peerName = peerName;
+            this.onSourceLost = onSourceLost || null;
             this.managers = new Map(); // streamKey -> ProctoringManager
         }
 
         _ensure(streamKey) {
             let m = this.managers.get(streamKey);
             if (!m) {
-                m = new ProctoringManager({ signallingUrl: this.signallingUrl, peerName: this.peerName, streamKey });
+                m = new ProctoringManager({
+                    signallingUrl: this.signallingUrl,
+                    peerName: this.peerName,
+                    streamKey,
+                    onSourceLost: this.onSourceLost
+                        ? (sk, reason) => this.onSourceLost(sk, reason)
+                        : null,
+                });
                 this.managers.set(streamKey, m);
             }
             return m;
@@ -1138,6 +1188,12 @@
                 promises.push(this._ensure(key).start(cfg, stream).catch(e => console.error(`proctoring[${key}] start failed`, e)));
             }
             await Promise.all(promises);
+        }
+
+        async replaceSource(streamKey, newStream) {
+            const m = this.managers.get(streamKey);
+            if (!m) return false;
+            return m.replaceSource(newStream);
         }
 
         pause() {
@@ -1323,10 +1379,102 @@
         updateState("connecting");
         const client = new GrabberCaptureClient(connectionArgs.peerName);
 
+        // Track pending source-loss recoveries so we can re-acquire sources
+        // automatically where possible (webcam) or prompt for a user gesture
+        // when required (getDisplayMedia cannot run without one).
+        const showSourceLossBanner = (streamKey, reason, onRecover) => {
+            let banner = document.getElementById('source-loss-banner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'source-loss-banner';
+                banner.style.cssText = [
+                    'position:fixed', 'top:0', 'left:0', 'right:0',
+                    'background:#b12a1c', 'color:#fff', 'padding:12px 20px',
+                    'font:14pt sans-serif', 'z-index:99999',
+                    'display:flex', 'align-items:center', 'gap:16px',
+                    'box-shadow:0 2px 12px rgba(0,0,0,.4)',
+                ].join(';');
+                document.body.appendChild(banner);
+            }
+            banner.innerHTML = '';
+            const text = document.createElement('span');
+            text.style.flex = '1';
+            text.textContent = `Stream "${streamKey}" ended (${reason}). Proctoring is paused for this stream.`;
+            banner.appendChild(text);
+            const btn = document.createElement('button');
+            btn.textContent = `Re-share ${streamKey}`;
+            btn.style.cssText = 'font:14pt sans-serif;padding:6px 16px;cursor:pointer;border:0;border-radius:4px;background:#fff;color:#b12a1c';
+            btn.onclick = async () => {
+                btn.disabled = true;
+                btn.textContent = 'Working...';
+                try {
+                    const ok = await onRecover();
+                    if (ok) banner.remove();
+                    else btn.textContent = `Retry ${streamKey}`;
+                } catch (e) {
+                    console.error('recover failed', e);
+                    btn.textContent = `Retry ${streamKey}`;
+                } finally {
+                    btn.disabled = false;
+                }
+            };
+            banner.appendChild(btn);
+        };
+
+        const recoverStream = async (streamKey) => {
+            // Webcam: try automatic re-acquire (getUserMedia does not need a
+            // user gesture in most browsers once the permission was granted).
+            // Desktop: getDisplayMedia MUST be called from a user gesture, so
+            // this function is only invoked from the banner button onclick.
+            try {
+                if (streamKey === 'webcam') {
+                    const newStream = await navigator.mediaDevices.getUserMedia({
+                        video: webcamConstraint, audio: true,
+                    }).catch(() => undefined);
+                    if (!newStream) return false;
+                    streams[streamKey] = newStream;
+                } else if (streamKey === 'desktop' && desktopConstraint) {
+                    const newStream = await navigator.mediaDevices.getDisplayMedia(desktopConstraint).catch(() => undefined);
+                    if (!newStream) return false;
+                    streams[streamKey] = newStream;
+                } else {
+                    return false;
+                }
+                const ok = await proctoringSession.replaceSource(streamKey, streams[streamKey]);
+                if (!ok) {
+                    console.warn(`proctoring[${streamKey}] replaceSource returned false`);
+                    return false;
+                }
+                return true;
+            } catch (e) {
+                console.error(`proctoring[${streamKey}] recoverStream failed`, e);
+                return false;
+            }
+        };
+
         const proctoringSession = new ProctoringSession({
             signallingUrl: client.signallingUrl,
             peerName: connectionArgs.peerName,
+            onSourceLost: async (streamKey, reason) => {
+                console.warn(`proctoring source lost: ${streamKey} (${reason})`);
+                if (streamKey === 'webcam') {
+                    // Try automatic re-acquire first — most browsers allow it
+                    // after the initial permission grant.
+                    const ok = await recoverStream(streamKey);
+                    if (ok) {
+                        console.log(`proctoring[${streamKey}] auto-recovered`);
+                        return;
+                    }
+                }
+                // Desktop (or auto-recovery failed): surface a banner with a
+                // button so the user can supply the required gesture.
+                showSourceLossBanner(streamKey, reason, () => recoverStream(streamKey));
+            },
         });
+        // Expose for the smoke harness (cmd/smoke-proctoring). Harmless in
+        // production: it only allows read-only inspection of the session
+        // state from devtools.
+        window.__proctoringSession = proctoringSession;
 
         client.target.addEventListener("init_peer", async ({ detail: { pcConfig, pingInterval } }) => {
             peerConnectionConfig = pcConfig;
