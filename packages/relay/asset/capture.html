@@ -149,13 +149,14 @@
             this.socket.on("proctoring_stop",   proctoring_stop_handle.bind(this));
         }
 
-        send_ping(connectionsCount, streamTypes, currentRecordId, proctoringActiveStreams) {
+        send_ping(connectionsCount, streamTypes, currentRecordId, proctoringActiveStreams, proctoringHealth) {
             this.socket.emit("ping", {
                 ping: {
                     connectionsCount: connectionsCount,
                     streamTypes: streamTypes,
                     currentRecordId: currentRecordId,
                     proctoringActiveStreams: proctoringActiveStreams || [],
+                    proctoringHealth: proctoringHealth || [],
                 }
             });
         }
@@ -369,10 +370,68 @@
 }
     }
 
+    class ProctoringHealth {
+        constructor(streamKey) {
+            this.streamKey = streamKey;
+            this.lastChunkAt = 0;
+            this.chunksTotal = 0;
+            this.bytesTotal = 0;
+            this.recorderState = '';
+            this.lastError = '';
+            this.restartCount = 0;
+            this.droppedChunks = 0;
+            this.queueDepth = 0;
+            this.mimeType = '';
+            this.browser = ProctoringHealth.detectBrowser();
+        }
+
+        static detectBrowser() {
+            const ua = navigator.userAgent;
+            if (/Firefox\//.test(ua)) return 'firefox';
+            if (/Edg\//.test(ua)) return 'edge';
+            if (/Chrome\//.test(ua) && !/Edg\//.test(ua)) return 'chrome';
+            if (/Safari\//.test(ua) && !/Chrome\//.test(ua)) return 'safari';
+            return 'other';
+        }
+
+        recordChunk(byteSize) {
+            this.lastChunkAt = Date.now();
+            this.chunksTotal++;
+            this.bytesTotal += byteSize;
+            this.lastError = '';
+        }
+
+        recordError(msg) { this.lastError = String(msg).slice(0, 200); }
+        incRestart() { this.restartCount++; }
+        incDrop(n = 1) { this.droppedChunks += n; }
+
+        snapshot() {
+            return {
+                streamKey: this.streamKey,
+                lastChunkAt: this.lastChunkAt,
+                chunksTotal: this.chunksTotal,
+                bytesTotal: this.bytesTotal,
+                recorderState: this.recorderState,
+                lastError: this.lastError,
+                restartCount: this.restartCount,
+                droppedChunks: this.droppedChunks,
+                queueDepth: this.queueDepth,
+                browser: this.browser,
+                mimeType: this.mimeType,
+            };
+        }
+    }
+
     class ProctoringQueue {
-        constructor(dbName = 'webrtc-grabber-proctoring') {
+        constructor(dbName = 'webrtc-grabber-proctoring', maxBytes = 200 * 1024 * 1024) {
             this.dbName = dbName;
+            this.maxBytes = maxBytes;
             this.dbPromise = this._open();
+            this.lastDepth = 0;
+            this.droppedTotal = 0;
+            this.lastDroppedSeq = -1;
+            this.estimateBytes = 0;
+            this._refreshEstimate();
         }
 
         _open() {
@@ -394,12 +453,113 @@
             return db.transaction('chunks', mode).objectStore('chunks');
         }
 
-        async enqueue(item) {
-            const store = await this._store('readwrite');
+        // Drop oldest entries until the running byte estimate is at or below
+        // maxBytes. Caller already holds the 'readwrite' store context.
+        _evictUntilFit(store) {
             return new Promise((resolve, reject) => {
-                const req = store.add(item);
-                req.onsuccess = () => resolve(req.result);
-                req.onerror = () => reject(req.error);
+                if (this.estimateBytes <= this.maxBytes) {
+                    resolve(0);
+                    return;
+                }
+                let dropped = 0;
+                const cursorReq = store.openCursor();
+                cursorReq.onerror = () => reject(cursorReq.error);
+                cursorReq.onsuccess = () => {
+                    const cursor = cursorReq.result;
+                    if (!cursor) {
+                        resolve(dropped);
+                        return;
+                    }
+                    const v = cursor.value;
+                    const size = (v && v.blob && v.blob.size) || 0;
+                    if (this.estimateBytes <= this.maxBytes) {
+                        resolve(dropped);
+                        return;
+                    }
+                    cursor.delete();
+                    dropped++;
+                    this.droppedTotal++;
+                    if (v && Number.isFinite(v.seq)) this.lastDroppedSeq = v.seq;
+                    this.estimateBytes -= size;
+                    cursor.continue();
+                };
+            });
+        }
+
+        async _refreshEstimate() {
+            try {
+                const store = await this._store('readonly');
+                const totalSize = await new Promise((resolve, reject) => {
+                    const req = store.openCursor();
+                    let sum = 0;
+                    req.onsuccess = () => {
+                        const c = req.result;
+                        if (!c) { resolve(sum); return; }
+                        const v = c.value;
+                        sum += (v && v.blob && v.blob.size) || 0;
+                        c.continue();
+                    };
+                    req.onerror = () => reject(req.error);
+                });
+                this.estimateBytes = totalSize;
+                this.lastDepth = await this.size();
+            } catch (e) {
+                console.warn('proctoring queue: estimate refresh failed', e);
+            }
+        }
+
+        async enqueue(item) {
+            const db = await this.dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('chunks', 'readwrite');
+                const store = tx.objectStore('chunks');
+                const addReq = store.add(item);
+                addReq.onerror = () => reject(addReq.error);
+                tx.oncomplete = async () => {
+                    this.estimateBytes += (item.blob && item.blob.size) || 0;
+                    // Evict oldest while still over the cap. Run in a fresh
+                    // transaction to avoid re-using the completed one.
+                    try {
+                        if (this.estimateBytes > this.maxBytes) {
+                            await this._evictOldestUntilFit();
+                        }
+                        this.lastDepth = await this.size();
+                    } catch (e) {
+                        console.warn('proctoring queue: post-enqueue evict failed', e);
+                    }
+                    resolve(addReq.result);
+                };
+                tx.onerror = () => reject(tx.error);
+            });
+        }
+
+        async _evictOldestUntilFit() {
+            const db = await this.dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('chunks', 'readwrite');
+                const store = tx.objectStore('chunks');
+                const cursorReq = store.openCursor();
+                let dropped = 0;
+                cursorReq.onerror = () => reject(cursorReq.error);
+                cursorReq.onsuccess = () => {
+                    const cursor = cursorReq.result;
+                    if (!cursor) {
+                        tx.oncomplete = () => resolve(dropped);
+                        return;
+                    }
+                    if (this.estimateBytes <= this.maxBytes) {
+                        tx.oncomplete = () => resolve(dropped);
+                        return;
+                    }
+                    const v = cursor.value;
+                    const size = (v && v.blob && v.blob.size) || 0;
+                    cursor.delete();
+                    dropped++;
+                    this.droppedTotal++;
+                    if (v && Number.isFinite(v.seq)) this.lastDroppedSeq = v.seq;
+                    this.estimateBytes -= size;
+                    cursor.continue();
+                };
             });
         }
 
@@ -416,7 +576,10 @@
             const store = await this._store('readwrite');
             return new Promise((resolve, reject) => {
                 const req = store.delete(id);
-                req.onsuccess = () => resolve();
+                req.onsuccess = async () => {
+                    resolve();
+                    try { this.lastDepth = await this.size(); } catch (e) {}
+                };
                 req.onerror = () => reject(req.error);
             });
         }
@@ -440,6 +603,7 @@
             this.running = false;
             this.attempt = 0;
             this.uploadToken = null;
+            this.lastKnownCommitted = -1;
         }
 
         setUploadToken(token) {
@@ -466,9 +630,21 @@
                     while (true) {
                         const item = await this.queue.peek();
                         if (!item) break;
+                        // If the head is ahead of what the server has, the
+                        // gap in between was lost (evicted from the bounded
+                        // queue under network pressure, or session resumed
+                        // mid-stream). Send an explicit advance marker so the
+                        // server closes the gap atomically with the upload.
+                        let advanceToSeq = null;
+                        if (Number.isFinite(item.seq)
+                            && this.lastKnownCommitted >= 0
+                            && item.seq > this.lastKnownCommitted + 1) {
+                            advanceToSeq = item.seq;
+                            console.warn(`proctoring[${this.streamKey}] gap detected: committed=${this.lastKnownCommitted}, head.seq=${item.seq} → advancing`);
+                        }
                         let outcome;
                         try {
-                            outcome = await this._upload(item);
+                            outcome = await this._upload(item, advanceToSeq);
                         } catch (e) {
                             await this._backoff(`upload failed: ${e}`);
                             continue;
@@ -476,6 +652,9 @@
                         if (outcome === 'ok' || outcome === 'drop') {
                             await this.queue.remove(item.id);
                             this.attempt = 0;
+                            if (Number.isFinite(item.seq) && item.seq > this.lastKnownCommitted) {
+                                this.lastKnownCommitted = item.seq;
+                            }
                             continue;
                         }
                         // outcome === 'conflict'
@@ -497,13 +676,19 @@
             })();
         }
 
-        async _upload({ sessionId, seq, blob }) {
+        async _upload({ sessionId, seq, segment, blob }, advanceToSeq) {
             const fd = new FormData();
             fd.append('file', blob, `${seq}.webm`);
-            const url = `${this.signallingUrl}/api/agent/${this.peerName}/proctoring_upload`
+            let url = `${this.signallingUrl}/api/agent/${this.peerName}/proctoring_upload`
                 + `?sessionId=${encodeURIComponent(sessionId)}`
                 + `&streamKey=${encodeURIComponent(this.streamKey)}`
                 + `&seq=${encodeURIComponent(seq)}`;
+            if (segment != null && Number.isFinite(segment)) {
+                url += `&segment=${encodeURIComponent(segment)}`;
+            }
+            if (advanceToSeq != null && Number.isFinite(advanceToSeq)) {
+                url += `&advanceToSeq=${encodeURIComponent(advanceToSeq)}`;
+            }
             const res = await fetch(url, { method: 'POST', body: fd, headers: this._authHeaders() });
             if (res.ok) return 'ok';
             if (res.status === 409) return 'conflict';
@@ -523,6 +708,7 @@
             if (!res.ok) throw new Error(`state fetch: status ${res.status}`);
             const state = await res.json();
             const committed = state.committedSeq;
+            this.lastKnownCommitted = committed;
             let dropped = 0;
             while (true) {
                 const head = await this.queue.peek();
@@ -553,10 +739,29 @@
             this.seqStorageKey = null;
             this.streamingActive = false;
             this.trackListeners = [];
+            this.health = new ProctoringHealth(streamKey);
+            this.sourceStream = null;
+            this.watchdogTimer = null;
+            this.restartInFlight = false;
+            this.lastRecorderStartAt = 0;
+            this.segmentIndex = 0;
+            this.segmentStorageKey = null;
+            this.segmentStartedAt = 0;
+            this.segmentRotateTimer = null;
+            this.segmentRotateMs = 10 * 60 * 1000;
             this.uploader.kick();
         }
 
         isStreaming() { return this.streamingActive; }
+
+        getHealth() {
+            this.health.recorderState = this.recorder ? this.recorder.state : (this.streamingActive ? 'unknown' : 'inactive');
+            this.health.queueDepth = this.queue.lastDepth;
+            if (this.queue.droppedTotal > this.health.droppedChunks) {
+                this.health.droppedChunks = this.queue.droppedTotal;
+            }
+            return this.health.snapshot();
+        }
 
         _seqKey(sessionId) {
             return `proctoring_next_seq:${this.peerName}:${this.streamKey}:${sessionId}`;
@@ -584,20 +789,31 @@
             else this._destroyPipeline();
 
             this.cfg = cfg;
+            this.sourceStream = sourceStream;
             this.uploader.setUploadToken(cfg.uploadTokens && cfg.uploadTokens[this.streamKey]);
             this.seqStorageKey = this._seqKey(cfg.sessionId);
             const saved = parseInt(localStorage.getItem(this.seqStorageKey), 10);
             this.seq = Number.isFinite(saved) && saved >= 0 ? saved : 0;
-            console.log(`proctoring[${this.streamKey}]: starting session=${cfg.sessionId} from seq=${this.seq}`);
+            this.segmentStorageKey = this._segmentKey(cfg.sessionId);
+            const savedSeg = parseInt(localStorage.getItem(this.segmentStorageKey), 10);
+            this.segmentIndex = Number.isFinite(savedSeg) && savedSeg >= 0 ? savedSeg : 0;
+            this.segmentStartedAt = Date.now();
+            console.log(`proctoring[${this.streamKey}]: starting session=${cfg.sessionId} from seq=${this.seq} segment=${this.segmentIndex}`);
             await this._initPipeline(sourceStream);
         }
 
+        _segmentKey(sessionId) {
+            return `proctoring_segment:${this.peerName}:${this.streamKey}:${sessionId}`;
+        }
+
         async _initPipeline(sourceStream) {
-            const videoTrack = sourceStream.getVideoTracks().find(t => t.readyState === 'live');
-            const audioTrack = sourceStream.getAudioTracks().find(t => t.readyState === 'live');
+            if (sourceStream) this.sourceStream = sourceStream;
+            const videoTrack = this.sourceStream && this.sourceStream.getVideoTracks().find(t => t.readyState === 'live');
+            const audioTrack = this.sourceStream && this.sourceStream.getAudioTracks().find(t => t.readyState === 'live');
 
             if (!videoTrack) {
                 console.warn(`proctoring[${this.streamKey}]: no live video track, aborting`);
+                this.health.recordError('no live video track');
                 return;
             }
 
@@ -630,18 +846,21 @@
             this.canvasStream.getVideoTracks().forEach(t => this.recordedStream.addTrack(t));
 
             this._trackEndedSubscribe(videoTrack, () => {
-                console.warn(`proctoring[${this.streamKey}]: video track ended; tearing down recorder`);
-                this._teardownRecorder();
+                console.warn(`proctoring[${this.streamKey}]: video track ended; attempting pipeline restart`);
+                this.health.recordError('video track ended');
+                this._scheduleRestart('video track ended');
             });
 
             if (audioTrack) {
                 this.recordedStream.addTrack(audioTrack);
                 this._trackEndedSubscribe(audioTrack, () => {
                     console.warn(`proctoring[${this.streamKey}]: audio track ended; continuing without audio`);
+                    this.health.recordError('audio track ended');
                 });
             }
 
             this._startRecorder();
+            this._startWatchdog();
         }
 
         _startRecorder() {
@@ -659,31 +878,154 @@
                 recorder = new MediaRecorder(this.recordedStream, opts);
             } catch (e) {
                 console.error(`proctoring[${this.streamKey}] failed to create MediaRecorder`, e);
+                this.health.recordError(`MediaRecorder create failed: ${e.message || e}`);
                 return;
             }
             this.recorder = recorder;
+            this.health.mimeType = mimeType || 'default';
+            this.health.recorderState = recorder.state;
             this.streamingActive = true;
+            this.lastRecorderStartAt = Date.now();
+            this.segmentStartedAt = Date.now();
 
             const sessionId = this.cfg.sessionId;
+            const streamKey = this.streamKey;
             recorder.addEventListener('dataavailable', async (e) => {
                 if (!e.data || !e.data.size) return;
+                this.health.recordChunk(e.data.size);
                 const seq = this.seq++;
+                const segment = this.segmentIndex;
                 try {
-                    await this.queue.enqueue({ sessionId, seq, blob: e.data, createdAt: Date.now() });
+                    await this.queue.enqueue({ sessionId, seq, segment, streamKey, blob: e.data, createdAt: Date.now() });
                     if (this.seqStorageKey) localStorage.setItem(this.seqStorageKey, String(this.seq));
                     this.uploader.kick();
                 } catch (err) {
-                    console.error(`proctoring[${this.streamKey}] enqueue failed`, err);
+                    console.error(`proctoring[${streamKey}] enqueue failed`, err);
+                    this.health.recordError(`enqueue failed: ${err.message || err}`);
+                    this.health.incDrop();
                 }
             });
-            recorder.addEventListener('error', e => console.error(`proctoring[${this.streamKey}] recorder error`, e.error));
+            recorder.addEventListener('error', e => {
+                const msg = (e && e.error && (e.error.message || e.error.name)) || 'recorder error';
+                console.error(`proctoring[${streamKey}] recorder error`, e && e.error);
+                this.health.recordError(`recorder error: ${msg}`);
+            });
+            recorder.addEventListener('stop', () => {
+                this.health.recorderState = 'stopped';
+            });
 
             try {
                 recorder.start(this.cfg.chunkDurationMs);
-                console.log(`proctoring[${this.streamKey}] started: session=${sessionId} fps=${this.cfg.fps} chunk=${this.cfg.chunkDurationMs}ms mime=${mimeType}`);
+                this.health.recorderState = recorder.state;
+                console.log(`proctoring[${streamKey}] started: session=${sessionId} seg=${this.segmentIndex} fps=${this.cfg.fps} chunk=${this.cfg.chunkDurationMs}ms mime=${mimeType}`);
             } catch (e) {
-                console.error(`proctoring[${this.streamKey}] failed to start recorder`, e);
+                console.error(`proctoring[${streamKey}] failed to start recorder`, e);
+                this.health.recordError(`recorder start failed: ${e.message || e}`);
             }
+
+            this._startSegmentRotateTimer();
+        }
+
+        _startSegmentRotateTimer() {
+            this._stopSegmentRotateTimer();
+            this.segmentRotateTimer = setInterval(() => {
+                if (!this.cfg || !this.streamingActive) return;
+                const elapsed = Date.now() - this.segmentStartedAt;
+                if (elapsed >= this.segmentRotateMs) {
+                    this._scheduleRestart(`segment rotation after ${Math.round(elapsed / 1000)}s`);
+                }
+            }, 60 * 1000);
+        }
+
+        _stopSegmentRotateTimer() {
+            if (this.segmentRotateTimer) {
+                clearInterval(this.segmentRotateTimer);
+                this.segmentRotateTimer = null;
+            }
+        }
+
+        _startWatchdog() {
+            this._stopWatchdog();
+            const tickMs = 1000;
+            this.watchdogTimer = setInterval(() => this._watchdogTick(), tickMs);
+        }
+
+        _stopWatchdog() {
+            if (this.watchdogTimer) {
+                clearInterval(this.watchdogTimer);
+                this.watchdogTimer = null;
+            }
+        }
+
+        _watchdogTick() {
+            if (!this.cfg || !this.streamingActive) return;
+            // Recorder went inactive without us noticing — force restart.
+            if (this.recorder && this.recorder.state === 'inactive') {
+                this._scheduleRestart('recorder inactive');
+                return;
+            }
+            const last = this.health.lastChunkAt;
+            if (!last) {
+                // No chunk yet — give it time. If more than 3x chunkMs passed
+                // since the recorder started without a single byte, it's dead.
+                const sinceStart = Date.now() - this.lastRecorderStartAt;
+                if (sinceStart > Math.max(this.cfg.chunkDurationMs * 3, 10000)) {
+                    this._scheduleRestart('no chunks since start');
+                }
+                return;
+            }
+            const staleAfter = Math.max(this.cfg.chunkDurationMs * 2, 5000);
+            const since = Date.now() - last;
+            if (since > staleAfter) {
+                this._scheduleRestart(`no data for ${since}ms`);
+            }
+        }
+
+        _scheduleRestart(reason) {
+            if (this.restartInFlight) return;
+            const videoTrack = this.sourceStream && this.sourceStream.getVideoTracks().find(t => t.readyState === 'live');
+            if (!videoTrack) {
+                console.warn(`proctoring[${this.streamKey}] restart skipped: source video track not live (reason: ${reason})`);
+                this.health.recordError(`restart skipped (${reason}): no live source track`);
+                this.streamingActive = false;
+                return;
+            }
+            this.restartInFlight = true;
+            this.health.incRestart();
+            this.health.recordError(`restart: ${reason}`);
+            console.warn(`proctoring[${this.streamKey}] watchdog: ${reason}, rebuilding pipeline`);
+            this._restart()
+                .catch(e => {
+                    console.error(`proctoring[${this.streamKey}] restart failed`, e);
+                    this.health.recordError(`restart failed: ${e.message || e}`);
+                })
+                .finally(() => { this.restartInFlight = false; });
+        }
+
+        async _restart() {
+            // Rebuild the recorder/canvas pipeline using the same session and
+            // seq counter. The source stream is *not* re-acquired here — that
+            // is the responsibility of upstream (track-ended recovery, future
+            // work) so we only act when the source is still live.
+            const sourceStream = this.sourceStream;
+            const cfg = this.cfg;
+            if (!sourceStream || !cfg) return;
+            this._destroyPipeline();
+            // Rotate the segment on every recorder rebuild — a fresh
+            // MediaRecorder emits a brand-new WebM EBML header that cannot be
+            // appended to the previous segment file (the resulting file would
+            // be unplayable). The seq counter continues uninterrupted, so the
+            // server keeps ordering across segments.
+            this._rotateSegmentIndex('restart');
+            await new Promise(r => setTimeout(r, 500));
+            await this._initPipeline(sourceStream);
+        }
+
+        _rotateSegmentIndex(reason) {
+            this.segmentIndex++;
+            this.segmentStartedAt = Date.now();
+            if (this.segmentStorageKey) localStorage.setItem(this.segmentStorageKey, String(this.segmentIndex));
+            console.log(`proctoring[${this.streamKey}] segment rotated to ${this.segmentIndex} (${reason})`);
         }
 
         // Pause without tearing down the recorder so resume can reuse the same
@@ -696,6 +1038,7 @@
                 try { this.recorder.pause(); } catch (e) {}
             }
             this.streamingActive = false;
+            this.health.recorderState = this.recorder ? this.recorder.state : 'paused';
             console.log(`proctoring[${this.streamKey}] paused`);
         }
 
@@ -703,9 +1046,11 @@
             if (this.recorder && this.recorder.state === 'paused') {
                 try { this.recorder.resume(); } catch (e) {
                     console.warn(`proctoring[${this.streamKey}] resume failed`, e);
+                    this.health.recordError(`resume failed: ${e.message || e}`);
                     return false;
                 }
                 this.streamingActive = true;
+                this.health.recorderState = this.recorder.state;
                 console.log(`proctoring[${this.streamKey}] resumed`);
                 return true;
             }
@@ -719,9 +1064,12 @@
             }
             this.recorder = null;
             this.streamingActive = false;
+            this.health.recorderState = 'inactive';
         }
 
         _destroyPipeline() {
+            this._stopWatchdog();
+            this._stopSegmentRotateTimer();
             this._teardownRecorder();
             this._clearTrackListeners();
             if (this.drawTimer) { clearInterval(this.drawTimer); this.drawTimer = null; }
@@ -744,7 +1092,12 @@
                 localStorage.removeItem(this.seqStorageKey);
                 this.seqStorageKey = null;
             }
+            if (this.segmentStorageKey) {
+                localStorage.removeItem(this.segmentStorageKey);
+                this.segmentStorageKey = null;
+            }
             this.cfg = null;
+            this.sourceStream = null;
         }
     }
 
@@ -769,6 +1122,12 @@
             for (const [key, m] of this.managers) {
                 if (m.isStreaming()) out.push(key);
             }
+            return out;
+        }
+
+        getHealth() {
+            const out = [];
+            for (const m of this.managers.values()) out.push(m.getHealth());
             return out;
         }
 
@@ -806,6 +1165,70 @@
             await Promise.all(ps);
         }
     }
+
+    const probeCapabilities = () => {
+        const caps = {
+            browser: ProctoringHealth.detectBrowser(),
+            mediaRecorder: typeof MediaRecorder !== 'undefined',
+            canvasCaptureStream: typeof HTMLCanvasElement !== 'undefined'
+                && typeof HTMLCanvasElement.prototype.captureStream === 'function',
+            wakeLock: !!(navigator.wakeLock && navigator.wakeLock.request),
+            rVFC: typeof HTMLVideoElement !== 'undefined'
+                && typeof HTMLVideoElement.prototype.requestVideoFrameCallback === 'function',
+            indexedDB: typeof indexedDB !== 'undefined',
+            mimeType: '',
+        };
+
+        const candidates = [
+            'video/webm;codecs=vp8,opus',
+            'video/webm;codecs=vp8',
+            'video/webm;codecs=vp9,opus',
+            'video/webm',
+        ];
+        for (const t of candidates) {
+            if (caps.mediaRecorder && MediaRecorder.isTypeSupported(t)) {
+                caps.mimeType = t;
+                break;
+            }
+        }
+        return caps;
+    };
+
+    const assertSupportedBrowser = () => {
+        const b = ProctoringHealth.detectBrowser();
+        if (b === 'safari') {
+            const msg = 'Safari is not supported for proctoring. Use Chrome, Edge or Firefox.';
+            console.error(msg);
+            alert(msg);
+            return false;
+        }
+        if (!MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
+            const msg = 'Browser lacks required APIs (MediaRecorder / canvas.captureStream). Use a current Chrome, Edge or Firefox.';
+            console.error(msg);
+            alert(msg);
+            return false;
+        }
+        return true;
+    };
+
+    let capabilities = null;
+    let activeWakeLock = null;
+    const requestWakeLock = async () => {
+        if (!navigator.wakeLock) return;
+        try {
+            if (activeWakeLock && activeWakeLock.released === false) return;
+            activeWakeLock = await navigator.wakeLock.request('screen');
+            if (activeWakeLock) {
+                activeWakeLock.addEventListener('release', () => { activeWakeLock = null; });
+            }
+            console.log('proctoring: screen wake lock acquired');
+        } catch (e) {
+            console.warn('proctoring: wakeLock failed', e);
+        }
+    };
+    const onVisibilityChange = () => {
+        if (document.visibilityState === 'visible') requestWakeLock();
+    };
 
     const extractArguments = () => {
         const params = new URLSearchParams(window.location.search);
@@ -873,7 +1296,13 @@
 
     const capture = async () => {
         if (currentState !== null) return;
+        if (!assertSupportedBrowser()) return;
         updateState("detecting");
+
+        capabilities = probeCapabilities();
+        console.log('proctoring: capabilities', capabilities);
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        await requestWakeLock();
 
         const streams = await detectStreams();
         for (const [key, stream] of Object.entries(streams)) {
@@ -911,6 +1340,7 @@
                     liveStreamTypes(),
                     recordingManager.activeRecording.recordId,
                     proctoringSession.getActiveStreams(),
+                    proctoringSession.getHealth(),
                 );
             }, pingInterval);
             console.log(`init peer (pingInterval = ${pingInterval})`);

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -20,8 +21,11 @@ type adminProctoringPeer struct {
 	ActivelyStreaming bool        `json:"activelyStreaming"`
 	CommittedSeq   int64          `json:"committedSeq"`
 	TotalBytes     int64          `json:"totalBytes"`
+	SegmentCount   int            `json:"segmentCount"`
+	CurrentSegment int            `json:"currentSegment"`
 	LastChunkAt    *time.Time     `json:"lastChunkAt,omitempty"`
 	Finalized      bool           `json:"finalized"`
+	Health         *api.ProctoringStreamHealth `json:"health,omitempty"`
 }
 
 type adminProctoringResponse struct {
@@ -258,10 +262,12 @@ func (s *Server) setupAdminApi() {
 			peerName := c.Params("peerName")
 			streamKey := c.Params("streamKey")
 			fileName := c.Params("file")
-			if !isSafePathSegment(sessionId) || !isSafePathSegment(peerName) || !isProctoringStreamKey(streamKey) {
+			if !isSafePathSegment(sessionId) || !isSafePathSegment(peerName) || !isSafePathSegment(fileName) || !isProctoringStreamKey(streamKey) {
 				return c.Status(fiber.StatusBadRequest).SendString("Invalid params")
 			}
-			if fileName != "full.webm" && fileName != "full.remuxed.webm" {
+			allowed := fileName == "full.webm" || fileName == "full.remuxed.webm" ||
+				(strings.HasPrefix(fileName, "segment_") && strings.HasSuffix(fileName, ".webm"))
+			if !allowed {
 				return c.Status(fiber.StatusBadRequest).SendString("Invalid file")
 			}
 			path := filepath.Join(s.config.Record.StorageDir, "proctoring", sessionId, peerName, streamKey, fileName)
@@ -303,6 +309,13 @@ func buildAdminPeer(storageDir, sessionId, peerName, streamKey string, online *a
 				break
 			}
 		}
+		for _, h := range online.ProctoringHealth {
+			if h.StreamKey == streamKey {
+				hc := h
+				out.Health = &hc
+				break
+			}
+		}
 	}
 	if sessionId == "" {
 		return out
@@ -311,6 +324,11 @@ func buildAdminPeer(storageDir, sessionId, peerName, streamKey string, online *a
 	if st, err := loadProctoringState(stateFile); err == nil {
 		out.CommittedSeq = st.CommittedSeq
 		out.TotalBytes = st.TotalBytes
+		out.SegmentCount = len(st.Segments)
+		if out.SegmentCount == 0 && st.TotalBytes > 0 {
+			out.SegmentCount = 1 // legacy single-file session
+		}
+		out.CurrentSegment = st.CurrentSegment
 	}
 	full := filepath.Join(storageDir, "proctoring", sessionId, peerName, streamKey, "full.webm")
 	if info, err := os.Stat(full); err == nil {

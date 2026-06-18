@@ -8,15 +8,30 @@ import (
 )
 
 type Peer struct {
-	Name                    string           `json:"name"`
-	SocketId                sockets.SocketID `json:"id"`
-	LastPing                *time.Time       `json:"lastPing"`
-	ConnectionsCount        int              `json:"connectionsCount"`
-	StreamTypes             []StreamType     `json:"streamTypes"`
-	CurrentRecordId         *string          `json:"currentRecordId"`
-	ProctoringActiveStreams []StreamType     `json:"proctoringActiveStreams,omitempty"`
-	TeamName                string           `json:"teamName,omitempty"`
-	University              string           `json:"university,omitempty"`
+	Name                    string                  `json:"name"`
+	SocketId                sockets.SocketID        `json:"id"`
+	LastPing                *time.Time              `json:"lastPing"`
+	ConnectionsCount        int                     `json:"connectionsCount"`
+	StreamTypes             []StreamType            `json:"streamTypes"`
+	CurrentRecordId         *string                 `json:"currentRecordId"`
+	ProctoringActiveStreams []StreamType            `json:"proctoringActiveStreams,omitempty"`
+	ProctoringHealth        []ProctoringStreamHealth `json:"proctoringHealth,omitempty"`
+	TeamName                string                  `json:"teamName,omitempty"`
+	University              string                  `json:"university,omitempty"`
+}
+
+type ProctoringStreamHealth struct {
+	StreamKey        string  `json:"streamKey"`
+	LastChunkAt      int64   `json:"lastChunkAt,omitempty"`
+	ChunksTotal      uint64  `json:"chunksTotal,omitempty"`
+	BytesTotal       uint64  `json:"bytesTotal,omitempty"`
+	RecorderState    string  `json:"recorderState,omitempty"`
+	LastError        string  `json:"lastError,omitempty"`
+	RestartCount     uint32  `json:"restartCount,omitempty"`
+	DroppedChunks    uint64  `json:"droppedChunks,omitempty"`
+	QueueDepth       uint32  `json:"queueDepth,omitempty"`
+	Browser          string  `json:"browser,omitempty"`
+	MimeType         string  `json:"mimeType,omitempty"`
 }
 
 type StreamType string
@@ -27,10 +42,11 @@ const (
 )
 
 type PeerStatus struct {
-	ConnectionsCount        int          `json:"connectionsCount"`
-	StreamTypes             []StreamType `json:"streamTypes"`
-	CurrentRecordId         *string      `json:"currentRecordId"`
-	ProctoringActiveStreams []StreamType `json:"proctoringActiveStreams,omitempty"`
+	ConnectionsCount        int                       `json:"connectionsCount"`
+	StreamTypes             []StreamType              `json:"streamTypes"`
+	CurrentRecordId         *string                   `json:"currentRecordId"`
+	ProctoringActiveStreams []StreamType              `json:"proctoringActiveStreams,omitempty"`
+	ProctoringHealth        []ProctoringStreamHealth  `json:"proctoringHealth,omitempty"`
 }
 
 type PlayerAuth struct {

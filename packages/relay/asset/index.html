@@ -1016,6 +1016,17 @@ function FocusPanel({ p, peer, stalled, proctoringPeers, sessionId, streamType, 
                     seq {procRecord.committedSeq < 0 ? "—" : procRecord.committedSeq}
                     {" · "}{fmtBytes(procRecord.totalBytes)}
                     {" · "}last {fmtAgo(lastChunkMs)}
+                    {procRecord.health && (
+                      <>
+                        {" · "}restarts {procRecord.health.restartCount || 0}
+                        {procRecord.segmentCount > 1 && <>{" · "}segs {procRecord.segmentCount}</>}
+                        {procRecord.health.queueDepth > 0 && <>{" · "}queue {procRecord.health.queueDepth}</>}
+                        {procRecord.health.droppedChunks > 0 && <span style={{ color: "var(--warn)" }}>{" · "}dropped {procRecord.health.droppedChunks}</span>}
+                        {procRecord.health.browser && <>{" · "}{procRecord.health.browser}</>}
+                        {procRecord.health.recorderState && procRecord.health.recorderState !== 'recording' && <span style={{ color: "var(--warn)" }}>{" · "}{procRecord.health.recorderState}</span>}
+                        {procRecord.health.lastError && <div style={{ color: "var(--warn)" }} title={procRecord.health.lastError}>err: {procRecord.health.lastError.slice(0, 80)}</div>}
+                      </>
+                    )}
                     {procRecord.committedSeq >= 0 && (
                       <>
                         {"  "}

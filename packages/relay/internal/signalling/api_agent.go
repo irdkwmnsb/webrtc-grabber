@@ -2,6 +2,7 @@ package signalling
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -36,8 +38,30 @@ func limitBody(max int) fiber.Handler {
 }
 
 type proctoringChunkState struct {
-	CommittedSeq int64 `json:"committedSeq"`
-	TotalBytes   int64 `json:"totalBytes"`
+	CommittedSeq   int64                  `json:"committedSeq"`
+	TotalBytes     int64                  `json:"totalBytes"`
+	CurrentSegment int                    `json:"currentSegment,omitempty"`
+	SegmentBytes   int64                  `json:"segmentBytes,omitempty"`
+	Segments       []proctoringSegmentRow `json:"segments,omitempty"`
+}
+
+type proctoringSegmentRow struct {
+	Index       int   `json:"index"`
+	StartSeq    int64 `json:"startSeq"`
+	EndSeq      int64 `json:"endSeq"`
+	Bytes       int64 `json:"bytes"`
+	Chunks      int64 `json:"chunks"`
+	FirstChunkMs int64 `json:"firstChunkMs,omitempty"`
+	LastChunkMs  int64 `json:"lastChunkMs,omitempty"`
+}
+
+const proctoringLegacySegment = -1
+
+func segmentFileName(index int) string {
+	if index == proctoringLegacySegment {
+		return "full.webm"
+	}
+	return fmt.Sprintf("segment_%06d.webm", index)
 }
 
 var proctoringLocks sync.Map
@@ -66,7 +90,7 @@ func cleanupProctoringLocks(sessionId string) {
 }
 
 func loadProctoringState(stateFile string) (proctoringChunkState, error) {
-	st := proctoringChunkState{CommittedSeq: -1}
+	st := proctoringChunkState{CommittedSeq: -1, CurrentSegment: 0}
 	data, err := os.ReadFile(stateFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -76,6 +100,9 @@ func loadProctoringState(stateFile string) (proctoringChunkState, error) {
 	}
 	if err := json.Unmarshal(data, &st); err != nil {
 		return st, err
+	}
+	if st.CommittedSeq == 0 && st.CurrentSegment == 0 && len(st.Segments) == 0 {
+		st.CommittedSeq = -1
 	}
 	return st, nil
 }
@@ -105,6 +132,43 @@ func saveProctoringState(stateFile string, st proctoringChunkState) error {
 		return err
 	}
 	return os.Rename(tmp, stateFile)
+}
+
+// upsertSegment updates the manifest entry for the given index with the new
+// chunk. It assumes that segments are append-only by index — i.e. once we
+// move to index N+1 we never go back to N (stragglers from N will have been
+// written to segment_N.webm directly via the upload handler).
+func upsertSegment(st *proctoringChunkState, index, startSeq, endSeq int, bytes int64, nowMs int64) {
+	// Most common case: appending to the last segment.
+	if len(st.Segments) > 0 && st.Segments[len(st.Segments)-1].Index == index {
+		last := &st.Segments[len(st.Segments)-1]
+		last.EndSeq = int64(endSeq)
+		last.Bytes += bytes
+		last.Chunks++
+		last.LastChunkMs = nowMs
+		return
+	}
+	// Otherwise: find or create a row for this index. This handles the case
+	// where a straggler chunk arrives for segment N after we already moved to
+	// N+1 — we want to update N's row, not start a new one at the tail.
+	for i, r := range st.Segments {
+		if r.Index == index {
+			st.Segments[i].EndSeq = int64(endSeq)
+			st.Segments[i].Bytes += bytes
+			st.Segments[i].Chunks++
+			st.Segments[i].LastChunkMs = nowMs
+			return
+		}
+	}
+	st.Segments = append(st.Segments, proctoringSegmentRow{
+		Index:        index,
+		StartSeq:     int64(startSeq),
+		EndSeq:       int64(endSeq),
+		Bytes:        bytes,
+		Chunks:       1,
+		FirstChunkMs: nowMs,
+		LastChunkMs:  nowMs,
+	})
 }
 
 func (s *Server) setupAgentApi() {
@@ -172,9 +236,17 @@ func (s *Server) setupAgentApi() {
 			sessionId := c.Query("sessionId")
 			streamKey := c.Query("streamKey")
 			seqStr := c.Query("seq")
+			segmentStr := c.Query("segment")
+			advanceStr := c.Query("advanceToSeq")
 
 			if !isSafePathSegment(peerName) || !isSafePathSegment(sessionId) || !isSafePathSegment(seqStr) || !isProctoringStreamKey(streamKey) {
 				return c.Status(fiber.StatusBadRequest).SendString("Invalid params")
+			}
+			if segmentStr != "" && !isSafePathSegment(segmentStr) {
+				return c.Status(fiber.StatusBadRequest).SendString("Invalid segment")
+			}
+			if advanceStr != "" && !isSafePathSegment(advanceStr) {
+				return c.Status(fiber.StatusBadRequest).SendString("Invalid advanceToSeq")
 			}
 			if !s.verifyUploadToken(proctoringScope(sessionId, peerName, streamKey), c.Get(uploadTokenHeader)) {
 				return c.Status(fiber.StatusUnauthorized).SendString("Invalid upload token")
@@ -182,6 +254,25 @@ func (s *Server) setupAgentApi() {
 			seq, err := strconv.ParseInt(seqStr, 10, 64)
 			if err != nil || seq < 0 {
 				return c.Status(fiber.StatusBadRequest).SendString("Invalid seq")
+			}
+			// Missing segment (legacy clients) → 0. Negative is forbidden.
+			segment := 0
+			if segmentStr != "" {
+				segment, err = strconv.Atoi(segmentStr)
+				if err != nil || segment < 0 {
+					return c.Status(fiber.StatusBadRequest).SendString("Invalid segment")
+				}
+			}
+			// Optional gap-closing marker: lets the client declare that everything
+			// between committedSeq+1 and advanceToSeq-1 has been permanently lost
+			// (e.g. evicted from a bounded upload queue under network pressure).
+			// Server advances committedSeq to advanceToSeq-1 atomically.
+			advanceToSeq := int64(-1)
+			if advanceStr != "" {
+				advanceToSeq, err = strconv.ParseInt(advanceStr, 10, 64)
+				if err != nil || advanceToSeq < 0 {
+					return c.Status(fiber.StatusBadRequest).SendString("Invalid advanceToSeq")
+				}
 			}
 
 			file, err := c.FormFile("file")
@@ -200,7 +291,6 @@ func (s *Server) setupAgentApi() {
 			defer lock.Unlock()
 
 			stateFile := filepath.Join(dir, "state.json")
-			fullFile := filepath.Join(dir, "full.webm")
 
 			st, err := loadProctoringState(stateFile)
 			if err != nil {
@@ -211,20 +301,47 @@ func (s *Server) setupAgentApi() {
 			if seq <= st.CommittedSeq {
 				return c.Status(fiber.StatusOK).SendString("OK (already committed)")
 			}
+
+			// Apply optional gap-closing marker before the strict in-order
+			// check so a client that lost chunks can still make progress.
+			if advanceToSeq > st.CommittedSeq+1 {
+				slog.Info("proctoring gap closed by client",
+					"session", sessionId, "peer", peerName, "stream", streamKey,
+					"prevCommitted", st.CommittedSeq, "advancedTo", advanceToSeq-1,
+					"gap", advanceToSeq-1-st.CommittedSeq)
+				st.CommittedSeq = advanceToSeq - 1
+			}
+
 			if seq != st.CommittedSeq+1 {
 				return c.Status(fiber.StatusConflict).SendString("Out of order")
 			}
 
-			if info, err := os.Stat(fullFile); err == nil && info.Size() > st.TotalBytes {
-				if err := os.Truncate(fullFile, st.TotalBytes); err != nil {
-					slog.Error("failed to truncate proctoring file", "file", fullFile, "error", err)
+			// Forward-only *current segment* marker (used only for manifest /
+			// admin display). Actual writes target the file matching the
+			// client's segment so a straggler chunk from segment N appending
+			// after rotation to N+1 lands in segment_N.webm, not N+1 (their
+			// WebM EBML headers are mutually incompatible).
+			if segment > st.CurrentSegment {
+				st.CurrentSegment = segment
+			}
+			currentSegmentFile := filepath.Join(dir, segmentFileName(segment))
+
+			// Per-segment recovery: truncate if the on-disk file is larger
+			// than what state claims (e.g. server crashed mid-write).
+			var segBytes int64
+			if len(st.Segments) > 0 && st.Segments[len(st.Segments)-1].Index == segment {
+				segBytes = st.Segments[len(st.Segments)-1].Bytes
+			}
+			if info, err := os.Stat(currentSegmentFile); err == nil && info.Size() > segBytes {
+				if err := os.Truncate(currentSegmentFile, segBytes); err != nil {
+					slog.Error("failed to truncate proctoring segment", "file", currentSegmentFile, "error", err)
 					return c.Status(fiber.StatusInternalServerError).SendString("Failed to truncate")
 				}
 			}
 
-			out, err := os.OpenFile(fullFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+			out, err := os.OpenFile(currentSegmentFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 			if err != nil {
-				slog.Error("failed to open proctoring file", "file", fullFile, "error", err)
+				slog.Error("failed to open proctoring segment", "file", currentSegmentFile, "error", err)
 				return c.Status(fiber.StatusInternalServerError).SendString("Failed to open")
 			}
 			defer out.Close()
@@ -237,21 +354,25 @@ func (s *Server) setupAgentApi() {
 
 			n, err := io.Copy(out, src)
 			if err != nil {
-				slog.Error("failed to append proctoring chunk", "file", fullFile, "error", err)
+				slog.Error("failed to append proctoring chunk", "file", currentSegmentFile, "error", err)
 				return c.Status(fiber.StatusInternalServerError).SendString("Failed to append")
 			}
 			if err := out.Sync(); err != nil {
-				slog.Error("failed to fsync proctoring file", "file", fullFile, "error", err)
+				slog.Error("failed to fsync proctoring segment", "file", currentSegmentFile, "error", err)
 				return c.Status(fiber.StatusInternalServerError).SendString("Failed to sync")
 			}
 
-			next := proctoringChunkState{CommittedSeq: seq, TotalBytes: st.TotalBytes + n}
-			if err := saveProctoringState(stateFile, next); err != nil {
+			nowMs := time.Now().UnixMilli()
+			upsertSegment(&st, segment, int(seq), int(seq), n, nowMs)
+			st.CommittedSeq = seq
+			st.TotalBytes += n
+			if err := saveProctoringState(stateFile, st); err != nil {
 				slog.Error("failed to save proctoring state", "stateFile", stateFile, "error", err)
 				return c.Status(fiber.StatusInternalServerError).SendString("Failed to save state")
 			}
 
-			slog.Debug("appended proctoring chunk", "session", sessionId, "peer", peerName, "seq", seq, "sizeKB", n/1024, "total", next.TotalBytes)
+			slog.Debug("appended proctoring chunk", "session", sessionId, "peer", peerName, "seq", seq,
+				"segment", segment, "sizeKB", n/1024, "total", st.TotalBytes)
 			return c.Status(fiber.StatusOK).SendString("OK")
 		})
 	})
