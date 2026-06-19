@@ -173,3 +173,101 @@ func makeRealWebmFileCustom(t *testing.T, path string, seconds int, size string)
 		t.Fatalf("ffmpeg generate %s (%s): %v\n%s", path, size, err, out)
 	}
 }
+
+// TestEBMLHeaderOffsets covers the pure header-scanning helpers without ffmpeg.
+func TestEBMLHeaderOffsets(t *testing.T) {
+	// A minimal but structurally real header prefix: magic, 1-byte size vint
+	// (0x9F), then EBMLVersion (0x4286). Trailing bytes stand in for payload.
+	hdr := []byte{0x1A, 0x45, 0xDF, 0xA3, 0x9F, 0x42, 0x86, 0x81, 0x01, 0xAA, 0xBB}
+	// A magic-like sequence NOT followed by EBMLVersion — must be ignored.
+	fake := []byte{0x1A, 0x45, 0xDF, 0xA3, 0x9F, 0x11, 0x22, 0x33}
+
+	var blob []byte
+	blob = append(blob, hdr...)
+	blob = append(blob, 0xCC, 0xDD) // filler
+	want2 := int64(len(blob))
+	blob = append(blob, hdr...)
+	blob = append(blob, fake...) // decoy, should not be counted
+
+	got := ebmlHeaderOffsetsBytes(blob)
+	if len(got) != 2 || got[0] != 0 || got[1] != want2 {
+		t.Fatalf("ebmlHeaderOffsetsBytes = %v, want [0 %d]", got, want2)
+	}
+
+	if vintLen(0x9F) != 1 || vintLen(0x40) != 2 || vintLen(0x00) != 0 {
+		t.Errorf("vintLen wrong: 0x9F=%d 0x40=%d 0x00=%d", vintLen(0x9F), vintLen(0x40), vintLen(0x00))
+	}
+	if !validEBMLHeader(hdr, 0) {
+		t.Errorf("validEBMLHeader rejected a real header")
+	}
+	if validEBMLHeader(fake, 0) {
+		t.Errorf("validEBMLHeader accepted a decoy")
+	}
+}
+
+// TestFinalizeProctoringSession_ReconstructsMisalignedSegments simulates the
+// legacy capture bug: a stopped recorder's headerless tail was tagged into the
+// next segment, so segment files do not begin at recorder-run boundaries and a
+// plain concat-copy fails. The finalizer must fall back to header-split
+// reconstruction and still produce a valid full.webm of the full duration.
+func TestFinalizeProctoringSession_ReconstructsMisalignedSegments(t *testing.T) {
+	ffmpegAvailable(t)
+	dir := t.TempDir()
+	session := "misaligned-session"
+	peer := "peer-M"
+	stream := "desktop"
+	streamDir := filepath.Join(dir, "proctoring", session, peer, stream)
+	if err := os.MkdirAll(streamDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Three independent recorder runs (2+3+2 = 7s), each a self-contained WebM.
+	runsDir := t.TempDir()
+	r0 := filepath.Join(runsDir, "r0.webm")
+	r1 := filepath.Join(runsDir, "r1.webm")
+	r2 := filepath.Join(runsDir, "r2.webm")
+	makeRealWebmFile(t, r0, 2)
+	makeRealWebmFile(t, r1, 3)
+	makeRealWebmFile(t, r2, 2)
+	b0, b1, b2 := readFile(t, r0), readFile(t, r1), readFile(t, r2)
+
+	// The original continuous byte stream, then re-cut at boundaries that fall
+	// MID-run so neither segment aligns with a recorder-run header. seg1 starts
+	// inside run1 (headerless) — exactly what breaks plain concat.
+	blob := append(append(append([]byte{}, b0...), b1...), b2...)
+	cut := len(b0) + len(b1)/2
+	writeFile(t, filepath.Join(streamDir, "segment_000000.webm"), blob[:cut])
+	writeFile(t, filepath.Join(streamDir, "segment_000001.webm"), blob[cut:])
+
+	finalizeProctoringSession(dir, session)
+
+	full := filepath.Join(streamDir, "full.webm")
+	if _, err := os.Stat(full); err != nil {
+		t.Fatalf("expected reconstructed full.webm missing: %v", err)
+	}
+	dur := ffprobeDuration(t, full)
+	if dur == "" {
+		t.Fatalf("full.webm is not ffprobe-valid (reconstruction produced garbage)")
+	}
+	// Allow a little slack for container timing, but it must reflect all 7s,
+	// not just the first decodable run.
+	if !strings.HasPrefix(dur, "6") && !strings.HasPrefix(dur, "7") {
+		t.Errorf("reconstructed duration = %q, want ~7 seconds (2+3+2)", dur)
+	}
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return b
+}
+
+func writeFile(t *testing.T, path string, b []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}

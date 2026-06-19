@@ -892,7 +892,10 @@
 
             const sessionId = this.cfg.sessionId;
             const streamKey = this.streamKey;
-            recorder.addEventListener('dataavailable', async (e) => {
+            // Kept as a named reference so _teardownRecorder can detach it
+            // before stopping: stop() flushes a final headerless chunk
+            // asynchronously, by which point segmentIndex has already advanced.
+            const onData = async (e) => {
                 if (!e.data || !e.data.size) return;
                 this.health.recordChunk(e.data.size);
                 const seq = this.seq++;
@@ -906,7 +909,9 @@
                     this.health.recordError(`enqueue failed: ${err.message || err}`);
                     this.health.incDrop();
                 }
-            });
+            };
+            recorder._onData = onData;
+            recorder.addEventListener('dataavailable', onData);
             recorder.addEventListener('error', e => {
                 const msg = (e && e.error && (e.error.message || e.error.name)) || 'recorder error';
                 console.error(`proctoring[${streamKey}] recorder error`, e && e.error);
@@ -1101,7 +1106,18 @@
 
         _teardownRecorder() {
             if (this.recorder && this.recorder.state !== 'inactive') {
-                try { this.recorder.requestData(); } catch (e) {}
+                // Detach the chunk handler BEFORE stopping. stop() flushes a
+                // final, headerless chunk asynchronously, but segmentIndex has
+                // already been bumped by _rotateSegmentIndex — so that tail
+                // chunk would be tagged with the *next* segment and pushed in
+                // front of the new recorder's EBML header, leaving the segment
+                // file starting mid-stream (not standalone-decodable). Dropping
+                // the old recorder's tail keeps every segment beginning cleanly
+                // with its own header. (We no longer call requestData() either,
+                // since its sole purpose was flushing that now-unwanted tail.)
+                if (this.recorder._onData) {
+                    try { this.recorder.removeEventListener('dataavailable', this.recorder._onData); } catch (e) {}
+                }
                 try { this.recorder.stop(); } catch (e) {}
             }
             this.recorder = null;

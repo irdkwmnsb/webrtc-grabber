@@ -933,7 +933,8 @@ function CellTooltip({ data }) {
 // ── FocusPanel ──
 function FocusPanel({ p, peer, stalled, proctoringPeers, sessionId, streamType, setStreamType,
                       videoRef, isLive, needsPlay, onPlayClick, onConnectStream, onCloseStream,
-                      onRecord, onStopRecord, onClearSelection, onDownload, onPlayersDisconnect, onPopOut }) {
+                      onRecord, onStopRecord, onClearSelection, onDownload, onPlayersDisconnect, onPopOut,
+                      procVideoRef, onProcVideoEnded, playProctoringSegment }) {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -1810,6 +1811,9 @@ function App() {
           onDownload={onDownload}
           onPlayersDisconnect={onPlayersDisconnect}
           onPopOut={onPopOut}
+          procVideoRef={procVideoRef}
+          onProcVideoEnded={onProcVideoEnded}
+          playProctoringSegment={playProctoringSegment}
         />
         {sessionsToShow.length > 0 && (
           <div className="sessions-strip">
