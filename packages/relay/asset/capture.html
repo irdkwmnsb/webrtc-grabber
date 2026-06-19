@@ -1471,10 +1471,6 @@
                 showSourceLossBanner(streamKey, reason, () => recoverStream(streamKey));
             },
         });
-        // Expose for the smoke harness (cmd/smoke-proctoring). Harmless in
-        // production: it only allows read-only inspection of the session
-        // state from devtools.
-        window.__proctoringSession = proctoringSession;
 
         client.target.addEventListener("init_peer", async ({ detail: { pcConfig, pingInterval } }) => {
             peerConnectionConfig = pcConfig;
