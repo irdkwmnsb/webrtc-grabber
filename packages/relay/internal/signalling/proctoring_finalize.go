@@ -128,6 +128,19 @@ func listSegmentFiles(dir string) []string {
 	return out
 }
 
+// concatListEntry formats one line for ffmpeg's concat demuxer. Entries are
+// resolved relative to the LIST FILE's directory (not the process cwd), so a
+// cwd-relative path like "records/.../seg.webm" written into a list that itself
+// lives under "records/.../" gets doubled. Resolving to an absolute path (the
+// demuxer accepts them with -safe 0) avoids that, and single quotes in the path
+// are escaped so odd names can't break the list.
+func concatListEntry(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	return "file '" + strings.ReplaceAll(p, "'", `'\''`) + "'\n"
+}
+
 // concatSegments uses ffmpeg's concat demuxer to join segments into
 // `full.webm`. The original segment files are kept on disk so that even if
 // the merged file is corrupt, individual segments remain recoverable.
@@ -160,8 +173,7 @@ func concatSegments(dir string, segments []string) {
 	listPath := filepath.Join(dir, "concat_list.txt")
 	var buf bytes.Buffer
 	for _, s := range segments {
-		// concat demuxer with -safe 0 accepts absolute paths.
-		fmt.Fprintf(&buf, "file '%s'\n", filepath.Join(dir, s))
+		buf.WriteString(concatListEntry(filepath.Join(dir, s)))
 	}
 	if err := os.WriteFile(listPath, buf.Bytes(), 0o644); err != nil {
 		slog.Warn("proctoring concat: cannot write list", "file", listPath, "error", err)
@@ -284,7 +296,7 @@ func reconstructFromHeaders(dir string, segments []string, full string) bool {
 		if !remuxToFile(runPath, fixedPath) {
 			continue
 		}
-		fmt.Fprintf(&listBuf, "file '%s'\n", fixedPath)
+		listBuf.WriteString(concatListEntry(fixedPath))
 		runs++
 	}
 	if runs == 0 {
