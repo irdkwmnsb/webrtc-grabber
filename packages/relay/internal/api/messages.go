@@ -98,7 +98,16 @@ type GrabberMessage struct {
 
 type GrabberInitPeerMessage struct {
 	PcConfigMessage
-	PingInterval int `json:"pingInterval"`
+	PingInterval int                    `json:"pingInterval"`
+	SiteCheck    *SiteCheckClientConfig `json:"siteCheck,omitempty"`
+}
+
+// SiteCheckClientConfig tells the capture page which sites to probe and how
+// often. Sent in the grabber init message; omitted entirely when no sites are
+// configured (feature off).
+type SiteCheckClientConfig struct {
+	Sites      []string `json:"sites"`
+	IntervalMs int      `json:"intervalMs"`
 }
 
 type PcConfigMessage struct {

@@ -1,0 +1,22 @@
+# Site availability checks (optional).
+#
+# Each student's capture page periodically tries to reach these URLs and reports
+# the result. The sites are expected to be UNREACHABLE during an exam (e.g. they
+# should be blocked at the network level): if a student CAN reach one, it is
+# flagged red on the dashboard and the proctoring review page.
+#
+# Leave `sites` empty (default) to disable the feature entirely — no probing is
+# done and nothing is shown.
+#
+# Notes:
+#   - Use https:// URLs. An https capture page cannot probe http:// URLs
+#     (browsers block mixed content), which would look "unreachable" regardless.
+#   - Probing uses a no-cors fetch with a timeout; a resolved request means the
+#     host answered (reachable), a network error / block / timeout means not.
+
+sites: []
+#  - "https://google.com"
+#  - "https://chat.openai.com"
+
+# How often each capture page re-checks, in milliseconds (min 1000).
+intervalMs: 15000

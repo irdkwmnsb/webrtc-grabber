@@ -102,8 +102,8 @@
                 console.log("init socket", socketPath);
             });
 
-            const init_peer_handle = function ({ initPeer: { pcConfig, pingInterval } }) {
-                this.target.dispatchEvent(new CustomEvent('init_peer', { detail: { pcConfig, pingInterval } }));
+            const init_peer_handle = function ({ initPeer: { pcConfig, pingInterval, siteCheck } }) {
+                this.target.dispatchEvent(new CustomEvent('init_peer', { detail: { pcConfig, pingInterval, siteCheck } }));
             };
             const offer_handle = async function ({ offer: { peerId, offer, streamType } }) {
                 this.target.dispatchEvent(new CustomEvent('offer', { detail: { playerId: peerId, offer, streamType } }));
@@ -149,7 +149,7 @@
             this.socket.on("proctoring_stop",   proctoring_stop_handle.bind(this));
         }
 
-        send_ping(connectionsCount, streamTypes, currentRecordId, proctoringActiveStreams, proctoringHealth) {
+        send_ping(connectionsCount, streamTypes, currentRecordId, proctoringActiveStreams, proctoringHealth, siteChecks) {
             this.socket.emit("ping", {
                 ping: {
                     connectionsCount: connectionsCount,
@@ -157,6 +157,7 @@
                     currentRecordId: currentRecordId,
                     proctoringActiveStreams: proctoringActiveStreams || [],
                     proctoringHealth: proctoringHealth || [],
+                    siteChecks: siteChecks || [],
                 }
             });
         }
@@ -1392,6 +1393,59 @@
         let peerConnectionConfig = undefined;
         let pingTimerId = undefined;
 
+        // ── Site availability checks ──────────────────────────────────────────
+        // The configured sites are expected to be UNreachable (forbidden during
+        // an exam). We probe each with a no-cors fetch: if it resolves the host
+        // answered (reachable -> flagged red on the dashboard); a network error,
+        // block, or timeout means unreachable (ok). The latest results ride along
+        // with the regular ping status. Note: configured sites should be https,
+        // since an https capture page can't reach http URLs (mixed content).
+        let siteChecks = [];
+        let siteCheckTimerId = undefined;
+
+        const probeSite = async (url, timeoutMs = 5000) => {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+            try {
+                // no-cors so cross-origin requests aren't rejected by CORS; we
+                // never read the (opaque) body, only whether the host answered.
+                // Do NOT set redirect:"manual" — sites that redirect (e.g.
+                // google.com -> www.google.com) throw NetworkError under no-cors,
+                // which would mislabel a reachable site as blocked. "follow"
+                // (the default) resolves on any reachable target.
+                await fetch(url, { mode: "no-cors", cache: "no-store", signal: ctrl.signal });
+                return true;
+            } catch (_) {
+                return false;
+            } finally {
+                clearTimeout(timer);
+            }
+        };
+
+        const probeSites = async (sites) => {
+            const checkedAt = Date.now();
+            return Promise.all(sites.map(async (url) => ({
+                url,
+                reachable: await probeSite(url),
+                checkedAt,
+            })));
+        };
+
+        const startSiteChecks = (siteCheck) => {
+            const sites = siteCheck && Array.isArray(siteCheck.sites) ? siteCheck.sites : [];
+            if (siteCheckTimerId) {
+                clearInterval(siteCheckTimerId);
+                siteCheckTimerId = undefined;
+            }
+            siteChecks = [];
+            if (!sites.length) return;
+            const intervalMs = Math.max(1000, siteCheck.intervalMs || 15000);
+            const run = async () => { siteChecks = await probeSites(sites); };
+            run();
+            siteCheckTimerId = setInterval(run, intervalMs);
+            console.log(`site checks enabled (${sites.length} sites, every ${intervalMs}ms)`);
+        };
+
         updateState("connecting");
         const client = new GrabberCaptureClient(connectionArgs.peerName);
 
@@ -1488,7 +1542,7 @@
             },
         });
 
-        client.target.addEventListener("init_peer", async ({ detail: { pcConfig, pingInterval } }) => {
+        client.target.addEventListener("init_peer", async ({ detail: { pcConfig, pingInterval, siteCheck } }) => {
             peerConnectionConfig = pcConfig;
             pingInterval = pingInterval ?? 3000;
             if (pingTimerId) {
@@ -1501,8 +1555,10 @@
                     recordingManager.activeRecording.recordId,
                     proctoringSession.getActiveStreams(),
                     proctoringSession.getHealth(),
+                    siteChecks,
                 );
             }, pingInterval);
+            startSiteChecks(siteCheck);
             console.log(`init peer (pingInterval = ${pingInterval})`);
             updateState("active");
         });

@@ -87,6 +87,7 @@ func (s *Storage) ping(socketId sockets.SocketID, status *api.PeerStatus) {
 	peer.CurrentRecordId = status.CurrentRecordId
 	peer.ProctoringActiveStreams = status.ProctoringActiveStreams
 	peer.ProctoringHealth = status.ProctoringHealth
+	peer.SiteChecks = status.SiteChecks
 	s.peers[socketId] = peer
 }
 

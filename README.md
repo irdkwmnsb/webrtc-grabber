@@ -245,6 +245,15 @@ timeout: 180000
 storageDirectory: "./records"
 ```
 
+`sitecheck.yaml` (optional — see [Site availability checks](#site-checks)):
+
+```yaml
+sites:
+  - "https://google.com"
+  - "https://chat.openai.com"
+intervalMs: 15000
+```
+
 ### Configuration Parameters
 
 | Property               | Description                                                      | Type             | Default       |
@@ -267,6 +276,8 @@ storageDirectory: "./records"
 | `disableAudio`         | Disable audio publishing/subscription                           | **boolean**      | `false`       |
 | `timeout`              | Recording timeout (milliseconds)                                | **number**       | `180000`      |
 | `storageDirectory`     | Recording output directory                                      | **string**       | `"./records"` |
+| `sites`                | URLs each capture page probes; expected to be unreachable (empty = off) | **string[]** | `[]`          |
+| `intervalMs`           | How often capture pages re-probe `sites` (min 1000)             | **number**       | `15000`       |
 
 #### Login page (optional)
 
@@ -280,6 +291,31 @@ On a successful student login the server sets a signed, `HttpOnly` cookie scoped
 When `authEnabled` is `false` (the default) nothing changes: `/` serves the dashboard and the capture page stays open.
 
 > **Note:** The login form and page redirects are for convenience; the real access boundary is the WebSocket token check. Serve the relay over HTTPS/WSS (see the [Caddy config](deploy/caddy/)) so cookies and credentials aren't sent in clear text.
+
+#### Proctoring review page
+
+The relay serves a dedicated review page at **`/proctoring`** (linked from the dashboard header via **Review**). In the same style as the dashboard, it lets an admin:
+
+- Browse every recorded proctoring **session** — active, past, or finalized.
+- For a selected session, see each peer/stream with its online state, committed sequence, segment count, size, and last-chunk time.
+- **Play** a recording (segments are stitched in order) and **Download** the full file (`full.remuxed.webm` when finalized, otherwise `full.webm`).
+- See the latest [site-check](#site-checks) status per participant.
+
+It authenticates against the admin API with the same `adminCredential` (HTTP Basic), reusing the credential stored at login; it prompts once if missing. The underlying endpoints are `GET /api/admin/proctoring`, `GET /api/admin/proctoring/session/:sessionId`, and `GET /api/admin/proctoring/file/...`.
+
+#### Site availability checks <a name="site-checks"></a>
+
+Configure a list of sites in `sitecheck.yaml` that **must be unreachable** during an exam (e.g. blocked at the network level). Each student's capture page periodically probes every site from the browser and reports the result with its regular status ping. A site that the student **can** reach is flagged:
+
+- On the **dashboard**: a red `!` badge on the participant card, and a full **Site checks** panel (per site: `host · REACHABLE` in red vs `host · blocked`) when the participant is selected.
+- On the **`/proctoring` page**: a per-participant row of site badges.
+- Via `GET /api/admin/sitechecks` (admin auth) — `{ sites, intervalMs, peers: [{ name, online, siteChecks }] }`.
+
+Leave `sites` empty (the default) to disable the feature entirely — no probing is done and nothing is shown.
+
+> **Notes:**
+> - Use `https://` URLs. An `https` capture page cannot probe `http://` URLs (browsers block mixed content), which would always look unreachable.
+> - Probing uses a `no-cors` `fetch` with a timeout: a resolved request means the host answered (**reachable**); a network error, block, or timeout means **unreachable**. A network-level block that returns an HTTP page (e.g. a proxy block page) is the one case that can read as reachable.
 
 ### Build sources <a name="relay-build"></a>
 

@@ -186,6 +186,7 @@ func (s *Server) setupPublicApi() {
 		return c.JSON(fiber.Map{
 			"title":       title,
 			"authEnabled": s.authEnabled(),
+			"siteCheck":   s.siteCheckClientConfig(),
 		})
 	})
 
@@ -194,6 +195,60 @@ func (s *Server) setupPublicApi() {
 	s.app.Get("/api/auth/logout", s.handleLogout)
 
 	s.setupPageRoutes()
+}
+
+// siteCheckClientConfig returns the site-probe config handed to capture pages,
+// or nil when no sites are configured (feature off). The interval is clamped to
+// a sane floor so a misconfiguration can't hammer the network.
+func (s *Server) siteCheckClientConfig() *api.SiteCheckClientConfig {
+	sites := s.config.SiteCheck.Sites
+	if len(sites) == 0 {
+		return nil
+	}
+	interval := s.config.SiteCheck.IntervalMs
+	if interval < 1000 {
+		interval = 15000
+	}
+	return &api.SiteCheckClientConfig{Sites: sites, IntervalMs: interval}
+}
+
+type siteCheckPeerStatus struct {
+	Name       string                `json:"name"`
+	TeamName   string                `json:"teamName,omitempty"`
+	Online     bool                  `json:"online"`
+	SiteChecks []api.SiteCheckResult `json:"siteChecks"`
+}
+
+type siteCheckStatusResponse struct {
+	Sites      []string              `json:"sites"`
+	IntervalMs int                   `json:"intervalMs"`
+	Peers      []siteCheckPeerStatus `json:"peers"`
+}
+
+// buildSiteCheckStatus reports the configured sites plus each participant's most
+// recent probe results, for the admin dashboard / proctoring page.
+func (s *Server) buildSiteCheckStatus() siteCheckStatusResponse {
+	resp := siteCheckStatusResponse{
+		Sites:      s.config.SiteCheck.Sites,
+		IntervalMs: s.config.SiteCheck.IntervalMs,
+		Peers:      []siteCheckPeerStatus{},
+	}
+	if resp.Sites == nil {
+		resp.Sites = []string{}
+	}
+	for _, p := range s.storage.getParticipantsStatus() {
+		checks := p.SiteChecks
+		if checks == nil {
+			checks = []api.SiteCheckResult{}
+		}
+		resp.Peers = append(resp.Peers, siteCheckPeerStatus{
+			Name:       p.Name,
+			TeamName:   p.TeamName,
+			Online:     p.LastPing != nil,
+			SiteChecks: checks,
+		})
+	}
+	return resp
 }
 
 // sendAsset writes an embedded asset (see package asset) with the right
@@ -228,6 +283,10 @@ func (s *Server) setupPageRoutes() {
 
 	s.app.Get("/admin", func(c *fiber.Ctx) error {
 		return sendAsset(c, "index.html")
+	})
+
+	s.app.Get("/proctoring", func(c *fiber.Ctx) error {
+		return sendAsset(c, "proctoring.html")
 	})
 
 	s.app.Get("/player", func(c *fiber.Ctx) error {
@@ -563,6 +622,7 @@ func (s *Server) listenGrabberSocket(c *websocket.Conn, peerName string) {
 		InitPeer: &api.GrabberInitPeerMessage{
 			PcConfigMessage: api.PcConfigMessage{PcConfig: s.config.WebRTC.PeerConnectionConfig},
 			PingInterval:    s.config.Server.GrabberPingInterval,
+			SiteCheck:       s.siteCheckClientConfig(),
 		},
 	}); err != nil {
 		slog.Error("failed to send init_peer", "socketID", socketID, "error", err)

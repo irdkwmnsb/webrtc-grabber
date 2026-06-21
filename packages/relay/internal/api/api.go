@@ -8,30 +8,40 @@ import (
 )
 
 type Peer struct {
-	Name                    string                  `json:"name"`
-	SocketId                sockets.SocketID        `json:"id"`
-	LastPing                *time.Time              `json:"lastPing"`
-	ConnectionsCount        int                     `json:"connectionsCount"`
-	StreamTypes             []StreamType            `json:"streamTypes"`
-	CurrentRecordId         *string                 `json:"currentRecordId"`
-	ProctoringActiveStreams []StreamType            `json:"proctoringActiveStreams,omitempty"`
+	Name                    string                   `json:"name"`
+	SocketId                sockets.SocketID         `json:"id"`
+	LastPing                *time.Time               `json:"lastPing"`
+	ConnectionsCount        int                      `json:"connectionsCount"`
+	StreamTypes             []StreamType             `json:"streamTypes"`
+	CurrentRecordId         *string                  `json:"currentRecordId"`
+	ProctoringActiveStreams []StreamType             `json:"proctoringActiveStreams,omitempty"`
 	ProctoringHealth        []ProctoringStreamHealth `json:"proctoringHealth,omitempty"`
-	TeamName                string                  `json:"teamName,omitempty"`
-	University              string                  `json:"university,omitempty"`
+	SiteChecks              []SiteCheckResult        `json:"siteChecks,omitempty"`
+	TeamName                string                   `json:"teamName,omitempty"`
+	University              string                   `json:"university,omitempty"`
+}
+
+// SiteCheckResult is one site-reachability probe reported by a grabber. The
+// configured sites are expected to be UNreachable, so Reachable == true is the
+// alarm condition (the student can open a forbidden site).
+type SiteCheckResult struct {
+	Url       string `json:"url"`
+	Reachable bool   `json:"reachable"`
+	CheckedAt int64  `json:"checkedAt,omitempty"` // unix millis
 }
 
 type ProctoringStreamHealth struct {
-	StreamKey        string  `json:"streamKey"`
-	LastChunkAt      int64   `json:"lastChunkAt,omitempty"`
-	ChunksTotal      uint64  `json:"chunksTotal,omitempty"`
-	BytesTotal       uint64  `json:"bytesTotal,omitempty"`
-	RecorderState    string  `json:"recorderState,omitempty"`
-	LastError        string  `json:"lastError,omitempty"`
-	RestartCount     uint32  `json:"restartCount,omitempty"`
-	DroppedChunks    uint64  `json:"droppedChunks,omitempty"`
-	QueueDepth       uint32  `json:"queueDepth,omitempty"`
-	Browser          string  `json:"browser,omitempty"`
-	MimeType         string  `json:"mimeType,omitempty"`
+	StreamKey     string `json:"streamKey"`
+	LastChunkAt   int64  `json:"lastChunkAt,omitempty"`
+	ChunksTotal   uint64 `json:"chunksTotal,omitempty"`
+	BytesTotal    uint64 `json:"bytesTotal,omitempty"`
+	RecorderState string `json:"recorderState,omitempty"`
+	LastError     string `json:"lastError,omitempty"`
+	RestartCount  uint32 `json:"restartCount,omitempty"`
+	DroppedChunks uint64 `json:"droppedChunks,omitempty"`
+	QueueDepth    uint32 `json:"queueDepth,omitempty"`
+	Browser       string `json:"browser,omitempty"`
+	MimeType      string `json:"mimeType,omitempty"`
 }
 
 type StreamType string
@@ -42,11 +52,12 @@ const (
 )
 
 type PeerStatus struct {
-	ConnectionsCount        int                       `json:"connectionsCount"`
-	StreamTypes             []StreamType              `json:"streamTypes"`
-	CurrentRecordId         *string                   `json:"currentRecordId"`
-	ProctoringActiveStreams []StreamType              `json:"proctoringActiveStreams,omitempty"`
-	ProctoringHealth        []ProctoringStreamHealth  `json:"proctoringHealth,omitempty"`
+	ConnectionsCount        int                      `json:"connectionsCount"`
+	StreamTypes             []StreamType             `json:"streamTypes"`
+	CurrentRecordId         *string                  `json:"currentRecordId"`
+	ProctoringActiveStreams []StreamType             `json:"proctoringActiveStreams,omitempty"`
+	ProctoringHealth        []ProctoringStreamHealth `json:"proctoringHealth,omitempty"`
+	SiteChecks              []SiteCheckResult        `json:"siteChecks,omitempty"`
 }
 
 type PlayerAuth struct {

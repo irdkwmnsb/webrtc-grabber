@@ -163,6 +163,22 @@ func (r RawWebRTCConfig) ToDomain() WebRTCConfig {
 	return cfg
 }
 
+type RawSiteCheckConfig struct {
+	Sites      *[]string `yaml:"sites" json:"sites"`
+	IntervalMs *int      `yaml:"intervalMs" json:"intervalMs"`
+}
+
+func (r RawSiteCheckConfig) ToDomain() SiteCheckConfig {
+	var cfg SiteCheckConfig
+	if r.Sites != nil {
+		cfg.Sites = *r.Sites
+	}
+	if r.IntervalMs != nil {
+		cfg.IntervalMs = *r.IntervalMs
+	}
+	return cfg
+}
+
 type RawRecordConfig struct {
 	Timeout    *uint   `yaml:"timeout" json:"timeout"`
 	StorageDir *string `yaml:"storageDirectory" json:"storageDirectory"`

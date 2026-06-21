@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>proctoring · webrtc-grabber</title>
+  <style>
+    :root {
+      --paper:   #f5f3ee;
+      --paper-2: #efece5;
+      --card:    #ffffff;
+      --ink:     #18160f;
+      --ink-2:   #2c2920;
+      --mute:    #807a6e;
+      --mute-2:  #b6afa1;
+      --rule:    #d8d2c4;
+      --rule-2:  #e6e1d5;
+      --ok:      oklch(58% 0.10 150);
+      --alert:   oklch(56% 0.18 25);
+      --select:  oklch(45% 0.13 250);
+      --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+      --sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: var(--sans);
+      color: var(--ink);
+      background: var(--paper);
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: "ss01", "cv11";
+    }
+    a { color: var(--select); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    header {
+      display: flex; align-items: center; gap: 16px;
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--rule);
+      background: var(--card);
+      position: sticky; top: 0; z-index: 10;
+    }
+    header .title { font-weight: 600; font-size: 16px; }
+    header .badge {
+      font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--paper); background: var(--ink);
+      padding: 3px 7px; border-radius: 4px;
+    }
+    header nav { margin-left: auto; display: flex; gap: 18px; align-items: center; }
+    header nav .m { font-family: var(--mono); font-size: 12px; }
+
+    main { max-width: 1100px; margin: 0 auto; padding: 22px; }
+    section { margin-bottom: 28px; }
+    h2 {
+      font-size: 12px; font-family: var(--mono); font-weight: 600;
+      letter-spacing: .1em; text-transform: uppercase; color: var(--mute);
+      margin: 0 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--rule-2);
+    }
+
+    .card {
+      background: var(--card); border: 1px solid var(--rule);
+      border-radius: 8px; padding: 14px 16px;
+    }
+
+    .sessions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .session-chip {
+      font-family: var(--mono); font-size: 12px;
+      padding: 7px 11px; border: 1px solid var(--rule); border-radius: 6px;
+      background: var(--card); cursor: pointer; display: flex; gap: 8px; align-items: center;
+    }
+    .session-chip:hover { background: var(--paper-2); }
+    .session-chip.active { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+    .tag {
+      font-family: var(--mono); font-size: 9px; letter-spacing: .08em;
+      text-transform: uppercase; padding: 2px 5px; border-radius: 3px;
+    }
+    .tag.live { background: var(--alert); color: #fff; }
+    .tag.fin  { background: var(--ok); color: #fff; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule-2); }
+    th { font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--mute); }
+    td .m, .num { font-family: var(--mono); font-size: 12px; }
+    .num { text-align: right; }
+
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+    .dot.on { background: var(--ok); }
+    .dot.off { background: var(--mute-2); }
+
+    .btn {
+      font-family: var(--sans); font-size: 12px; cursor: pointer;
+      padding: 5px 10px; border: 1px solid var(--rule); border-radius: 6px;
+      background: var(--card); color: var(--ink);
+    }
+    .btn:hover { background: var(--paper-2); }
+    .btn.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+    .btn:disabled { opacity: .45; cursor: default; }
+
+    .player { margin-top: 14px; }
+    .player video { width: 100%; max-height: 460px; background: #000; border-radius: 8px; }
+    .player .now { font-family: var(--mono); font-size: 11px; color: var(--mute); margin-top: 6px; }
+
+    /* Site checks */
+    .sitecheck-peer { padding: 9px 0; border-bottom: 1px solid var(--rule-2); display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+    .sitecheck-peer .name { font-family: var(--mono); font-size: 13px; min-width: 120px; }
+    .sitecheck-peer .name .team { color: var(--mute); font-size: 11px; }
+    .site-badge {
+      font-family: var(--mono); font-size: 11px; padding: 3px 8px; border-radius: 5px;
+      border: 1px solid var(--rule); display: inline-flex; gap: 6px; align-items: center;
+    }
+    .site-badge.bad { background: color-mix(in oklch, var(--alert) 14%, white); border-color: var(--alert); color: var(--alert); }
+    .site-badge.good { background: color-mix(in oklch, var(--ok) 12%, white); border-color: var(--ok); color: var(--ok); }
+    .site-badge.unknown { color: var(--mute); }
+    .muted { color: var(--mute); font-size: 12px; font-family: var(--mono); }
+    .empty { color: var(--mute-2); font-style: italic; font-size: 13px; }
+  </style>
+</head>
+
+<body>
+  <header>
+    <span class="badge">PROCTORING</span>
+    <span class="title" id="brand">webrtc-grabber</span>
+    <nav>
+      <a class="m" href="/admin">← Dashboard</a>
+      <a class="m" href="#" id="refresh">Refresh</a>
+      <a class="m" href="#" id="logout">Sign out</a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="sitecheck-section" hidden>
+      <h2>Site availability — must be unreachable</h2>
+      <div class="card" id="sitecheck-body"><span class="muted">loading…</span></div>
+    </section>
+
+    <section>
+      <h2>Sessions</h2>
+      <div class="sessions" id="sessions"><span class="muted">loading…</span></div>
+    </section>
+
+    <section id="detail-section" hidden>
+      <h2 id="detail-title">Recordings</h2>
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>Peer</th><th>Stream</th><th></th><th class="num">Segments</th>
+              <th class="num">Committed</th><th class="num">Size</th><th>Last chunk</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="detail-rows"></tbody>
+        </table>
+        <div class="player" id="player" hidden>
+          <video id="video" controls></video>
+          <div class="now" id="now"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // ── admin auth (HTTP Basic, same realm as the dashboard) ──
+    let credential = localStorage.getItem("adminCredentials") || "";
+    const authHeader = () => "Basic " + btoa("admin:" + credential);
+
+    async function api(path) {
+      let res = await fetch(path, { headers: { Authorization: authHeader() } });
+      if (res.status === 401) {
+        const c = prompt("Admin credentials");
+        if (c === null) throw new Error("auth cancelled");
+        credential = c;
+        localStorage.setItem("adminCredentials", credential);
+        res = await fetch(path, { headers: { Authorization: authHeader() } });
+      }
+      if (!res.ok) throw new Error(`${path}: ${res.status}`);
+      return res.json();
+    }
+
+    async function fetchBlobUrl(path) {
+      const res = await fetch(path, { headers: { Authorization: authHeader() } });
+      if (!res.ok) throw new Error(`${path}: ${res.status}`);
+      return URL.createObjectURL(await res.blob());
+    }
+
+    const fileUrl = (sessionId, peer, stream, file) =>
+      `/api/admin/proctoring/file/${encodeURIComponent(sessionId)}/${encodeURIComponent(peer)}/${encodeURIComponent(stream)}/${encodeURIComponent(file)}`;
+    const segmentName = (i) => "segment_" + String(i).padStart(6, "0") + ".webm";
+
+    const fmtBytes = (n) => {
+      if (!n) return "0";
+      const u = ["B", "KB", "MB", "GB"]; let i = 0; let v = n;
+      while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+      return v.toFixed(v < 10 && i > 0 ? 1 : 0) + " " + u[i];
+    };
+    const fmtAgo = (iso) => {
+      if (!iso) return "—";
+      const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+      if (s < 60) return s + "s ago";
+      if (s < 3600) return Math.round(s / 60) + "m ago";
+      return Math.round(s / 3600) + "h ago";
+    };
+
+    // ── site checks ──
+    async function loadSiteChecks() {
+      let data;
+      try { data = await api("/api/admin/sitechecks"); } catch (e) { return; }
+      const section = document.getElementById("sitecheck-section");
+      const body = document.getElementById("sitecheck-body");
+      if (!data.sites || data.sites.length === 0) { section.hidden = true; return; }
+      section.hidden = false;
+      body.innerHTML = "";
+      if (!data.peers.length) { body.innerHTML = '<span class="empty">No participants yet.</span>'; return; }
+      for (const p of data.peers) {
+        const row = document.createElement("div");
+        row.className = "sitecheck-peer";
+        const name = document.createElement("div");
+        name.className = "name";
+        name.innerHTML = `<span class="dot ${p.online ? "on" : "off"}"></span> ${p.name}` +
+          (p.teamName ? ` <span class="team">${p.teamName}</span>` : "");
+        row.appendChild(name);
+        const byUrl = new Map((p.siteChecks || []).map((r) => [r.url, r]));
+        for (const url of data.sites) {
+          const r = byUrl.get(url);
+          const badge = document.createElement("span");
+          const host = (() => { try { return new URL(url).host; } catch { return url; } })();
+          if (!r) { badge.className = "site-badge unknown"; badge.textContent = host + " · ?"; }
+          else if (r.reachable) { badge.className = "site-badge bad"; badge.textContent = host + " · REACHABLE"; }
+          else { badge.className = "site-badge good"; badge.textContent = host + " · blocked"; }
+          row.appendChild(badge);
+        }
+        body.appendChild(row);
+      }
+    }
+
+    // ── sessions ──
+    let activeSessionId = null;
+    async function loadSessions() {
+      const data = await api("/api/admin/proctoring");
+      const el = document.getElementById("sessions");
+      el.innerHTML = "";
+      const sessions = (data.sessions || []).slice().sort((a, b) => b.sessionId.localeCompare(a.sessionId));
+      if (!sessions.length) { el.innerHTML = '<span class="empty">No proctoring sessions recorded yet.</span>'; return; }
+      for (const s of sessions) {
+        const chip = document.createElement("div");
+        chip.className = "session-chip" + (s.sessionId === activeSessionId ? " active" : "");
+        chip.innerHTML = `<span>${s.sessionId}</span>` +
+          (s.isActive ? ' <span class="tag live">live</span>' : "") +
+          (s.finalized ? ' <span class="tag fin">finalized</span>' : "");
+        chip.onclick = () => loadSession(s.sessionId);
+        el.appendChild(chip);
+      }
+    }
+
+    async function loadSession(sessionId) {
+      activeSessionId = sessionId;
+      await loadSessions();
+      const data = await api("/api/admin/proctoring/session/" + encodeURIComponent(sessionId));
+      document.getElementById("detail-section").hidden = false;
+      document.getElementById("detail-title").textContent = "Recordings · " + sessionId;
+      const tbody = document.getElementById("detail-rows");
+      tbody.innerHTML = "";
+      const peers = (data.peers || []).slice().sort((a, b) =>
+        a.peerName.localeCompare(b.peerName) || a.streamKey.localeCompare(b.streamKey));
+      if (!peers.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">No recordings in this session.</td></tr>'; return; }
+      for (const p of peers) {
+        const tr = document.createElement("tr");
+        const hasFull = !!p.lastChunkAt;
+        tr.innerHTML =
+          `<td class="m">${p.peerName}</td>` +
+          `<td class="m">${p.streamKey}</td>` +
+          `<td><span class="dot ${p.online ? "on" : "off"}" title="${p.online ? "online" : "offline"}"></span></td>` +
+          `<td class="num">${p.segmentCount || 0}</td>` +
+          `<td class="num">${p.committedSeq >= 0 ? p.committedSeq : "—"}</td>` +
+          `<td class="num">${fmtBytes(p.totalBytes)}</td>` +
+          `<td class="m">${fmtAgo(p.lastChunkAt)}</td>`;
+        const actions = document.createElement("td");
+        const playBtn = document.createElement("button");
+        playBtn.className = "btn primary";
+        playBtn.textContent = "Play";
+        playBtn.disabled = !(p.segmentCount > 0);
+        playBtn.onclick = () => playSegments(sessionId, p.peerName, p.streamKey, p.segmentCount);
+        actions.appendChild(playBtn);
+        if (hasFull) {
+          const dl = document.createElement("button");
+          dl.className = "btn";
+          dl.style.marginLeft = "6px";
+          dl.textContent = "Download";
+          dl.onclick = () => downloadFile(sessionId, p.peerName, p.streamKey);
+          actions.appendChild(dl);
+        }
+        tr.appendChild(actions);
+        tbody.appendChild(tr);
+      }
+    }
+
+    // ── playback (segments stitched via blob URLs so auth header applies) ──
+    let currentObjectUrl = null;
+    const video = document.getElementById("video");
+    const playlist = { sessionId: null, peer: null, stream: null, idx: 0, total: 0 };
+
+    async function playSegmentAt(i) {
+      if (i >= playlist.total) { document.getElementById("now").textContent = "Playback finished."; return; }
+      playlist.idx = i;
+      document.getElementById("now").textContent =
+        `${playlist.peer} · ${playlist.stream} · segment ${i + 1}/${playlist.total}`;
+      try {
+        const url = await fetchBlobUrl(fileUrl(playlist.sessionId, playlist.peer, playlist.stream, segmentName(i)));
+        if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+        currentObjectUrl = url;
+        video.src = url;
+        await video.play().catch(() => {});
+      } catch (e) {
+        console.warn("segment failed, skipping", i, e);
+        playSegmentAt(i + 1);
+      }
+    }
+
+    function playSegments(sessionId, peer, stream, total) {
+      Object.assign(playlist, { sessionId, peer, stream, idx: 0, total });
+      document.getElementById("player").hidden = false;
+      playSegmentAt(0);
+      document.getElementById("player").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    video.addEventListener("ended", () => playSegmentAt(playlist.idx + 1));
+
+    async function downloadFile(sessionId, peer, stream) {
+      // Prefer the remuxed file when present, else the raw concatenation.
+      for (const file of ["full.remuxed.webm", "full.webm"]) {
+        try {
+          const url = await fetchBlobUrl(fileUrl(sessionId, peer, stream, file));
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${sessionId}_${peer}_${stream}_${file}`;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+          return;
+        } catch (_) { /* try next */ }
+      }
+      alert("No downloadable file found for this stream.");
+    }
+
+    // ── boot ──
+    fetch("/api/ui-config").then((r) => r.json()).then((cfg) => {
+      if (cfg && cfg.title) { document.getElementById("brand").textContent = cfg.title; document.title = "proctoring · " + cfg.title; }
+    }).catch(() => {});
+
+    document.getElementById("refresh").onclick = (e) => { e.preventDefault(); refresh(); };
+    document.getElementById("logout").onclick = (e) => {
+      e.preventDefault();
+      localStorage.removeItem("adminCredentials");
+      fetch("/api/auth/logout", { method: "POST" }).finally(() => { window.location.href = "/login"; });
+    };
+
+    async function refresh() {
+      await loadSiteChecks();
+      await loadSessions();
+      if (activeSessionId) await loadSession(activeSessionId);
+    }
+
+    refresh().catch((e) => console.error(e));
+    setInterval(() => { loadSiteChecks().catch(() => {}); }, 10000);
+  </script>
+</body>
+
+</html>

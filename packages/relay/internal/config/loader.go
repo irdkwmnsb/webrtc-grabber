@@ -43,6 +43,12 @@ func LoadAppConfig(dir string) (*AppConfig, error) {
 	}
 	mergeInto(&cfg.Record, rawRecord.ToDomain())
 
+	var rawSiteCheck RawSiteCheckConfig
+	if err := loadFileInto(dir, "sitecheck", &rawSiteCheck); err != nil {
+		return nil, err
+	}
+	mergeInto(&cfg.SiteCheck, rawSiteCheck.ToDomain())
+
 	return &cfg, nil
 }
 

@@ -15,22 +15,22 @@ import (
 )
 
 type adminProctoringPeer struct {
-	PeerName       string         `json:"peerName"`
-	StreamKey      string         `json:"streamKey"`
-	Online         bool           `json:"online"`
-	ActivelyStreaming bool        `json:"activelyStreaming"`
-	CommittedSeq   int64          `json:"committedSeq"`
-	TotalBytes     int64          `json:"totalBytes"`
-	SegmentCount   int            `json:"segmentCount"`
-	CurrentSegment int            `json:"currentSegment"`
-	LastChunkAt    *time.Time     `json:"lastChunkAt,omitempty"`
-	Finalized      bool           `json:"finalized"`
-	Health         *api.ProctoringStreamHealth `json:"health,omitempty"`
+	PeerName          string                      `json:"peerName"`
+	StreamKey         string                      `json:"streamKey"`
+	Online            bool                        `json:"online"`
+	ActivelyStreaming bool                        `json:"activelyStreaming"`
+	CommittedSeq      int64                       `json:"committedSeq"`
+	TotalBytes        int64                       `json:"totalBytes"`
+	SegmentCount      int                         `json:"segmentCount"`
+	CurrentSegment    int                         `json:"currentSegment"`
+	LastChunkAt       *time.Time                  `json:"lastChunkAt,omitempty"`
+	Finalized         bool                        `json:"finalized"`
+	Health            *api.ProctoringStreamHealth `json:"health,omitempty"`
 }
 
 type adminProctoringResponse struct {
-	State    proctoring.State        `json:"state"`
-	Peers    []adminProctoringPeer   `json:"peers"`
+	State    proctoring.State         `json:"state"`
+	Peers    []adminProctoringPeer    `json:"peers"`
 	Sessions []adminProctoringSession `json:"sessions"`
 }
 
@@ -48,6 +48,10 @@ func (s *Server) setupAdminApi() {
 				return s.config.Security.PlayerCredential == nil || user == "admin" && pass == *s.config.Security.PlayerCredential
 			},
 		}))
+
+		router.Get("/sitechecks", func(c *fiber.Ctx) error {
+			return c.JSON(s.buildSiteCheckStatus())
+		})
 
 		router.Post("/record_start", func(c *fiber.Ctx) error {
 			var req startRecordRequest
@@ -251,6 +255,49 @@ func (s *Server) setupAdminApi() {
 				}
 			}
 
+			return c.JSON(resp)
+		})
+
+		// Lists peers/streams for any session (active or past), reading the
+		// session directory. Lets the proctoring page browse recordings that
+		// the live /proctoring response (active session only) doesn't cover.
+		router.Get("/proctoring/session/:sessionId", func(c *fiber.Ctx) error {
+			if s.config.Record.StorageDir == "" {
+				return c.Status(fiber.StatusMethodNotAllowed).SendString("Record storage is not enabled")
+			}
+			sessionId := c.Params("sessionId")
+			if !isSafePathSegment(sessionId) {
+				return c.Status(fiber.StatusBadRequest).SendString("Invalid sessionId")
+			}
+
+			online := map[string]*api.Peer{}
+			for _, p := range s.storage.getAll() {
+				peer := p
+				online[p.Name] = &peer
+			}
+
+			resp := adminProctoringResponse{
+				State:    s.proctoring.Get(),
+				Peers:    []adminProctoringPeer{},
+				Sessions: []adminProctoringSession{},
+			}
+			sessionDir := proctoringSessionDir(s.config.Record.StorageDir, sessionId)
+			if peers, err := os.ReadDir(sessionDir); err == nil {
+				for _, p := range peers {
+					if !p.IsDir() {
+						continue
+					}
+					streams, err := os.ReadDir(filepath.Join(sessionDir, p.Name()))
+					if err != nil {
+						continue
+					}
+					for _, st := range streams {
+						if st.IsDir() {
+							resp.Peers = append(resp.Peers, buildAdminPeer(s.config.Record.StorageDir, sessionId, p.Name(), st.Name(), online[p.Name()]))
+						}
+					}
+				}
+			}
 			return c.JSON(resp)
 		})
 

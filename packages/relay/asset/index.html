@@ -115,8 +115,10 @@
     background: transparent; cursor: pointer;
     font-family: var(--sans); font-size: 12px;
     color: var(--ink); font-weight: 500; letter-spacing: 0;
+    text-decoration: none;
     transition: background .12s;
   }
+  a.pbtn:hover { text-decoration: none; }
   .pbtn:hover { background: var(--paper-2); }
   .pbtn:disabled { opacity: 0.5; cursor: not-allowed; }
   .pbtn.primary {
@@ -876,6 +878,7 @@ function ParticipantCell({ p, peer, stalled, selected, now, onClick, onHover }) 
   const ms = lastPingMsAt(p, now);
   const hasWebcam = (p.streamTypes || []).includes("webcam");
   const hasDesktop = (p.streamTypes || []).includes("desktop");
+  const siteAlarm = (p.siteChecks || []).some((s) => s.reachable);
   const teamLine = p.teamName
     || (peer?.id ? `id ${peer.id.slice(0, 6)}` : (p.streamTypes?.length ? p.streamTypes.join("·") : "no streams"));
   const showUniv = !!p.university;
@@ -904,6 +907,7 @@ function ParticipantCell({ p, peer, stalled, selected, now, onClick, onHover }) 
           <div className={`c-icon ${hasWebcam ? "on" : ""}`} title="webcam">W</div>
           <div className={`c-icon ${hasDesktop ? "on" : ""}`} title="desktop">D</div>
           {isRecording && <div className="c-icon rec on" title={`recording ${p.currentRecordId}`}>●</div>}
+          {siteAlarm && <div className="c-icon rec on" title="can reach a forbidden site">!</div>}
         </div>
       </div>
     </div>
@@ -1008,6 +1012,37 @@ function FocusPanel({ p, peer, stalled, proctoringPeers, sessionId, streamType, 
           <div className="lbl">Connections</div>
           <div className="val">{p.connectionsCount || 0}{recording ? "  · REC" : ""}</div>
         </div>
+        {p.siteChecks && p.siteChecks.length > 0 && (() => {
+          const reachable = p.siteChecks.filter((s) => s.reachable);
+          return (
+            <div className="cell" style={{ gridColumn: "1 / -1" }}>
+              <div className="lbl">
+                Site checks · must be unreachable
+                {reachable.length > 0
+                  ? <span style={{ color: "var(--alert)", fontWeight: 600 }}>{"  "}· {reachable.length} reachable!</span>
+                  : <span style={{ color: "var(--ok)" }}>{"  "}· all blocked</span>}
+              </div>
+              <div className="val" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                {p.siteChecks.map((s, i) => {
+                  let host; try { host = new URL(s.url).host; } catch { host = s.url; }
+                  return (
+                    <span
+                      key={i}
+                      title={s.url + (s.checkedAt ? ` · checked ${fmtAgo(Date.now() - s.checkedAt)}` : "")}
+                      style={{
+                        fontFamily: "var(--mono)", fontSize: 11, padding: "3px 9px", borderRadius: 5,
+                        border: "1px solid " + (s.reachable ? "var(--alert)" : "var(--rule)"),
+                        color: s.reachable ? "var(--alert)" : "var(--mute)",
+                        background: s.reachable ? "color-mix(in oklch, var(--alert) 12%, white)" : "transparent",
+                        fontWeight: s.reachable ? 600 : 400,
+                      }}
+                    >{host} · {s.reachable ? "REACHABLE" : "blocked"}</span>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
         {sessionId && (
           <div className="cell" style={{ gridColumn: "1 / -1" }}>
             <div className="lbl">Proctoring · {streamType}</div>
@@ -1722,6 +1757,7 @@ function App() {
           </div>
         </div>
         <div className="header-actions">
+          <a className="pbtn" href="/proctoring" title="Open the proctoring review page">Review</a>
           {!(proctoringState && proctoringState.sessionId) && (
             <button className="pbtn primary" onClick={() => setProctoringOpen(true)}>
               <span className="dot"></span>Start proctoring

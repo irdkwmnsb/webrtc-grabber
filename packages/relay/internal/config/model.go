@@ -9,11 +9,20 @@ import (
 )
 
 type AppConfig struct {
-	Server   ServerConfig   `json:"server" yaml:"server"`
-	Security SecurityConfig `json:"security" yaml:"security"`
-	WebRTC   WebRTCConfig   `json:"webrtc" yaml:"webrtc"`
-	Record   RecordConfig   `json:"record" yaml:"record"`
-	Debug    DebugConfig    `json:"debug" yaml:"debug"`
+	Server    ServerConfig    `json:"server" yaml:"server"`
+	Security  SecurityConfig  `json:"security" yaml:"security"`
+	WebRTC    WebRTCConfig    `json:"webrtc" yaml:"webrtc"`
+	Record    RecordConfig    `json:"record" yaml:"record"`
+	SiteCheck SiteCheckConfig `json:"siteCheck" yaml:"siteCheck"`
+	Debug     DebugConfig     `json:"debug" yaml:"debug"`
+}
+
+// SiteCheckConfig is the optional list of sites the capture page must probe.
+// They are expected to be UNreachable (forbidden during an exam): a reachable
+// result is flagged in the dashboard. Empty Sites disables the feature.
+type SiteCheckConfig struct {
+	Sites      []string `json:"sites" yaml:"sites"`
+	IntervalMs int      `json:"intervalMs" yaml:"intervalMs"`
 }
 
 type DebugConfig struct {
@@ -103,6 +112,10 @@ func DefaultAppConfig() AppConfig {
 		Record: RecordConfig{
 			Timeout:    180000,
 			StorageDir: "./records",
+		},
+		SiteCheck: SiteCheckConfig{
+			Sites:      []string{},
+			IntervalMs: 15000,
 		},
 		Debug: DebugConfig{
 			PprofAddr: "127.0.0.1:6060",
