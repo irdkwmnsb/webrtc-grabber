@@ -20,8 +20,9 @@ the firewall straight to the relay host and set `publicIp` in `server.yaml`.
 ## Setup
 
 1. Point a DNS A/AAAA record for your domain at this host.
-2. Edit `Caddyfile`: replace `signalling.example.com` with your domain (and set your
-   email under `tls` to get cert-expiry notices).
+2. Edit `Caddyfile`: replace `signalling.example.com` with your domain (and,
+   optionally, set your `email` in the global options block at the top to get
+   cert-expiry notices).
 3. Configure the relay (`packages/relay/conf`):
    - `server.yaml`: `port: 13478`, `publicIp: "<public ip>"`
    - `webrtc.yaml`: `portMin: 10000`, `portMax: 20000`

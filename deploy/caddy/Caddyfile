@@ -32,12 +32,14 @@
 #   TCP 80, 443   -> this host (Caddy: ACME challenge + HTTPS)
 #   UDP 10000-20000 -> relay host directly (WebRTC media)
 
-signalling.example.com {
-	# Provide an email so Let's Encrypt can send expiry / problem notices.
-	tls {
-		# email you@example.com
-	}
+# Global options. The ACME contact email is a GLOBAL option here — it is NOT a
+# subdirective of `tls`. Uncomment and set it so Let's Encrypt can send expiry /
+# problem notices (optional; Caddy issues certs fine without it).
+{
+	# email you@example.com
+}
 
+signalling.example.com {
 	# Forward everything (REST API, static admin UI, and WebSocket endpoints)
 	# to the signalling server. Caddy automatically handles the WS Upgrade.
 	reverse_proxy 127.0.0.1:13478 {
