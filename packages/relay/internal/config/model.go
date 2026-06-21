@@ -32,6 +32,9 @@ type ParticipantInfo struct {
 	Name       string `json:"name" yaml:"name"`
 	TeamName   string `json:"teamName,omitempty" yaml:"teamName,omitempty"`
 	University string `json:"university,omitempty" yaml:"university,omitempty"`
+	// Password gates the capture page for this participant when auth is enabled.
+	// Never serialized to clients (json:"-") so it can't leak to the dashboard.
+	Password string `json:"-" yaml:"password,omitempty"`
 }
 
 type SecurityConfig struct {
@@ -41,6 +44,13 @@ type SecurityConfig struct {
 	UploadSecret      *string           `json:"uploadSecret" yaml:"uploadSecret"`
 	Participants      []ParticipantInfo `json:"participants" yaml:"participants"`
 	AdminsRawNetworks []netip.Prefix    `json:"adminsNetworks" yaml:"adminsNetworks"`
+	// AuthEnabled turns on the login page (served at /) that routes admins to the
+	// dashboard and students to their capture page. When false, behavior is
+	// unchanged: / serves the dashboard and the capture page is open.
+	AuthEnabled bool `json:"authEnabled" yaml:"authEnabled"`
+	// AdminLogin is the username an admin types on the login page; the password is
+	// the existing PlayerCredential (adminCredential). Defaults to "admin".
+	AdminLogin *string `json:"adminLogin" yaml:"adminLogin"`
 }
 
 type WebRTCConfig struct {
@@ -63,6 +73,7 @@ type Codec struct {
 
 func DefaultAppConfig() AppConfig {
 	playerPassword := "live"
+	adminLogin := "admin"
 	return AppConfig{
 		Server: ServerConfig{
 			Host:                "0.0.0.0",
@@ -77,8 +88,10 @@ func DefaultAppConfig() AppConfig {
 			AdminsRawNetworks: []netip.Prefix{
 				netip.MustParsePrefix("0.0.0.0/0"),
 			},
-			TLSCrtFile: nil,
-			TLSKeyFile: nil,
+			TLSCrtFile:  nil,
+			TLSKeyFile:  nil,
+			AuthEnabled: false,
+			AdminLogin:  &adminLogin,
 		},
 		WebRTC: WebRTCConfig{
 			PortMin:              10000,

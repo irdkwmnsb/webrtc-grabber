@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/asset"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/metrics"
@@ -182,8 +184,68 @@ func (s *Server) setupPublicApi() {
 			title = "webrtc-grabber"
 		}
 		return c.JSON(fiber.Map{
-			"title": title,
+			"title":       title,
+			"authEnabled": s.authEnabled(),
 		})
+	})
+
+	s.app.Post("/api/auth/login", s.handleLogin)
+	s.app.Post("/api/auth/logout", s.handleLogout)
+	s.app.Get("/api/auth/logout", s.handleLogout)
+
+	s.setupPageRoutes()
+}
+
+// sendAsset writes an embedded asset (see package asset) with the right
+// Content-Type inferred from its extension.
+func sendAsset(c *fiber.Ctx, name string) error {
+	data, err := asset.FS.ReadFile(name)
+	if err != nil {
+		return fiber.ErrNotFound
+	}
+	c.Type(filepath.Ext(name))
+	return c.Send(data)
+}
+
+// setupPageRoutes registers the HTML entrypoints. They run before main.go's
+// static handler, so they take precedence for these exact paths, and main.go
+// blocks direct access to the raw .html files — so these guarded routes are the
+// only way to reach a page. Pages are served from the embedded asset FS. When
+// auth is disabled, "/" keeps serving the dashboard (unchanged behavior). The
+// hard access boundary remains the WebSocket token check in authorizeGrabber;
+// these page guards are the matching first line of defense.
+func (s *Server) setupPageRoutes() {
+	s.app.Get("/", func(c *fiber.Ctx) error {
+		if s.authEnabled() {
+			return sendAsset(c, "login.html")
+		}
+		return sendAsset(c, "index.html")
+	})
+
+	s.app.Get("/login", func(c *fiber.Ctx) error {
+		return sendAsset(c, "login.html")
+	})
+
+	s.app.Get("/admin", func(c *fiber.Ctx) error {
+		return sendAsset(c, "index.html")
+	})
+
+	s.app.Get("/player", func(c *fiber.Ctx) error {
+		return sendAsset(c, "player.html")
+	})
+
+	s.app.Get("/capture", func(c *fiber.Ctx) error {
+		if s.authEnabled() {
+			name, ok := s.verifyCaptureToken(c.Cookies(captureCookieName))
+			if !ok {
+				return c.Redirect("/login")
+			}
+			// The cookie, not the URL, decides which peer this student is.
+			if c.Query("peerName") != name {
+				return c.Redirect("/capture?peerName=" + url.QueryEscape(name))
+			}
+		}
+		return sendAsset(c, "capture.html")
 	})
 }
 
@@ -440,10 +502,33 @@ func (s *Server) setupGrabberSockets() {
 		peerName := c.Params("name")
 		slog.Debug("grabber trying to connect", "socketID", socketID)
 
+		if !s.authorizeGrabber(c, peerName) {
+			return
+		}
+
 		s.storage.addPeer(peerName, socketID)
 
 		s.listenGrabberSocket(c, peerName)
 	}))
+}
+
+// authorizeGrabber enforces the capture token when auth is enabled: the
+// connection must present a valid cookie issued for exactly this peerName.
+// When auth is disabled it always allows (unchanged behavior).
+func (s *Server) authorizeGrabber(c *websocket.Conn, peerName string) bool {
+	if !s.authEnabled() {
+		return true
+	}
+	name, ok := s.verifyCaptureToken(c.Cookies(captureCookieName))
+	if !ok || name != peerName {
+		slog.Warn("rejecting unauthorized grabber", "peerName", peerName)
+		_ = c.WriteJSON(fiber.Map{
+			"event":   "auth_failed",
+			"message": "unauthorized: please log in again",
+		})
+		return false
+	}
+	return true
 }
 
 func (s *Server) listenGrabberSocket(c *websocket.Conn, peerName string) {

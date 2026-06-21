@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>webrtc-grabber</title>
+  <style>
+    :root {
+      --paper:   #f5f3ee;
+      --paper-2: #efece5;
+      --card:    #ffffff;
+      --ink:     #18160f;
+      --ink-2:   #2c2920;
+      --mute:    #807a6e;
+      --mute-2:  #b6afa1;
+      --rule:    #d8d2c4;
+      --alert:   oklch(56% 0.18 25);
+      --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+      --sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      font-family: var(--sans);
+      color: var(--ink);
+      background: var(--paper);
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    ::selection { background: var(--ink); color: var(--paper); }
+
+    .card {
+      width: 320px;
+      max-width: calc(100vw - 32px);
+      background: var(--card);
+      border: 1px solid var(--rule);
+      border-radius: 10px;
+      padding: 28px 26px 26px;
+      box-shadow: 0 1px 0 rgba(0, 0, 0, .02), 0 12px 32px rgba(0, 0, 0, .06);
+    }
+
+    .brand {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--mute);
+      margin: 0 0 4px;
+    }
+
+    h1 {
+      font-size: 20px;
+      font-weight: 600;
+      margin: 0 0 22px;
+    }
+
+    label {
+      display: block;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--mute);
+      margin: 0 0 6px;
+    }
+
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      margin: 0 0 16px;
+      border: 1px solid var(--rule);
+      border-radius: 7px;
+      background: var(--paper);
+      font-family: var(--mono);
+      font-size: 14px;
+      color: var(--ink);
+      outline: 0;
+      transition: border-color .12s, background .12s;
+    }
+    input:focus { border-color: var(--ink); background: var(--card); }
+
+    button {
+      width: 100%;
+      padding: 11px;
+      border: 0;
+      border-radius: 7px;
+      background: var(--ink);
+      color: var(--paper);
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .12s;
+    }
+    button:hover { background: var(--ink-2); }
+    button:disabled { opacity: .55; cursor: default; }
+
+    .error {
+      min-height: 16px;
+      margin: 14px 0 0;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--alert);
+      text-align: center;
+    }
+
+    .hint {
+      margin: 18px 0 0;
+      font-family: var(--mono);
+      font-size: 10px;
+      line-height: 1.5;
+      color: var(--mute-2);
+      text-align: center;
+    }
+  </style>
+</head>
+
+<body>
+  <form class="card" id="login-form" autocomplete="on">
+    <p class="brand">webrtc-grabber</p>
+    <h1>Sign in</h1>
+
+    <label for="login">Login</label>
+    <input id="login" name="login" type="text" autocomplete="username" autofocus required />
+
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required />
+
+    <button id="submit" type="submit">Continue</button>
+
+    <p class="error" id="error"></p>
+    <p class="hint">Students: your login is your participant name.</p>
+  </form>
+
+  <script>
+    // Reflect the configured branding in the tab/title.
+    fetch("/api/ui-config")
+      .then((r) => r.json())
+      .then((cfg) => {
+        if (cfg && cfg.title) {
+          document.title = cfg.title;
+          document.querySelector(".brand").textContent = cfg.title;
+        }
+        // If auth is off, there's no login flow — go straight to the dashboard.
+        if (cfg && cfg.authEnabled === false) {
+          window.location.replace("/admin");
+        }
+      })
+      .catch(() => {});
+
+    const form = document.getElementById("login-form");
+    const errorEl = document.getElementById("error");
+    const submitEl = document.getElementById("submit");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorEl.textContent = "";
+      submitEl.disabled = true;
+
+      const login = document.getElementById("login").value.trim();
+      const password = document.getElementById("password").value;
+
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ login, password }),
+        });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          errorEl.textContent = body.error || "Login failed";
+          submitEl.disabled = false;
+          return;
+        }
+
+        const data = await res.json();
+        // The admin dashboard authenticates its WebSocket with the same
+        // credential; stash it so the dashboard doesn't prompt again.
+        if (data.role === "admin") {
+          try { localStorage.setItem("adminCredentials", password); } catch (_) {}
+        }
+        window.location.href = data.redirect || "/";
+      } catch (_) {
+        errorEl.textContent = "Network error";
+        submitEl.disabled = false;
+      }
+    });
+  </script>
+</body>
+
+</html>

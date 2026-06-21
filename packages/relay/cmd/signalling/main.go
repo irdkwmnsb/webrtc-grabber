@@ -9,16 +9,19 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/lmittmann/tint"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
 
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/asset"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/signalling"
 )
@@ -86,9 +89,23 @@ func main() {
 		return nil
 	})
 
-	app.Static("/", "./asset")
-	app.Static("/player", "./asset/player.html")
-	app.Static("/capture", "./asset/capture.html")
+	// Static assets are embedded in the binary (see package asset), so no asset
+	// directory needs to be shipped. The page entrypoints "/", "/login",
+	// "/admin", "/capture" and "/player" are served by setupPageRoutes (registered
+	// earlier, so they win and apply the auth guards).
+	//
+	// Block direct access to the raw .html files: otherwise "/capture.html" would
+	// bypass the "/capture" guard. HTML is only reachable through the auth-aware
+	// routes; this catch-all serves the js (and any other) assets they reference.
+	app.Use("/", func(c *fiber.Ctx) error {
+		if strings.HasSuffix(c.Path(), ".html") {
+			return fiber.ErrNotFound
+		}
+		return c.Next()
+	})
+	app.Use("/", filesystem.New(filesystem.Config{
+		Root: http.FS(asset.FS),
+	}))
 
 	go func() {
 		<-ctx.Done()

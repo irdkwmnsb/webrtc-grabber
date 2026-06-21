@@ -11,8 +11,8 @@ FROM alpine:3.17
 
 WORKDIR /app
 
+# Web assets are embedded in the binary (see package asset); no asset dir needed.
 COPY --from=builder /signalling /app/signalling
-COPY --from=builder /app/asset /app/asset
 
 EXPOSE 8000
 EXPOSE 13478

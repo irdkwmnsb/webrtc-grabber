@@ -195,10 +195,18 @@ grabberPingInterval: 3000
 
 ```yaml
 adminCredential: "your-secure-password"
+# Optional login page. When enabled, "/" shows a login form: admins (adminLogin
+# + adminCredential) land on the dashboard; students (participant name + their
+# password) land on their capture page, with a signed cookie that authorizes the
+# capture WebSocket. See "Login page" below.
+authEnabled: false
+adminLogin: "admin"
 participants:
-  - "team-001"
-  - "team-002"
-  - "team-003"
+  - name: "team-001"
+    password: "team-001-secret" # required for student login when authEnabled
+  - name: "team-002"
+    password: "team-002-secret"
+  - "team-003" # plain string is still fine (no password = can't log in)
 adminsNetworks:
   - "127.0.0.1/32"
   - "10.0.0.0/8"
@@ -245,6 +253,9 @@ storageDirectory: "./records"
 | `publicIp`             | Public IP for signalling/ICE announcements                      | **string**       | `""`          |
 | `grabberPingInterval`  | How often grabbers should ping (milliseconds)                   | **number**       | `3000`        |
 | `adminCredential`      | Password for admin authentication (null = no auth)              | **string\|null** | `"live"`      |
+| `authEnabled`          | Enable the login page at `/` (admins → dashboard, students → capture) | **boolean** | `false`       |
+| `adminLogin`           | Username an admin types on the login page (password = `adminCredential`) | **string**  | `"admin"`     |
+| `participants[].password` | Per-participant password for student login (when `authEnabled`)   | **string**       | -             |
 | `participants`         | List of expected grabber names for monitoring                   | **string[]**     | `[]`          |
 | `adminsNetworks`       | CIDR ranges allowed to access admin/player endpoints            | **string[]**     | `["0.0.0.0/0"]`|
 | `tlsCrtFile`           | Path to TLS certificate for HTTPS/WSS (null = no TLS)           | **string\|null** | `null`        |
@@ -256,6 +267,19 @@ storageDirectory: "./records"
 | `disableAudio`         | Disable audio publishing/subscription                           | **boolean**      | `false`       |
 | `timeout`              | Recording timeout (milliseconds)                                | **number**       | `180000`      |
 | `storageDirectory`     | Recording output directory                                      | **string**       | `"./records"` |
+
+#### Login page (optional)
+
+Set `authEnabled: true` to turn `/` into a single login form for both admins and students:
+
+- **Admin** — logs in with `adminLogin` (default `admin`) and the `adminCredential` password, and is redirected to the dashboard at `/admin`.
+- **Student** — logs in with their **participant name** as the login and that participant's `password`, and is redirected to `/capture?peerName=<name>`.
+
+On a successful student login the server sets a signed, `HttpOnly` cookie scoped to that participant. The capture WebSocket (`/ws/peers/:name`) **requires** a valid cookie for exactly that name — so a student can only publish as themselves, and only after logging in. Admins authenticate the dashboard with the same credential as before (no extra step).
+
+When `authEnabled` is `false` (the default) nothing changes: `/` serves the dashboard and the capture page stays open.
+
+> **Note:** The login form and page redirects are for convenience; the real access boundary is the WebSocket token check. Serve the relay over HTTPS/WSS (see the [Caddy config](deploy/caddy/)) so cookies and credentials aren't sent in clear text.
 
 ### Build sources <a name="relay-build"></a>
 

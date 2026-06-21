@@ -45,6 +45,7 @@ type RawParticipantInfo struct {
 	Name       string `yaml:"name" json:"name"`
 	TeamName   string `yaml:"teamName" json:"teamName"`
 	University string `yaml:"university" json:"university"`
+	Password   string `yaml:"password" json:"password"`
 }
 
 func (r *RawParticipantInfo) UnmarshalYAML(node *yaml.Node) error {
@@ -78,6 +79,8 @@ type RawSecurityConfig struct {
 	UploadSecret      *string               `yaml:"uploadSecret" json:"uploadSecret"`
 	Participants      *[]RawParticipantInfo `yaml:"participants" json:"participants"`
 	AdminsRawNetworks *[]string             `yaml:"adminsNetworks" json:"adminsNetworks"`
+	AuthEnabled       *bool                 `yaml:"authEnabled" json:"authEnabled"`
+	AdminLogin        *string               `yaml:"adminLogin" json:"adminLogin"`
 }
 
 func (r RawSecurityConfig) ToDomain() (SecurityConfig, error) {
@@ -86,6 +89,10 @@ func (r RawSecurityConfig) ToDomain() (SecurityConfig, error) {
 	cfg.TLSCrtFile = r.TLSCrtFile
 	cfg.TLSKeyFile = r.TLSKeyFile
 	cfg.UploadSecret = r.UploadSecret
+	cfg.AdminLogin = r.AdminLogin
+	if r.AuthEnabled != nil {
+		cfg.AuthEnabled = *r.AuthEnabled
+	}
 
 	if r.Participants != nil {
 		out := make([]ParticipantInfo, 0, len(*r.Participants))
@@ -97,6 +104,7 @@ func (r RawSecurityConfig) ToDomain() (SecurityConfig, error) {
 				Name:       p.Name,
 				TeamName:   p.TeamName,
 				University: p.University,
+				Password:   p.Password,
 			})
 		}
 		cfg.Participants = out
