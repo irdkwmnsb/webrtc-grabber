@@ -1,0 +1,78 @@
+# Caddy reverse proxy for the webrtc-grabber signalling server.
+#
+# What this does:
+#   - Terminates HTTPS (Caddy obtains & renews a Let's Encrypt cert automatically).
+#   - Reverse-proxies HTTP and WebSocket traffic to the signalling server on :13478.
+#   - WebSocket upgrades (/ws, /ws/player/*, /ws/peers/*) work out of the box —
+#     Caddy v2's reverse_proxy forwards Upgrade/Connection headers automatically,
+#     so wss:// works the same way https:// does.
+#
+# IMPORTANT — WebRTC media does NOT go through Caddy:
+#   The signalling traffic (HTTP/WS) is the ONLY thing proxied here. The actual
+#   audio/video is sent peer-to-peer over UDP (DTLS-SRTP), directly to the relay's
+#   publicIp on the configured WebRTC port range (default 10000-20000). Those UDP
+#   ports must be opened on the firewall and reach the relay host directly — Caddy
+#   cannot and should not proxy them.
+#
+# Required relay config (packages/relay/conf):
+#   server.yaml:
+#     port: 13478          # keep the relay bound to localhost / loopback if Caddy is on the same host
+#     publicIp: "<server public IP>"   # so remote peers can reach the UDP media ports
+#   webrtc.yaml:
+#     portMin: 10000
+#     portMax: 20000
+#   security.yaml:
+#     # Leave tlsCrtFile / tlsKeyFile null — Caddy terminates TLS, the relay stays plain HTTP behind it.
+#
+# Usage:
+#   1. Replace signalling.example.com with your real domain (DNS A/AAAA record -> this host).
+#   2. caddy run --config /path/to/Caddyfile        (or `caddy reload` if already running)
+#
+# Firewall:
+#   TCP 80, 443   -> this host (Caddy: ACME challenge + HTTPS)
+#   UDP 10000-20000 -> relay host directly (WebRTC media)
+
+signalling.example.com {
+	# Provide an email so Let's Encrypt can send expiry / problem notices.
+	tls {
+		# email you@example.com
+	}
+
+	# Forward everything (REST API, static admin UI, and WebSocket endpoints)
+	# to the signalling server. Caddy automatically handles the WS Upgrade.
+	reverse_proxy 127.0.0.1:13478 {
+		# Preserve client info for the relay's logs / admissions checks.
+		header_up X-Real-IP {remote_host}
+
+		# Streaming / long-lived WebSocket connections must not be buffered
+		# or prematurely timed out.
+		flush_interval -1
+		transport http {
+			# Don't cut idle WebSocket connections (grabbers/players ping ~3s).
+			read_timeout 0
+			write_timeout 0
+		}
+	}
+
+	encode gzip zstd
+
+	log {
+		output stderr
+		format console
+	}
+}
+
+# --- Local / no-domain testing -------------------------------------------------
+# If you don't have a public domain yet, comment out the block above and use this
+# one instead. Caddy serves an internally-trusted (self-signed) cert on https://localhost.
+# Browsers will warn unless you trust Caddy's local CA (`caddy trust`).
+#
+# localhost {
+# 	reverse_proxy 127.0.0.1:13478 {
+# 		flush_interval -1
+# 		transport http {
+# 			read_timeout 0
+# 			write_timeout 0
+# 		}
+# 	}
+# }

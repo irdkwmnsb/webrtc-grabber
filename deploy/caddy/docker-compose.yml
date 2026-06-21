@@ -1,0 +1,22 @@
+# Runs Caddy as an HTTPS reverse proxy in front of the signalling server.
+#
+# Assumes the relay/signalling server is reachable from the Caddy container at
+# host:13478. With network_mode "host" the relay binds to 127.0.0.1:13478 and
+# Caddy reaches it on the loopback. If you run the relay in another container
+# instead, drop network_mode and point reverse_proxy at that service name.
+version: "3"
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: webrtc-caddy
+    network_mode: "host" # needed for ACME on :80/:443 and to reach relay on 127.0.0.1:13478
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # persisted certs — keep this, or you'll re-issue on every restart
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
