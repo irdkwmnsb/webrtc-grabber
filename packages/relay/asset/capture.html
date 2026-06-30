@@ -2,76 +2,90 @@
 <html lang="en">
 
 <head>
-    <title>WebRTC grabber</title>
+    <title>webrtc-grabber</title>
+    <link id="favicon" rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='%23b6afa1'/%3E%3C/svg%3E">
     <style>
+        :root {
+            --paper:   #f5f3ee;
+            --paper-2: #efece5;
+            --card:    #ffffff;
+            --ink:     #18160f;
+            --mute:    #807a6e;
+            --rule:    #d8d2c4;
+            --ok:      #1eb11c;
+            --rec:     #e5342a;
+            --wait:    #c98a16;
+        }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; height: 100%; }
+        body {
+            font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: var(--ink);
+            background: radial-gradient(120% 120% at 50% 0%, var(--paper) 0%, var(--paper-2) 100%);
+            -webkit-font-smoothing: antialiased;
+        }
+        .wrap { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px; }
+        .card {
+            width: 100%; max-width: 440px; background: var(--card);
+            border: 1px solid var(--rule); border-radius: 16px;
+            padding: 34px 30px 28px; text-align: center;
+            box-shadow: 0 18px 50px -24px rgba(24,22,15,.45);
+        }
+        .brand {
+            font: 600 13px/1 ui-monospace, "SF Mono", Menlo, monospace;
+            letter-spacing: .22em; text-transform: uppercase; color: var(--mute);
+        }
+        .brand span { margin: 0 2px; opacity: .5; }
+        .peer { margin-top: 10px; font-weight: 700; font-size: 22px; word-break: break-word; }
+        .peer:empty::before { content: "-"; color: var(--mute); }
+        .status {
+            margin: 18px auto 0; display: inline-flex; align-items: center; gap: 9px;
+            padding: 7px 14px; border-radius: 999px; font-size: 13px; font-weight: 600;
+            border: 1px solid var(--rule); background: var(--paper); color: var(--mute);
+        }
+        .status .ring { width: 10px; height: 10px; border-radius: 50%; background: var(--mute); }
+        .status.ready { border-color: color-mix(in srgb, var(--ok) 50%, var(--rule)); color: var(--ok); }
+        .status.ready .ring { background: var(--ok); }
+        .status.recording { border-color: color-mix(in srgb, var(--rec) 55%, var(--rule)); color: var(--rec); }
+        .status.recording .ring { background: var(--rec); animation: pulse 1.3s infinite; }
+        @keyframes pulse {
+            0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--rec) 65%, transparent); }
+            70%  { box-shadow: 0 0 0 8px rgba(229,52,42,0); }
+            100% { box-shadow: 0 0 0 0 rgba(229,52,42,0); }
+        }
+        .btns { margin-top: 24px; }
         button {
-            font-size: 24pt;
-            text-decoration: none;
-            display: inline-block;
-            padding: 10px 30px;
-            margin: 10px 20px;
-            position: relative;
-            overflow: hidden;
-            border: 2px solid #b12a1c;
-            border-radius: 8px;
-            color: #b12a1c;
-            transition: .2s ease-in-out;
-            background: inherit;
+            font-size: 17px; font-weight: 600; cursor: pointer;
+            padding: 13px 30px; border-radius: 10px;
+            border: 2px solid var(--ink); color: var(--card); background: var(--ink);
+            transition: transform .08s ease, opacity .15s ease, background .15s ease, border-color .15s ease;
         }
-
-        button:hover {
-            background: #b12a1c;
-            color: #ffffff;
-        }
-
-        #captureButton:hover {
-            color: #ffffff !important;
-        }
-
-        #captureButton.detecting {
-            border-color: #4a82c3;
-            color: #4a82c3;
-        }
-
-        #captureButton.detecting:hover {
-            background: #4a82c3;
-        }
-
-        #captureButton.connecting {
-            border-color: #fdba31;
-            color: #fdba31;
-        }
-
-        #captureButton.connecting:hover {
-            background: #fdba31;
-        }
-
-        #captureButton.active {
-            border-color: #1eb11c;
-            color: #1eb11c;
-        }
-
-        #captureButton.active:hover {
-            background: #1eb11c;
-        }
-
-        #captureButton.recording {
-            border-color: #ff0000;
-            color: #ff0000;
-        }
-
-        #captureButton.recording:hover {
-            background: #ff0000;
+        button:hover { transform: translateY(-1px); }
+        button:active { transform: translateY(0); }
+        #captureButton.detecting,
+        #captureButton.connecting { background: var(--wait); border-color: var(--wait); }
+        #captureButton.active     { background: var(--ok);  border-color: var(--ok); }
+        #captureButton.recording  { background: var(--rec); border-color: var(--rec); }
+        .hint {
+            margin: 22px auto 0; max-width: 340px; font-size: 12.5px; line-height: 1.55; color: var(--mute);
         }
     </style>
     <script src="/sockets.js"></script>
 </head>
 
 <body>
-    <div style="text-align: center">
-        <button id="allowAccess" style="display: none">Allow access</button>
-        <button id="captureButton">Capture</button>
-    </div>
+    <main class="wrap">
+        <div class="card">
+            <div class="brand">webrtc-grabber</div>
+            <div class="peer" id="peerLabel"></div>
+            <div class="status" id="statusPill"><span class="ring"></span><span id="statusText">Idle</span></div>
+            <div class="btns">
+                <button id="allowAccess" style="display: none">Allow access</button>
+                <button id="captureButton">Start capture</button>
+            </div>
+            <p class="hint" id="hint">Click "Start capture" and grant access to your screen and camera. Keep this tab open until the exam ends - recording continues even while the tab is in the background.</p>
+        </div>
+    </main>
 </body>
 
 </html>
@@ -1358,18 +1372,66 @@
         return detectedStreams;
     }
 
+    // ── Recording indicator (tab title + favicon) ───────────────────────────
+    // The capture tab usually sits in the background during an exam, so the
+    // clearest "is it still recording?" signal is the browser tab itself: a
+    // coloured favicon dot and a title prefix the student/proctor can read at a
+    // glance in the tab strip without focusing the page.
+    const faviconEl = document.getElementById("favicon");
+    const faviconFor = (color) => "data:image/svg+xml," + encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="${color}"/></svg>`);
+    const PEER_TITLE = connectionArgs.peerName || "";
+    let faviconBlink = null;
+    // indicator state: 'idle' | 'ready' | 'recording'
+    const setIndicator = (state) => {
+        if (faviconBlink) { clearInterval(faviconBlink); faviconBlink = null; }
+        const pill = document.getElementById("statusPill");
+        const txt = document.getElementById("statusText");
+        if (pill) pill.className = "status" + (state === "idle" ? "" : " " + state);
+        if (state === "recording") {
+            // Keep the title pure ASCII; the colour cue lives in the favicon so
+            // it stays correct regardless of how the page charset is served.
+            document.title = PEER_TITLE ? `REC - ${PEER_TITLE}` : "REC";
+            if (txt) txt.textContent = "Recording";
+            if (faviconEl) {
+                let on = true;
+                const tick = () => { faviconEl.href = faviconFor(on ? "#e5342a" : "#7a1610"); on = !on; };
+                tick();
+                faviconBlink = setInterval(tick, 800);
+            }
+        } else if (state === "ready") {
+            document.title = PEER_TITLE ? `Ready - ${PEER_TITLE}` : "Ready";
+            if (txt) txt.textContent = "Ready";
+            if (faviconEl) faviconEl.href = faviconFor("#1eb11c");
+        } else {
+            document.title = PEER_TITLE ? `webrtc-grabber - ${PEER_TITLE}` : "webrtc-grabber";
+            if (txt) txt.textContent = "Idle";
+            if (faviconEl) faviconEl.href = faviconFor("#b6afa1");
+        }
+    };
+    // Reassigned inside capture() once the session objects exist; a harmless
+    // no-op until then so updateState() can call it unconditionally.
+    let refreshIndicator = () => {};
+
+    const peerLabelEl = document.getElementById("peerLabel");
+    if (peerLabelEl) peerLabelEl.textContent = PEER_TITLE;
+    setIndicator("idle");
+
     let currentState = null;
     const updateState = (newState) => {
         currentState = newState;
         const captureButton = document.getElementById("captureButton");
         captureButton.className = newState;
-        if (newState === "connecting") {
-            captureButton.innerText = "connecting ...";
+        if (newState === "detecting") {
+            captureButton.innerText = "Requesting access...";
+        } else if (newState === "connecting") {
+            captureButton.innerText = "Connecting...";
         } else if (newState === "active") {
-            captureButton.innerText = "OK";
+            captureButton.innerText = "Capture active";
         } else if (newState === "recording") {
             captureButton.innerText = "Recording";
         }
+        refreshIndicator();
     }
 
     const capture = async () => {
@@ -1547,6 +1609,17 @@
             },
         });
 
+        // Derive the tab indicator from what is actually streaming: proctoring
+        // is the steady-state "recording" signal; on-demand record counts too.
+        refreshIndicator = () => {
+            let proctoring = false;
+            try { proctoring = proctoringSession.getActiveStreams().length > 0; } catch (e) {}
+            const onDemand = !!recordingManager.activeRecording.recordId;
+            if (proctoring || onDemand) setIndicator("recording");
+            else if (currentState === "active" || currentState === "recording") setIndicator("ready");
+            else setIndicator("idle");
+        };
+
         client.target.addEventListener("init_peer", async ({ detail: { pcConfig, pingInterval, siteCheck } }) => {
             peerConnectionConfig = pcConfig;
             pingInterval = pingInterval ?? 3000;
@@ -1562,6 +1635,7 @@
                     proctoringSession.getHealth(),
                     siteChecks,
                 );
+                refreshIndicator();
             }, pingInterval);
             startSiteChecks(siteCheck);
             console.log(`init peer (pingInterval = ${pingInterval})`);
@@ -1589,10 +1663,16 @@
 
             pc.addEventListener('connectionstatechange', ({ target: connection }) => {
                 console.log(`change player ${playerId} connection state ${connection.connectionState}`);
-                if (connection.connectionState === "failed") {
-                    connection.close();
-                    pcs.delete(playerId);
-                    console.log(`close connection for ${playerId}`);
+                // Close on any terminal state, not just "failed". When a viewer
+                // (admin/player) closes its side, this peer goes to
+                // "disconnected"/"closed" — without cleaning those up the dead
+                // RTCPeerConnections pile up here (one per view), leaking memory
+                // on the student's machine as the proctor switches participants.
+                const st = connection.connectionState;
+                if (st === "failed" || st === "disconnected" || st === "closed") {
+                    try { connection.close(); } catch (e) {}
+                    if (pcs.get(playerId) === connection) pcs.delete(playerId);
+                    console.log(`close connection for ${playerId} (${st})`);
                 }
             });
 
@@ -1612,6 +1692,7 @@
             console.log(`Start recording: ${recordId}, timeout: ${timeout}ms`);
             updateState("recording");
             await recordingManager.startRecording(recordId, timeout, streams, uploadToken);
+            refreshIndicator();
         });
 
         client.target.addEventListener('record_stop', async ({ detail: { recordId } }) => {
@@ -1631,10 +1712,12 @@
             } catch (e) {
                 console.error('failed to start proctoring', e);
             }
+            refreshIndicator();
         });
 
         client.target.addEventListener('proctoring_pause', () => {
             proctoringSession.pause();
+            refreshIndicator();
         });
 
         client.target.addEventListener('proctoring_resume', async ({ detail: cfg }) => {
@@ -1643,10 +1726,12 @@
             } catch (e) {
                 console.error('failed to resume proctoring', e);
             }
+            refreshIndicator();
         });
 
         client.target.addEventListener('proctoring_stop', async () => {
             await proctoringSession.stop();
+            refreshIndicator();
         });
 
         client.target.addEventListener('players_disconnect', async () => {

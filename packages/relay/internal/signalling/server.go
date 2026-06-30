@@ -252,13 +252,16 @@ func (s *Server) buildSiteCheckStatus() siteCheckStatusResponse {
 }
 
 // sendAsset writes an embedded asset (see package asset) with the right
-// Content-Type inferred from its extension.
+// Content-Type inferred from its extension. The charset is pinned to utf-8:
+// the embedded HTML/JS is utf-8, and without an explicit charset the browser
+// sniffs and may fall back to latin-1, which mojibakes every non-ASCII glyph
+// (·, arrows, any localized text) across the dashboard and capture pages.
 func sendAsset(c *fiber.Ctx, name string) error {
 	data, err := asset.FS.ReadFile(name)
 	if err != nil {
 		return fiber.ErrNotFound
 	}
-	c.Type(filepath.Ext(name))
+	c.Type(filepath.Ext(name), "utf-8")
 	return c.Send(data)
 }
 
@@ -291,6 +294,10 @@ func (s *Server) setupPageRoutes() {
 
 	s.app.Get("/player", func(c *fiber.Ctx) error {
 		return sendAsset(c, "player.html")
+	})
+
+	s.app.Get("/pip", func(c *fiber.Ctx) error {
+		return sendAsset(c, "pip.html")
 	})
 
 	s.app.Get("/capture", func(c *fiber.Ctx) error {

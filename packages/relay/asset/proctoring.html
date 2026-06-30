@@ -97,9 +97,17 @@
     .btn.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
     .btn:disabled { opacity: .45; cursor: default; }
 
-    .player { margin-top: 14px; }
-    .player video { width: 100%; max-height: 460px; background: #000; border-radius: 8px; }
+    .player { margin-top: 14px; position: relative; }
+    #video { width: 100%; max-height: 460px; background: #000; border-radius: 8px; display: block; }
     .player .now { font-family: var(--mono); font-size: 11px; color: var(--mute); margin-top: 6px; }
+    .rec-toolbar { margin-bottom: 12px; }
+    .rec-search {
+      width: 100%; max-width: 360px; font-family: var(--mono); font-size: 12px;
+      padding: 7px 11px; border: 1px solid var(--rule); border-radius: 6px;
+      background: var(--paper); color: var(--ink);
+    }
+    .rec-search:focus { outline: none; border-color: var(--select); }
+    td .sub { color: var(--mute); font-size: 11px; font-family: var(--mono); margin-top: 2px; }
 
     /* Site checks */
     .sitecheck-peer { padding: 9px 0; border-bottom: 1px solid var(--rule-2); display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
@@ -142,11 +150,13 @@
     <section id="detail-section" hidden>
       <h2 id="detail-title">Recordings</h2>
       <div class="card">
+        <div class="rec-toolbar">
+          <input id="rec-search" class="rec-search" placeholder="search peer / team / university" autocomplete="off" />
+        </div>
         <table>
           <thead>
             <tr>
-              <th>Peer</th><th>Stream</th><th></th><th class="num">Segments</th>
-              <th class="num">Committed</th><th class="num">Size</th><th>Last chunk</th><th></th>
+              <th>Participant</th><th></th><th>Streams</th><th></th>
             </tr>
           </thead>
           <tbody id="detail-rows"></tbody>
@@ -252,50 +262,118 @@
       }
     }
 
+    // One row per participant; each stream (desktop / webcam) is a button on
+    // that row rather than its own row. Grouped + searchable by name/team/uni.
+    let sessionParticipants = [];
+
     async function loadSession(sessionId) {
       activeSessionId = sessionId;
       await loadSessions();
       const data = await api("/api/admin/proctoring/session/" + encodeURIComponent(sessionId));
+      currentSessionPeers = data.peers || [];
       document.getElementById("detail-section").hidden = false;
       document.getElementById("detail-title").textContent = "Recordings · " + sessionId;
+
+      const byName = new Map();
+      for (const p of currentSessionPeers) {
+        let g = byName.get(p.peerName);
+        if (!g) { g = { name: p.peerName, teamName: "", university: "", online: false, streams: {} }; byName.set(p.peerName, g); }
+        if (p.teamName && !g.teamName) g.teamName = p.teamName;
+        if (p.university && !g.university) g.university = p.university;
+        if (p.online) g.online = true;
+        g.streams[p.streamKey] = p;
+      }
+      sessionParticipants = Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
+      renderRows();
+    }
+
+    function renderRows() {
       const tbody = document.getElementById("detail-rows");
       tbody.innerHTML = "";
-      const peers = (data.peers || []).slice().sort((a, b) =>
-        a.peerName.localeCompare(b.peerName) || a.streamKey.localeCompare(b.streamKey));
-      if (!peers.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">No recordings in this session.</td></tr>'; return; }
-      for (const p of peers) {
+      const q = (document.getElementById("rec-search").value || "").trim().toLowerCase();
+      const rows = sessionParticipants.filter((g) =>
+        !q || [g.name, g.teamName, g.university].join(" ").toLowerCase().includes(q));
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty">' +
+          (sessionParticipants.length ? "No matching participants." : "No recordings in this session.") + '</td></tr>';
+        return;
+      }
+      for (const g of rows) {
         const tr = document.createElement("tr");
-        const hasFull = !!p.lastChunkAt;
-        tr.innerHTML =
-          `<td class="m">${p.peerName}</td>` +
-          `<td class="m">${p.streamKey}</td>` +
-          `<td><span class="dot ${p.online ? "on" : "off"}" title="${p.online ? "online" : "offline"}"></span></td>` +
-          `<td class="num">${p.segmentCount || 0}</td>` +
-          `<td class="num">${p.committedSeq >= 0 ? p.committedSeq : "—"}</td>` +
-          `<td class="num">${fmtBytes(p.totalBytes)}</td>` +
-          `<td class="m">${fmtAgo(p.lastChunkAt)}</td>`;
+
+        const streamList = Object.values(g.streams);
+        const totalSeg = streamList.reduce((a, s) => a + (s.segmentCount || 0), 0);
+        const totalBytes = streamList.reduce((a, s) => a + (s.totalBytes || 0), 0);
+        const lastChunk = streamList.map((s) => s.lastChunkAt).filter(Boolean).sort().pop();
+
+        const nameCell = document.createElement("td");
+        const idLine = [g.teamName, g.university].filter(Boolean).join(" · ");
+        const statLine = [
+          `${totalSeg} seg`,
+          fmtBytes(totalBytes),
+          lastChunk ? `last ${fmtAgo(lastChunk)}` : null,
+        ].filter(Boolean).join(" · ");
+        nameCell.innerHTML = `<div class="m">${g.name}</div>` +
+          (idLine ? `<div class="sub">${idLine}</div>` : "") +
+          `<div class="sub">${statLine}</div>`;
+        tr.appendChild(nameCell);
+
+        const dotCell = document.createElement("td");
+        dotCell.innerHTML = `<span class="dot ${g.online ? "on" : "off"}" title="${g.online ? "online" : "offline"}"></span>`;
+        tr.appendChild(dotCell);
+
+        const streamsCell = document.createElement("td");
+        streamsCell.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;align-items:center;";
+        for (const sk of ["desktop", "webcam"]) {
+          const s = g.streams[sk];
+          if (!s) continue;
+          const segs = s.segmentCount || 0;
+          const b = document.createElement("button");
+          b.className = "btn primary";
+          b.textContent = `▶ ${sk} · ${segs} seg`;
+          b.title = `${fmtBytes(s.totalBytes)} · last ${fmtAgo(s.lastChunkAt)}`;
+          b.disabled = !(segs > 0);
+          b.onclick = () => playSegments(activeSessionId, g.name, sk, segs);
+          streamsCell.appendChild(b);
+        }
+        tr.appendChild(streamsCell);
+
         const actions = document.createElement("td");
-        const playBtn = document.createElement("button");
-        playBtn.className = "btn primary";
-        playBtn.textContent = "Play";
-        playBtn.disabled = !(p.segmentCount > 0);
-        playBtn.onclick = () => playSegments(sessionId, p.peerName, p.streamKey, p.segmentCount);
-        actions.appendChild(playBtn);
-        if (hasFull) {
-          const dl = document.createElement("button");
-          dl.className = "btn";
-          dl.style.marginLeft = "6px";
-          dl.textContent = "Download";
-          dl.onclick = () => downloadFile(sessionId, p.peerName, p.streamKey);
-          actions.appendChild(dl);
+        const anySegs = ["desktop", "webcam"].some((sk) => g.streams[sk] && g.streams[sk].segmentCount > 0);
+        if (anySegs) {
+          const pip = document.createElement("button");
+          pip.className = "btn";
+          pip.textContent = "⧉ PiP";
+          pip.title = "Open desktop + webcam together in a window";
+          pip.onclick = () => openReviewPip(activeSessionId, g.name);
+          actions.appendChild(pip);
+        }
+        for (const sk of ["desktop", "webcam"]) {
+          const s = g.streams[sk];
+          if (s && s.lastChunkAt) {
+            const dl = document.createElement("button");
+            dl.className = "btn";
+            dl.style.marginLeft = "6px";
+            dl.textContent = "↓ " + sk;
+            dl.onclick = () => downloadFile(activeSessionId, g.name, sk);
+            actions.appendChild(dl);
+          }
         }
         tr.appendChild(actions);
         tbody.appendChild(tr);
       }
     }
 
-    // ── playback (segments stitched via blob URLs so auth header applies) ──
+    function openReviewPip(sessionId, peer) {
+      const url = `/pip?mode=review&sessionId=${encodeURIComponent(sessionId)}&peerName=${encodeURIComponent(peer)}`;
+      window.open(url, "pip_" + peer + "_review", "noopener,width=1280,height=760");
+    }
+
+    // ── inline single-stream playback (segments stitched via blob URLs so the
+    // auth header applies). The desktop+webcam composite lives in the PiP
+    // window (openReviewPip) instead. ──
     let currentObjectUrl = null;
+    let currentSessionPeers = [];
     const video = document.getElementById("video");
     const playlist = { sessionId: null, peer: null, stream: null, idx: 0, total: 0 };
 
@@ -346,6 +424,7 @@
       if (cfg && cfg.title) { document.getElementById("brand").textContent = cfg.title; document.title = "proctoring · " + cfg.title; }
     }).catch(() => {});
 
+    document.getElementById("rec-search").addEventListener("input", () => renderRows());
     document.getElementById("refresh").onclick = (e) => { e.preventDefault(); refresh(); };
     document.getElementById("logout").onclick = (e) => {
       e.preventDefault();

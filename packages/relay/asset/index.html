@@ -938,7 +938,7 @@ function CellTooltip({ data }) {
 function FocusPanel({ p, peer, stalled, proctoringPeers, sessionId, streamType, setStreamType,
                       videoRef, isLive, needsPlay, onPlayClick, onConnectStream, onCloseStream,
                       onRecord, onStopRecord, onClearSelection, onDownload, onPlayersDisconnect, onPopOut,
-                      procVideoRef, onProcVideoEnded, playProctoringSegment }) {
+                      procVideoRef, onProcVideoEnded, playProctoringSegment, onPip }) {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -1092,6 +1092,11 @@ function FocusPanel({ p, peer, stalled, proctoringPeers, sessionId, streamType, 
                       style={{ padding: '2px 10px', cursor: 'pointer' }}
                       title="Play all segments in order"
                     >▶ all</button>
+                    <button
+                      onClick={() => onPip(p.name, { review: true, sessionId })}
+                      style={{ padding: '2px 10px', cursor: 'pointer' }}
+                      title="Open desktop + webcam together in a PiP window"
+                    >⧉ PiP</button>
                     {indices.map(i => (
                       <a
                         key={i}
@@ -1149,6 +1154,9 @@ function FocusPanel({ p, peer, stalled, proctoringPeers, sessionId, streamType, 
         </button>
         <button onClick={() => onPopOut(streamType)} disabled={!p} title={`Open ${streamType} in a new tab`}>
           ↗ Open tab
+        </button>
+        <button onClick={() => onPip(p?.name)} disabled={!p} title="Open desktop + webcam together in a PiP window">
+          ⧉ PiP
         </button>
         <button className="danger" onClick={onPlayersDisconnect} disabled={!p} title="Disconnect all players from this peer">
           Disconnect
@@ -1261,10 +1269,7 @@ function App() {
   // could fire against a now-hidden peer.
   useEffect(() => {
     const v = procVideoRef.current;
-    if (!v) return;
-    v.pause();
-    v.removeAttribute('src');
-    v.load();
+    if (v) { v.pause(); v.removeAttribute('src'); v.load(); }
     procPlaylistRef.current = null;
   }, [selected, streamType]);
 
@@ -1292,6 +1297,19 @@ function App() {
       playProctoringSegment(pl.sessionId, pl.peerName, pl.streamKey, pl.segIndex + 1, pl.totalSegments);
     }
   };
+
+  // Open the composite (desktop + webcam) in a dedicated PiP window. credential
+  // rides along for the live WS auth; review mode reads admin creds in the page.
+  const openPip = useCallback((peerName, opts) => {
+    if (!peerName) return;
+    const cred = encodeURIComponent(localStorage.getItem("adminCredentials") || "");
+    let url = `/pip?peerName=${encodeURIComponent(peerName)}&credential=${cred}`;
+    if (opts && opts.review && opts.sessionId) {
+      url += `&mode=review&sessionId=${encodeURIComponent(opts.sessionId)}`;
+    }
+    window.open(url, "pip_" + peerName + (opts && opts.review ? "_review" : "_live"),
+      "noopener,width=1280,height=760");
+  }, []);
 
   // tick clock — drives all "ago"/online-derivations
   useEffect(() => {
@@ -1619,6 +1637,14 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, streamType]);
 
+  // Close the live WebRTC connection when the dashboard tab goes away, so we
+  // don't leave a dangling pc (and a lingering consumer on the relay).
+  useEffect(() => {
+    const close = () => { try { client.close(); } catch (e) {} };
+    window.addEventListener("pagehide", close);
+    return () => window.removeEventListener("pagehide", close);
+  }, []);
+
   // ── handlers ──
   const onStartProctoring = async (params) => {
     setProctoringOpen(false);
@@ -1850,6 +1876,7 @@ function App() {
           procVideoRef={procVideoRef}
           onProcVideoEnded={onProcVideoEnded}
           playProctoringSegment={playProctoringSegment}
+          onPip={openPip}
         />
         {sessionsToShow.length > 0 && (
           <div className="sessions-strip">

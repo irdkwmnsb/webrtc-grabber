@@ -167,3 +167,16 @@ func (s *Storage) setParticipants(participants []config.ParticipantInfo) {
 	defer s.mutex.Unlock()
 	s.participants = participants
 }
+
+// participantMeta returns the configured participant registry keyed by name.
+// Unlike the live peer map this is independent of online status, so proctoring
+// review can still show team/university for participants that are now offline.
+func (s *Storage) participantMeta() map[string]config.ParticipantInfo {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	m := make(map[string]config.ParticipantInfo, len(s.participants))
+	for _, p := range s.participants {
+		m[p.Name] = p
+	}
+	return m
+}

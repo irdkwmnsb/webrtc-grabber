@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PiP · webrtc-grabber</title>
+  <script src="/sockets.js"></script>
+  <script src="/grabber_player.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+    body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #fff; }
+    .stage { position: fixed; inset: 0; }
+    #main { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
+    .cam {
+      position: fixed; right: 14px; bottom: 14px; z-index: 5;
+      width: 28%; max-width: 360px; min-width: 140px; aspect-ratio: 16 / 9;
+      background: #000; border-radius: 8px; overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.55); box-shadow: 0 6px 22px rgba(0,0,0,0.6);
+    }
+    .cam video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .cam .tag {
+      position: absolute; left: 7px; top: 6px;
+      font: 600 9px ui-monospace, Menlo, monospace; letter-spacing: 0.12em; text-transform: uppercase;
+      color: #fff; background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 3px;
+    }
+    .cam.empty { display: none; }
+    .bar {
+      position: fixed; left: 12px; top: 10px; z-index: 6;
+      font: 600 11px ui-monospace, Menlo, monospace; letter-spacing: 0.08em;
+      color: rgba(255,255,255,0.9); background: rgba(0,0,0,0.45);
+      padding: 5px 10px; border-radius: 5px;
+    }
+    .bar .live::before { content: "● "; color: #ff5b4d; }
+    button.ctl {
+      position: fixed; z-index: 7; cursor: pointer;
+      font: 600 12px sans-serif; padding: 6px 12px; border-radius: 6px;
+      color: #fff; background: rgba(24,22,15,0.7); border: 1px solid rgba(255,255,255,0.3);
+    }
+    #unmute { right: 14px; top: 10px; }
+    #play-overlay {
+      position: fixed; inset: 0; z-index: 20; display: none;
+      align-items: center; justify-content: center; background: rgba(0,0,0,0.85);
+    }
+    #play-overlay button {
+      font-size: 22px; padding: 18px 36px; cursor: pointer; border: 0; border-radius: 10px;
+      background: #1eb11c; color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <video id="main" autoplay playsinline muted></video>
+  </div>
+  <div class="cam empty" id="cam-wrap">
+    <video id="cam" autoplay playsinline muted></video>
+    <span class="tag">webcam</span>
+  </div>
+  <div class="bar" id="bar"></div>
+  <button class="ctl" id="unmute" hidden>🔇 Unmute webcam</button>
+  <div id="play-overlay"><button id="play-btn">▶ Click to play</button></div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const peerName = params.get("peerName") || "";
+    const mode = (params.get("mode") || "live").toLowerCase();
+    const credential = params.get("credential") || "";
+    const sessionId = params.get("sessionId") || "";
+
+    const mainVideo = document.getElementById("main");
+    const camVideo = document.getElementById("cam");
+    const camWrap = document.getElementById("cam-wrap");
+    const bar = document.getElementById("bar");
+    const unmuteBtn = document.getElementById("unmute");
+
+    document.title = `PiP · ${peerName}` + (mode === "review" ? " · review" : "");
+
+    const showCam = () => camWrap.classList.remove("empty");
+    const hideCam = () => camWrap.classList.add("empty");
+
+    const showPlayOverlay = () => {
+      const ov = document.getElementById("play-overlay");
+      ov.style.display = "flex";
+      document.getElementById("play-btn").onclick = () => {
+        ov.style.display = "none";
+        mainVideo.play().catch(() => {});
+        camVideo.play().catch(() => {});
+      };
+    };
+
+    // The webcam carries audio; start muted so autoplay works, offer one click
+    // to unmute (audio autoplay is blocked without a gesture).
+    unmuteBtn.hidden = false;
+    unmuteBtn.onclick = () => {
+      camVideo.muted = !camVideo.muted;
+      unmuteBtn.textContent = camVideo.muted ? "🔇 Unmute webcam" : "🔊 Mute webcam";
+      if (!camVideo.muted) camVideo.play().catch(() => {});
+    };
+
+    // ── live: two player connections (desktop main + webcam inset) ──────────
+    function startLive() {
+      bar.innerHTML = `<span class="live"></span>${peerName} · desktop + webcam`;
+      const desktop = new GrabberPlayerClient("play");
+      const webcam = new GrabberPlayerClient("play");
+      desktop.authorize(credential);
+      webcam.authorize(credential);
+
+      desktop.on("initialized", () => {
+        desktop.connect({ peerName }, "desktop", (track) => {
+          mainVideo.srcObject = track;
+          mainVideo.play().catch(() => showPlayOverlay());
+        });
+      });
+      webcam.on("initialized", () => {
+        webcam.connect({ peerName }, "webcam", (track) => {
+          camVideo.srcObject = track;
+          showCam();
+          camVideo.play().catch(() => {});
+        });
+      });
+
+      window.addEventListener("beforeunload", () => {
+        try { desktop.close(); } catch (e) {}
+        try { webcam.close(); } catch (e) {}
+      });
+    }
+
+    // ── review: blob-stitched segments, desktop main + webcam inset ─────────
+    function startReview() {
+      unmuteBtn.hidden = true; // recordings already carry baked audio in main if any
+      const cred = localStorage.getItem("adminCredentials") || "";
+      const authHeader = () => "Basic " + btoa("admin:" + (localStorage.getItem("adminCredentials") || cred));
+      const enc = encodeURIComponent;
+      const segName = (i) => "segment_" + String(i).padStart(6, "0") + ".webm";
+      const fileUrl = (stream, i) =>
+        `/api/admin/proctoring/file/${enc(sessionId)}/${enc(peerName)}/${enc(stream)}/${enc(segName(i))}`;
+
+      const blobUrl = async (url) => {
+        const res = await fetch(url, { headers: { Authorization: authHeader() } });
+        if (!res.ok) throw new Error(url + ": " + res.status);
+        return URL.createObjectURL(await res.blob());
+      };
+
+      let mainTotal = 0, camTotal = 0, idx = 0;
+      let mainStream = "desktop";
+      let mainUrl = null, camUrl = null;
+
+      const loadMain = async (i) => {
+        if (i >= mainTotal) { bar.textContent = `${peerName} · review · finished`; hideCam(); return; }
+        idx = i;
+        bar.textContent = `${peerName} · review · ${mainStream} segment ${i + 1}/${mainTotal}`;
+        // webcam inset (best-effort, segment-aligned)
+        loadCam(i);
+        try {
+          const u = await blobUrl(fileUrl(mainStream, i));
+          if (mainUrl) URL.revokeObjectURL(mainUrl);
+          mainUrl = u; mainVideo.src = u;
+          await mainVideo.play().catch(() => {});
+        } catch (e) { console.warn(mainStream + " segment failed", i, e); loadMain(i + 1); }
+      };
+      const loadCam = async (i) => {
+        if (!camTotal || i >= camTotal) { hideCam(); return; }
+        try {
+          const u = await blobUrl(fileUrl("webcam", i));
+          if (camUrl) URL.revokeObjectURL(camUrl);
+          camUrl = u; camVideo.src = u; showCam();
+          await camVideo.play().catch(() => {});
+        } catch (e) { hideCam(); }
+      };
+      mainVideo.addEventListener("ended", () => loadMain(idx + 1));
+
+      (async () => {
+        try {
+          const res = await fetch(`/api/admin/proctoring/session/${enc(sessionId)}`, { headers: { Authorization: authHeader() } });
+          if (!res.ok) throw new Error("session " + res.status);
+          const data = await res.json();
+          const peers = data.peers || [];
+          const d = peers.find((p) => p.peerName === peerName && p.streamKey === "desktop");
+          const w = peers.find((p) => p.peerName === peerName && p.streamKey === "webcam");
+          mainTotal = (d && d.segmentCount) || 0;
+          camTotal = (w && w.segmentCount) || 0;
+          if (!mainTotal && camTotal) {
+            // no desktop recording — show the webcam as the main view instead
+            mainStream = "webcam"; mainTotal = camTotal; camTotal = 0;
+          }
+          mainVideo.controls = true;
+          loadMain(0);
+        } catch (e) {
+          bar.textContent = "review failed: " + e.message;
+          console.error(e);
+        }
+      })();
+    }
+
+    if (!peerName) {
+      bar.textContent = "missing peerName";
+    } else if (mode === "review") {
+      startReview();
+    } else {
+      startLive();
+    }
+  </script>
+</body>
+</html>

@@ -10,6 +10,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/basicauth"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/api"
+	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/config"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/proctoring"
 	"github.com/irdkwmnsb/webrtc-grabber/packages/relay/internal/sockets"
 )
@@ -17,6 +18,8 @@ import (
 type adminProctoringPeer struct {
 	PeerName          string                      `json:"peerName"`
 	StreamKey         string                      `json:"streamKey"`
+	TeamName          string                      `json:"teamName,omitempty"`
+	University        string                      `json:"university,omitempty"`
 	Online            bool                        `json:"online"`
 	ActivelyStreaming bool                        `json:"activelyStreaming"`
 	CommittedSeq      int64                       `json:"committedSeq"`
@@ -219,6 +222,7 @@ func (s *Server) setupAdminApi() {
 				peer := p
 				online[p.Name] = &peer
 			}
+			meta := s.storage.participantMeta()
 
 			seen := map[string]bool{}
 			emit := func(peerName, streamKey string) {
@@ -227,7 +231,7 @@ func (s *Server) setupAdminApi() {
 					return
 				}
 				seen[key] = true
-				resp.Peers = append(resp.Peers, buildAdminPeer(s.config.Record.StorageDir, state.SessionId, peerName, streamKey, online[peerName]))
+				resp.Peers = append(resp.Peers, buildAdminPeer(s.config.Record.StorageDir, state.SessionId, peerName, streamKey, online[peerName], meta[peerName]))
 			}
 
 			if state.SessionId != "" && s.config.Record.StorageDir != "" {
@@ -275,6 +279,7 @@ func (s *Server) setupAdminApi() {
 				peer := p
 				online[p.Name] = &peer
 			}
+			meta := s.storage.participantMeta()
 
 			resp := adminProctoringResponse{
 				State:    s.proctoring.Get(),
@@ -293,7 +298,7 @@ func (s *Server) setupAdminApi() {
 					}
 					for _, st := range streams {
 						if st.IsDir() {
-							resp.Peers = append(resp.Peers, buildAdminPeer(s.config.Record.StorageDir, sessionId, p.Name(), st.Name(), online[p.Name()]))
+							resp.Peers = append(resp.Peers, buildAdminPeer(s.config.Record.StorageDir, sessionId, p.Name(), st.Name(), online[p.Name()], meta[p.Name()]))
 						}
 					}
 				}
@@ -341,10 +346,12 @@ func (s *Server) setupAdminApi() {
 	})
 }
 
-func buildAdminPeer(storageDir, sessionId, peerName, streamKey string, online *api.Peer) adminProctoringPeer {
+func buildAdminPeer(storageDir, sessionId, peerName, streamKey string, online *api.Peer, info config.ParticipantInfo) adminProctoringPeer {
 	out := adminProctoringPeer{
 		PeerName:     peerName,
 		StreamKey:    streamKey,
+		TeamName:     info.TeamName,
+		University:   info.University,
 		CommittedSeq: -1,
 		Finalized:    sessionId != "" && isProctoringFinalized(storageDir, sessionId),
 	}
