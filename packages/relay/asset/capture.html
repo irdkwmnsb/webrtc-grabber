@@ -820,33 +820,34 @@
                 return;
             }
 
+            // Record the captured source track directly. The previous pipeline
+            // re-encoded through a <canvas>: a setInterval drawImage loop fed
+            // canvas.captureStream(), which the MediaRecorder recorded. That
+            // works only while the capture tab is on the foreground — once it
+            // goes to the background (the student switches to the exam window),
+            // the browser throttles setInterval and freezes canvas/<video>
+            // rendering, so the canvas stream stops producing frames. The
+            // recorder then emits nothing ("no data"), the watchdog tears the
+            // pipeline down and rebuilds it endlessly ("restart" storm), and
+            // every rebuild leaks a half-dead encoder + canvas stream until the
+            // tab runs out of memory and OOMs.
+            //
+            // A MediaRecorder attached straight to a getUserMedia/getDisplayMedia
+            // track keeps delivering chunks in background tabs (capture happens
+            // at the OS/compositor level, independent of tab rendering), so we
+            // record the source as-is and let videoBitsPerSecond bound the size.
             this.recordedStream = new MediaStream();
+            this.recordedStream.addTrack(videoTrack);
+            if (audioTrack) this.recordedStream.addTrack(audioTrack);
 
-            const videoOnlyStream = new MediaStream([videoTrack]);
-            const video = document.createElement('video');
-            video.muted = true;
-            video.srcObject = videoOnlyStream;
-            await video.play().catch(e => console.warn(`proctoring[${this.streamKey}] video play failed`, e));
-            this.video = video;
-
-            const settings = videoTrack.getSettings();
-            const w = settings.width  || video.videoWidth  || 1280;
-            const h = settings.height || video.videoHeight || 720;
-
-            const canvas = document.createElement('canvas');
-            canvas.width = w;
-            canvas.height = h;
-            this.canvas = canvas;
-            this.canvasCtx = canvas.getContext('2d');
-
-            const drawIntervalMs = Math.max(1, Math.floor(1000 / this.cfg.fps));
-            this.drawTimer = setInterval(() => {
-                try { this.canvasCtx.drawImage(this.video, 0, 0, canvas.width, canvas.height); }
-                catch (e) {}
-            }, drawIntervalMs);
-
-            this.canvasStream = canvas.captureStream(this.cfg.fps);
-            this.canvasStream.getVideoTracks().forEach(t => this.recordedStream.addTrack(t));
+            // Best-effort fps cap to cut CPU/size on weak machines. Harmless if
+            // unsupported — the bitrate cap already bounds the file size. Note
+            // this also caps the live-view fps for this track, which matches the
+            // configured proctoring fps and is acceptable for monitoring.
+            if (this.cfg && this.cfg.fps) {
+                try { await videoTrack.applyConstraints({ frameRate: { max: this.cfg.fps } }); }
+                catch (e) { /* ignore — recording proceeds at native fps */ }
+            }
 
             this._trackEndedSubscribe(videoTrack, () => {
                 console.warn(`proctoring[${this.streamKey}]: video track ended; attempting pipeline restart`);
@@ -855,7 +856,6 @@
             });
 
             if (audioTrack) {
-                this.recordedStream.addTrack(audioTrack);
                 this._trackEndedSubscribe(audioTrack, () => {
                     console.warn(`proctoring[${this.streamKey}]: audio track ended; continuing without audio`);
                     this.health.recordError('audio track ended');
@@ -972,17 +972,22 @@
                 this._scheduleRestart('recorder inactive');
                 return;
             }
+            // Background tabs throttle timers and may deliver chunks in bursts;
+            // be much more tolerant when hidden so a transient stall doesn't
+            // spiral into a teardown/rebuild storm (which, in the background,
+            // never recovers and only burns memory).
+            const hiddenMult = (typeof document !== 'undefined' && document.hidden) ? 6 : 1;
             const last = this.health.lastChunkAt;
             if (!last) {
                 // No chunk yet — give it time. If more than 3x chunkMs passed
                 // since the recorder started without a single byte, it's dead.
                 const sinceStart = Date.now() - this.lastRecorderStartAt;
-                if (sinceStart > Math.max(this.cfg.chunkDurationMs * 3, 10000)) {
+                if (sinceStart > Math.max(this.cfg.chunkDurationMs * 3, 10000) * hiddenMult) {
                     this._scheduleRestart('no chunks since start');
                 }
                 return;
             }
-            const staleAfter = Math.max(this.cfg.chunkDurationMs * 2, 5000);
+            const staleAfter = Math.max(this.cfg.chunkDurationMs * 2, 5000) * hiddenMult;
             const since = Date.now() - last;
             if (since > staleAfter) {
                 this._scheduleRestart(`no data for ${since}ms`);

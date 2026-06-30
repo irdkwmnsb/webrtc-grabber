@@ -63,12 +63,23 @@ func (s *Storage) getPeerByName(name string) (api.Peer, bool) {
 	return s.getPeerByNameLocked(name)
 }
 
+// peerStaleAfter is how long a peer may go without an application ping before
+// it is dropped from storage (and disappears/goes offline on the dashboard).
+// A capture page pings every GrabberPingInterval (3s), but a backgrounded tab
+// — the normal case during an exam, when the student is working in another
+// window — has its setInterval throttled by the browser to roughly once per
+// minute. A 60s threshold races that throttled cadence and makes the peer flap
+// offline even while it is recording and uploading fine. We keep a comfortable
+// margin so a once-a-minute ping still holds the peer online; the only cost is
+// that a genuinely dead peer lingers a few minutes before it is swept away.
+const peerStaleAfter = 3 * time.Minute
+
 func (s *Storage) deleteOldPeers() {
 	// So because we do not have thousands peers in production, this code is ok
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	for peerSocketId, peer := range s.peers {
-		if peer.LastPing != nil && time.Since(*peer.LastPing).Seconds() > 60 {
+		if peer.LastPing != nil && time.Since(*peer.LastPing) > peerStaleAfter {
 			delete(s.peers, peerSocketId)
 			metrics.StoredPeers.Set(float64(len(s.peers)))
 		}
