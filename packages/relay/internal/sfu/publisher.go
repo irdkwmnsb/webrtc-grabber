@@ -20,6 +20,7 @@ type Publisher struct {
 
 	setupChan chan struct{}
 	setupOnce sync.Once
+	setupErr  error
 
 	mu sync.RWMutex
 }
@@ -37,6 +38,21 @@ func NewPublisher(id sockets.SocketID, streamType string) *Publisher {
 
 func (p *Publisher) FinishSetup() {
 	p.setupOnce.Do(func() { close(p.setupChan) })
+}
+
+func (p *Publisher) FailSetup(err error) {
+	p.mu.Lock()
+	if p.setupErr == nil {
+		p.setupErr = err
+	}
+	p.mu.Unlock()
+	p.FinishSetup()
+}
+
+func (p *Publisher) SetupErr() error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.setupErr
 }
 
 func (p *Publisher) WaitSetup(ctx context.Context, timeout time.Duration) bool {

@@ -326,6 +326,9 @@ func (pm *LocalSFU) validatePublisher(publisherID sockets.SocketID, streamType s
 	if err != nil {
 		return nil, err
 	}
+	if setupErr := publisher.SetupErr(); setupErr != nil {
+		return nil, fmt.Errorf("publisher %s setup failed: %w", publisher.Key, setupErr)
+	}
 	if publisher.BroadcasterCount() == 0 {
 		return nil, fmt.Errorf("no tracks available for %s", publisher.Key)
 	}
@@ -475,6 +478,9 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisher *Publisher) {
 
 	expectedTracks, err := pm.createPublisherPC(publisher)
 	if err != nil {
+		slog.Error("create publisher peer connection",
+			"publisherID", publisher.ID, "streamType", publisher.StreamType, "error", err)
+		publisher.FailSetup(err)
 		pm.cleanupPublisher(publisher.Key)
 		return
 	}
@@ -482,11 +488,15 @@ func (pm *LocalSFU) setupGrabberPeerConnection(publisher *Publisher) {
 	tracksDone := pm.attachPublisherHandlers(publisher, expectedTracks)
 
 	if err := pm.negotiatePublisherOffer(publisher); err != nil {
+		slog.Error("negotiate publisher offer",
+			"publisherID", publisher.ID, "streamType", publisher.StreamType, "error", err)
+		publisher.FailSetup(err)
 		pm.cleanupPublisher(publisher.Key)
 		return
 	}
 
 	if !pm.waitForTracks(tracksDone, publisher) {
+		publisher.FailSetup(fmt.Errorf("timeout waiting for first track"))
 		pm.cleanupPublisher(publisher.Key)
 		return
 	}
@@ -518,9 +528,10 @@ func (pm *LocalSFU) createPublisherPC(publisher *Publisher) ([]webrtc.RTPCodecTy
 	metrics.ActivePeerConnections.WithLabelValues("publisher").Inc()
 	metrics.PeerConnectionsCreatedTotal.WithLabelValues("publisher").Inc()
 
-	closeOnError := func(format string, err error) error {
+	closeOnError := func(reason, format string, err error) error {
 		_ = pc.Close()
 		metrics.ActivePeerConnections.WithLabelValues("publisher").Dec()
+		metrics.PeerConnectionFailuresTotal.WithLabelValues(reason).Inc()
 		return fmt.Errorf(format, err)
 	}
 
@@ -528,13 +539,13 @@ func (pm *LocalSFU) createPublisherPC(publisher *Publisher) ([]webrtc.RTPCodecTy
 	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
 		Direction: webrtc.RTPTransceiverDirectionRecvonly,
 	}); err != nil {
-		return nil, closeOnError("add video transceiver: %w", err)
+		return nil, closeOnError("publisher_video_transceiver_failed", "add video transceiver: %w", err)
 	}
 	if publisher.StreamType == "webcam" && !pm.config.DisableAudio {
 		if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
 			Direction: webrtc.RTPTransceiverDirectionRecvonly,
 		}); err != nil {
-			return nil, closeOnError("add audio transceiver: %w", err)
+			return nil, closeOnError("publisher_audio_transceiver_failed", "add audio transceiver: %w", err)
 		}
 		expected = append(expected, webrtc.RTPCodecTypeAudio)
 	}
@@ -608,9 +619,11 @@ func (pm *LocalSFU) attachBroadcasterToExistingSubscribers(
 func (pm *LocalSFU) negotiatePublisherOffer(publisher *Publisher) error {
 	offer, err := publisher.pc.CreateOffer(nil)
 	if err != nil {
+		metrics.PeerConnectionFailuresTotal.WithLabelValues("publisher_create_offer_failed").Inc()
 		return fmt.Errorf("create offer: %w", err)
 	}
 	if err := publisher.pc.SetLocalDescription(offer); err != nil {
+		metrics.PeerConnectionFailuresTotal.WithLabelValues("publisher_set_local_failed").Inc()
 		return fmt.Errorf("set local: %w", err)
 	}
 	pm.emit(Event{
