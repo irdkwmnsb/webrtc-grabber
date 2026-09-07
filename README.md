@@ -575,6 +575,9 @@ https://gitlab.gnome.org/Mond1c/xdg-desktop-portal-gnome/-/tree/patch-wayland-ic
 > **Q:** Is VLC still required on participant computers?
 > **A:** **No**. The grabber application handles all media capture.
 
+> **Q:** How to record reaction videos using grabber
+> **A:** [https://github.com/kbats183/cds-grabber-recorder](https://github.com/kbats183/cds-grabber-recorder)
+
 > **Q:** Does the grabber start streaming immediately when launched?
 > **A:** **No**. It connects to the signaling server and sends periodic pings every 5 seconds (configurable), but only streams when a viewer requests it.
 
