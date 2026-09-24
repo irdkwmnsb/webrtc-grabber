@@ -46,7 +46,8 @@ func main() {
 	cfg := cfgManager.Get()
 
 	app := fiber.New(fiber.Config{
-		BodyLimit: 50 * 1024 * 1024,
+		BodyLimit:                    50 * 1024 * 1024,
+		DisablePreParseMultipartForm: true,
 	})
 
 	server, err := signalling.NewServer(ctx, &cfg, app)

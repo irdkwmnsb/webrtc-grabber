@@ -75,7 +75,7 @@ func run() error {
 	secret := "e2e-secret-32-bytes-0123456789abcdef"
 	cfg.Security.UploadSecret = &secret
 
-	app := fiber.New(fiber.Config{BodyLimit: 50 * 1024 * 1024, DisableStartupMessage: true})
+	app := fiber.New(fiber.Config{BodyLimit: 50 * 1024 * 1024, DisablePreParseMultipartForm: true, DisableStartupMessage: true})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv, err := signalling.NewServer(ctx, &cfg, app)

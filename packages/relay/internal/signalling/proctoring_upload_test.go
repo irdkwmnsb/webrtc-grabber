@@ -1,11 +1,37 @@
 package signalling
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestCopyProctoringUpload(t *testing.T) {
+	want := bytes.Repeat([]byte("chunk"), 20_000)
+	var got bytes.Buffer
+
+	n, err := copyProctoringUpload(&got, bytes.NewReader(want))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != int64(len(want)) || !bytes.Equal(got.Bytes(), want) {
+		t.Fatalf("copied %d bytes, want %d exact bytes", n, len(want))
+	}
+}
+
+func TestCopyProctoringUpload_RejectsShortWrite(t *testing.T) {
+	n, err := copyProctoringUpload(shortWriter{}, bytes.NewReader([]byte("chunk")))
+	if n != 5 || err != io.ErrShortWrite {
+		t.Fatalf("got (%d, %v), want (5, %v)", n, err, io.ErrShortWrite)
+	}
+}
+
+type shortWriter struct{}
+
+func (shortWriter) Write(p []byte) (int, error) { return len(p) - 1, nil }
 
 const (
 	testPeer    = "peer-A"

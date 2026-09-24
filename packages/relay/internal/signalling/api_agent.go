@@ -1,10 +1,13 @@
 package signalling
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +18,24 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 )
+
+func multipartFilePart(c *fiber.Ctx, name string) (*multipart.Part, error) {
+	boundary := string(c.Context().Request.Header.MultipartFormBoundary())
+	if boundary == "" {
+		return nil, fmt.Errorf("missing multipart boundary")
+	}
+	r := multipart.NewReader(bytes.NewReader(c.Body()), boundary)
+	for {
+		part, err := r.NextPart()
+		if err != nil {
+			return nil, err
+		}
+		if part.FormName() == name {
+			return part, nil
+		}
+		_ = part.Close()
+	}
+}
 
 const (
 	proctoringChunkMaxBytes = 32 * 1024 * 1024
@@ -65,6 +86,24 @@ func segmentFileName(index int) string {
 }
 
 var proctoringLocks sync.Map
+
+var proctoringUploadWriters = sync.Pool{
+	New: func() any { return bufio.NewWriterSize(io.Discard, 64*1024) },
+}
+
+type writerOnly struct{ io.Writer }
+
+func copyProctoringUpload(dst io.Writer, src io.Reader) (int64, error) {
+	w := proctoringUploadWriters.Get().(*bufio.Writer)
+	w.Reset(writerOnly{dst})
+	n, err := io.Copy(w, src)
+	if err == nil {
+		err = w.Flush()
+	}
+	w.Reset(io.Discard)
+	proctoringUploadWriters.Put(w)
+	return n, err
+}
 
 func proctoringLockKey(sessionId, peerName, streamKey string) string {
 	return sessionId + "/" + peerName + "/" + streamKey
@@ -275,10 +314,11 @@ func (s *Server) setupAgentApi() {
 				}
 			}
 
-			file, err := c.FormFile("file")
+			file, err := multipartFilePart(c, "file")
 			if err != nil {
 				return c.Status(fiber.StatusBadRequest).SendString("No file to upload")
 			}
+			defer file.Close()
 
 			dir := filepath.Join(s.config.Record.StorageDir, "proctoring", sessionId, peerName, streamKey)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -346,13 +386,7 @@ func (s *Server) setupAgentApi() {
 			}
 			defer out.Close()
 
-			src, err := file.Open()
-			if err != nil {
-				return c.Status(fiber.StatusInternalServerError).SendString("Failed to read upload")
-			}
-			defer src.Close()
-
-			n, err := io.Copy(out, src)
+			n, err := copyProctoringUpload(out, file)
 			if err != nil {
 				slog.Error("failed to append proctoring chunk", "file", currentSegmentFile, "error", err)
 				return c.Status(fiber.StatusInternalServerError).SendString("Failed to append")

@@ -45,7 +45,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	secret := "test-secret-32-bytes-0123456789abcdef"
 	cfg.Security.UploadSecret = &secret
 
-	app := fiber.New(fiber.Config{BodyLimit: 50 * 1024 * 1024, DisableStartupMessage: true})
+	app := fiber.New(fiber.Config{BodyLimit: 50 * 1024 * 1024, DisablePreParseMultipartForm: true, DisableStartupMessage: true})
 	srv, err := NewServer(ctx, &cfg, app)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
