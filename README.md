@@ -294,6 +294,10 @@ When `authEnabled` is `false` (the default) nothing changes: `/` serves the dash
 
 #### Proctoring review page
 
+💡 Need advanced proctoring features?
+
+For access to the advanced version of the proctoring system, contact Mond1c on Telegram or email kornilovichmihail@gmail.com.
+
 The relay serves a dedicated review page at **`/proctoring`** (linked from the dashboard header via **Review**). In the same style as the dashboard, it lets an admin:
 
 - Browse every recorded proctoring **session** — active, past, or finalized.
